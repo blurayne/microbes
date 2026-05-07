@@ -471,7 +471,8 @@
   let pan = null;           // { lastX, lastY, startX, startY, moved, button }
   const activePointers = new Map();   // pointerId -> { x, y, world }
   let pinch = null;         // { startDist, startMid, startScale, startTx, startTy }
-  let selectedCell = null;  // tapped cell (visual marker + move-to target sink)
+  const selectedCells = new Set(); // good cells the user has marked for movement
+  let targetMarker = null;  // { x, y, t0 } — fading circle + dashed lines, ~1500ms
   const DRAG_THRESHOLD = 6;
 
   function resize() {
@@ -582,7 +583,7 @@
     }
 
     cells.splice(idx, 1, left, right);
-    if (selectedCell === cell) selectedCell = null;
+    selectedCells.delete(cell);
   }
 
   // ---------- Input ----------
@@ -734,20 +735,29 @@
         } else if (S.splitOnTap) {
           beginSplit(drag.cell);
         } else {
-          // Pure tap on a cell with splitOnTap OFF → toggle selection.
-          if (selectedCell === drag.cell) {
-            selectedCell = null;
+          // Pure tap on a cell with splitOnTap OFF.
+          // Only good cells can be selected for movement commands.
+          if (drag.cell.category === 'good') {
+            if (selectedCells.has(drag.cell)) {
+              selectedCells.delete(drag.cell);
+            } else {
+              selectedCells.add(drag.cell);
+              drag.cell.flash = 0.4;
+              drag.cell.target = null;
+            }
           } else {
-            selectedCell = drag.cell;
-            drag.cell.flash = 0.4;        // ~200 ms white pop (alpha clamped to 0.6 for first half, fades for second)
-            drag.cell.target = null;      // start a fresh selection state
+            // Bad cell: brief flash so the tap registers visually, no selection
+            drag.cell.flash = 0.25;
           }
         }
       } else if (pan && !pan.moved) {
-        // Tap on empty world → if a cell is selected, send it to that point.
-        if (selectedCell) {
+        // Tap on empty world → if any good cells are selected, send them all there.
+        if (selectedCells.size > 0) {
           const w = screenToWorld(pan.lastX, pan.lastY);
-          selectedCell.target = { x: w.x, y: w.y };
+          for (const c of selectedCells) {
+            if (c.state === 'NORMAL') c.target = { x: w.x, y: w.y };
+          }
+          targetMarker = { x: w.x, y: w.y, t0: performance.now() };
         }
       }
       drag = null;
@@ -1736,13 +1746,15 @@
   function frac(v) { return v - Math.floor(v); }
 
   // ---------- Nuclei ----------
-  // ---------- Selection ring + flash ----------
+  // ---------- Selection ring + flash + target marker ----------
   function drawSelection(shapes, t) {
-    if (!selectedCell && shapes.every(s => !s.cell.flash)) return;
+    const anyFlash = shapes.some(s => s.cell.flash);
+    if (selectedCells.size === 0 && !anyFlash && !targetMarker) return;
     withCameraCtx(() => {
-      // Selection ring: wobbly outline, offset 10% outward from the cell radius.
-      if (selectedCell && selectedCell.state === 'NORMAL') {
-        const c = selectedCell;
+      // Selection rings: wobbly outline 10% outward in each cell's own colour.
+      const N = WOBBLE_VERTS;
+      for (const c of selectedCells) {
+        if (c.state !== 'NORMAL') continue;
         const cc = cellColors(c);
         const inflated = { x: c.x, y: c.y, r: c.r * 1.10, cell: c };
         ctx.save();
@@ -1752,7 +1764,6 @@
         ctx.shadowBlur = 14 / camera.scale;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
-        const N = WOBBLE_VERTS;
         ctx.beginPath();
         for (let i = 0; i <= N; i++) {
           const theta = (i / N) * Math.PI * 2;
@@ -1765,14 +1776,13 @@
         ctx.restore();
       }
 
-      // Flash overlay: white wobbly fill that fades from alpha 0.6 to 0 across 200 ms.
+      // Flash overlay (selection + tap-bad-flash): white wobbly fill, ~200 ms fade.
       for (const s of shapes) {
         const c = s.cell;
         if (!c.flash || c.flash <= 0) continue;
         const alpha = Math.min(1, c.flash / 0.2) * 0.6;
         ctx.save();
         ctx.fillStyle = `rgba(255,255,255,${alpha})`;
-        const N = WOBBLE_VERTS;
         ctx.beginPath();
         for (let i = 0; i <= N; i++) {
           const theta = (i / N) * Math.PI * 2;
@@ -1783,6 +1793,45 @@
         ctx.closePath();
         ctx.fill();
         ctx.restore();
+      }
+
+      // Target marker: fading circle at the commanded point + dashed lines from
+      // every selected cell to the marker. Lifetime ~1500 ms.
+      if (targetMarker) {
+        const age = (performance.now() - targetMarker.t0) / 1500;
+        if (age >= 1) {
+          targetMarker = null;
+        } else {
+          const fade = 1 - age;
+          ctx.save();
+          ctx.globalAlpha = fade;
+          ctx.lineWidth = 2 / camera.scale;
+          ctx.setLineDash([8 / camera.scale, 6 / camera.scale]);
+          ctx.lineDashOffset = -performance.now() * 0.04 / camera.scale;
+          ctx.strokeStyle = '#ffffff';
+          // Dashed lines from each selected cell to the target
+          for (const c of selectedCells) {
+            if (c.state !== 'NORMAL') continue;
+            ctx.beginPath();
+            ctx.moveTo(c.x, c.y);
+            ctx.lineTo(targetMarker.x, targetMarker.y);
+            ctx.stroke();
+          }
+          // Pulsing target ring
+          ctx.setLineDash([]);
+          const r = 18 / camera.scale * (1 + 0.4 * age);
+          ctx.lineWidth = 3 / camera.scale;
+          ctx.strokeStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(targetMarker.x, targetMarker.y, r, 0, Math.PI * 2);
+          ctx.stroke();
+          // Inner dot
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(targetMarker.x, targetMarker.y, 4 / camera.scale, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
       }
     });
   }
