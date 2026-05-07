@@ -6,13 +6,13 @@
   const SETTINGS_KEY_V1 = 'microbes.settings.v1';
   const ALL_CELL_KEYS = ['neutrophil','monocyte','mast','nk','macrophage','dendritic','basophil','platelet','tcell','bcell','eosinophil'];
   const DEFAULTS = {
-    splitMode: 'bondDrift',     // 'pushApart' | 'bondDrift' | 'fixedGrid'
+    splitMode: 'bondDrift',     // 'pushApart' | 'bondDrift'
     autoSplitSeconds: 10,
     maxCells: 32,
     bgFlowSpeed: 1.0,
     outlinePx: 5,
     showDebugField: false,
-    theme: 'microbeGarden',
+    theme: 'petriDish',
     activeTypes: ALL_CELL_KEYS.slice(),
     splitOnTap: false,
     randomSplit: false,
@@ -20,6 +20,8 @@
     friction: 0.40,         // 0=no drag, 1=instant stop (mapped: dampingPerSec = 0.05^friction)
     bounce: 0.6,            // restitution 0..1
     throwStrength: 1.0,     // multiplier for release velocity
+    wobbleAmp: 0.13,        // membrane wobble amplitude (0..0.4)
+    blendMode: 'source-over', // canvas globalCompositeOperation for cell cytoplasm
   };
 
   function loadSettings() {
@@ -39,6 +41,11 @@
           || parsed.activeTypes.some(k => !ALL_CELL_KEYS.includes(k))) {
         parsed.activeTypes = [...DEFAULTS.activeTypes];
       }
+      // Drop the obsolete `fixedGrid` split-mode value
+      if (parsed.splitMode === 'fixedGrid') parsed.splitMode = 'bondDrift';
+      // Drop themes no longer in the registry (hard-coded list to avoid TDZ on THEMES)
+      const knownThemes = ['petriDish','bloodstream','neonBloom','aquaticGlow'];
+      if (parsed.theme && !knownThemes.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
       return { ...DEFAULTS, ...parsed };
     } catch { return { ...DEFAULTS }; }
   }
@@ -54,38 +61,34 @@
   // Each cell type carries its own colour identity (see CELL_TYPES below) so
   // every microbe stays visually distinct regardless of theme.
   const THEMES = {
-    microbeGarden: {
-      label: 'Microbe Garden',
-      bg: { kind: 'flat', base: '#dcecef', spotColor: 'rgba(255,170,140,0.18)', spotCount: 5, vignette: 0.0 },
-      outline: { color: '#1a0e10', defaultPx: 5 },
-      innerHighlight: 'rgba(255,255,255,0.55)',
-      ui: { panelAccent: '#c2375a' },
-    },
-    pandemic: {
-      label: 'Pandemic',
-      bg: { kind: 'flat', base: '#f5efe7', spotColor: 'rgba(220,80,110,0.10)', spotCount: 3, vignette: 0.0 },
-      outline: { color: '#3a0d1a', defaultPx: 6 },
-      innerHighlight: 'rgba(255,255,255,0.5)',
-      ui: { panelAccent: '#e35d2a' },
-    },
     petriDish: {
       label: 'Petri Dish',
       bg: { kind: 'agar', base: '#f1e1a1', spotColor: 'rgba(170,120,40,0.10)', spotCount: 5, vignette: 0.18, ringColor: 'rgba(120,80,30,0.10)' },
       outline: { color: '#2b1c0a', defaultPx: 5 },
-      innerHighlight: 'rgba(255,250,220,0.55)',
       ui: { panelAccent: '#a86a18' },
     },
     bloodstream: {
       label: 'Bloodstream',
       bg: { kind: 'gradient', topColor: '#5b101a', botColor: '#1d0306', spotColor: 'rgba(255,90,100,0.18)', spotCount: 6, vignette: 0.45, rbcSilhouettes: true },
       outline: { color: '#1c0306', defaultPx: 4 },
-      innerHighlight: 'rgba(255,210,210,0.42)',
       ui: { panelAccent: '#ff6b6b' },
+    },
+    neonBloom: {
+      label: 'Neon Bloom',
+      bg: { kind: 'navy-ghost', base: '#0e1840', spotColor: 'rgba(80,40,160,0.25)', spotCount: 7, vignette: 0.4 },
+      outline: { color: '#0d0420', defaultPx: 3, glow: '#ff4fbf', glowBlur: 22 },
+      ui: { panelAccent: '#ff4fbf' },
+    },
+    aquaticGlow: {
+      label: 'Aquatic Glow',
+      bg: { kind: 'gradient', topColor: '#001a4a', botColor: '#00050f', spotColor: 'rgba(80,200,255,0.10)', spotCount: 4, vignette: 0.3 },
+      outline: { color: '#06122a', defaultPx: 3, glow: '#5ce7ff', glowBlur: 18 },
+      ui: { panelAccent: '#5ce7ff' },
     },
   };
 
   function currentTheme() {
-    return THEMES[S.theme] || THEMES.microbeGarden;
+    return THEMES[S.theme] || THEMES.petriDish;
   }
 
   // ---------- Cell types ----------
@@ -230,7 +233,6 @@
   const MARGIN_SPRING = 5;
   const DOWNSAMPLE = 0.5;
   const WOBBLE_VERTS = 32;         // polygon resolution for membrane
-  const WOBBLE_AMP = 0.085;        // ±fraction of r added by wobble
 
   // ---------- Canvas + offscreens ----------
   const canvas = document.getElementById('stage');
@@ -272,7 +274,6 @@
     off.width = ow; off.height = oh;
     off2.width = ow; off2.height = oh;
 
-    if (S.splitMode === 'fixedGrid') buildGrid();
     clampAllInside();
   }
 
@@ -292,7 +293,6 @@
       splitProgress: 0,
       splitAngle: 0,
       bondTimer: 0,
-      gridIndex: -1,
       phase: Math.random() * Math.PI * 2,
       orientation: Math.random() * Math.PI * 2,
       wobbleSeed: Math.random() * 1000,
@@ -312,49 +312,6 @@
       c.x = Math.max(MARGIN, Math.min(W - MARGIN, c.x));
       c.y = Math.max(MARGIN, Math.min(H - MARGIN, c.y));
     }
-  }
-
-  // ---------- Hex grid ----------
-  let gridSlots = [];
-
-  function buildGrid() {
-    gridSlots = [];
-    const r = CELL_RADIUS;
-    const dx = r * 2.6, dy = r * 2.25;
-    const cols = Math.max(2, Math.floor((W - MARGIN * 2) / dx));
-    const rows = Math.max(2, Math.floor((H - MARGIN * 2) / dy));
-    const ox = (W - (cols - 1) * dx) / 2;
-    const oy = (H - (rows - 1) * dy) / 2;
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        const x = ox + col * dx + (row % 2 ? dx * 0.5 : 0);
-        const y = oy + row * dy;
-        gridSlots.push({ x, y, occupiedBy: 0 });
-      }
-    }
-    // Re-snap any existing cells
-    for (const c of cells) c.gridIndex = -1;
-    for (const c of cells) {
-      const idx = nearestFreeSlot(c.x, c.y);
-      if (idx >= 0) {
-        gridSlots[idx].occupiedBy = c.id;
-        c.gridIndex = idx;
-        c.x = gridSlots[idx].x;
-        c.y = gridSlots[idx].y;
-        c.vx = c.vy = 0;
-      }
-    }
-  }
-
-  function nearestFreeSlot(x, y) {
-    let best = -1, bestD = Infinity;
-    for (let i = 0; i < gridSlots.length; i++) {
-      const s = gridSlots[i];
-      if (s.occupiedBy) continue;
-      const d = (s.x - x) ** 2 + (s.y - y) ** 2;
-      if (d < bestD) { bestD = d; best = i; }
-    }
-    return best;
   }
 
   // ---------- Splitting ----------
@@ -401,22 +358,6 @@
       right.vx += cx * speed; right.vy += cy * speed;
       left.bondTimer = BOND_DURATION;
       right.bondTimer = BOND_DURATION;
-    } else if (S.splitMode === 'fixedGrid') {
-      if (cell.gridIndex >= 0) gridSlots[cell.gridIndex].occupiedBy = 0;
-      const li = nearestFreeSlot(left.x, left.y);
-      if (li >= 0) {
-        gridSlots[li].occupiedBy = left.id;
-        left.gridIndex = li;
-        left.x = gridSlots[li].x; left.y = gridSlots[li].y;
-        left.vx = left.vy = 0;
-      }
-      const ri = nearestFreeSlot(right.x, right.y);
-      if (ri >= 0) {
-        gridSlots[ri].occupiedBy = right.id;
-        right.gridIndex = ri;
-        right.x = gridSlots[ri].x; right.y = gridSlots[ri].y;
-        right.vx = right.vy = 0;
-      }
     }
 
     cells.splice(idx, 1, left, right);
@@ -604,7 +545,7 @@
           }
         }
 
-        if (S.splitMode !== 'fixedGrid' && c !== (drag && drag.cell)) {
+        if (c !== (drag && drag.cell)) {
           // Brownian (per-type multiplier)
           const bMul = (CELL_TYPES[c.type] && CELL_TYPES[c.type].brownianMul) || 1.0;
           c.vx += (Math.random() - 0.5) * BROWNIAN * bMul * dt;
@@ -632,8 +573,8 @@
       }
     }
 
-    // Pairwise collision response (skip in fixedGrid; skip pairs while bonded)
-    if (S.splitMode !== 'fixedGrid') {
+    // Pairwise collision response (skip pairs while bonded)
+    {
       const e = S.bounce;
       for (let i = 0; i < cells.length; i++) {
         const a = cells[i];
@@ -825,7 +766,7 @@
     const s = c.wobbleSeed;
     const w1 = Math.sin(t * 0.55 * c.wobbleFreq + theta * 3 + s);
     const w2 = Math.sin(t * 0.85 * c.wobbleFreq + theta * 5 + s * 1.31 + c.phase);
-    return WOBBLE_AMP * (w1 * 0.65 + w2 * 0.45);
+    return (S.wobbleAmp || 0) * (w1 * 0.65 + w2 * 0.45);
   }
 
   // Returns the world-space (x,y) of a vertex on the cell's outline at angle theta.
@@ -944,23 +885,44 @@
     const px = S.outlinePx;
 
     // ----- Outline pass: solid offset blits in the theme's outline colour
-    tintMask(theme.outline.color);
+    // Glow themes (Neon Bloom, Aquatic Glow) layer a shadowBlur halo around
+    // the same offsets, then darken the inner body so cell colours read.
     const offsets = [
       [-px, 0], [px, 0], [0, -px], [0, px],
       [-px, -px], [px, px], [-px, px], [px, -px],
     ];
-    for (const [dx, dy] of offsets) {
-      ctx.drawImage(off, 0, 0, off.width, off.height, dx, dy, W, H);
+    if (theme.outline.glow) {
+      tintMask(theme.outline.glow);
+      ctx.save();
+      ctx.shadowColor = theme.outline.glow;
+      ctx.shadowBlur = theme.outline.glowBlur || 14;
+      for (const [dx, dy] of offsets) {
+        ctx.drawImage(off, 0, 0, off.width, off.height, dx, dy, W, H);
+      }
+      ctx.restore();
+      // Dark inner body
+      tintMask(theme.outline.color);
+      ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, W, H);
+    } else {
+      tintMask(theme.outline.color);
+      for (const [dx, dy] of offsets) {
+        ctx.drawImage(off, 0, 0, off.width, off.height, dx, dy, W, H);
+      }
     }
 
-    // ----- Per-cell cytoplasm fill: each cell paints its own gradient on
-    // off, then we destination-in clip to the global mask in off2 and blit.
+    // ----- Per-cell cytoplasm fill: each cell paints its own gradient as a
+    // disk (arc+fill, NOT fillRect — the rectangle bleed used to leak the
+    // gradient's last colour into the corners of the cell's bounding box and
+    // overwrite a neighbour's interior).
+    // The user-selected blend mode (multiply, screen, …) decides what happens
+    // where two cells overlap inside the metaball mask.
     const sx = off.width / W;
     const cs = camera.scale, cTx = camera.tx, cTy = camera.ty;
     offCtx.setTransform(1, 0, 0, 1, 0, 0);
     offCtx.globalCompositeOperation = 'source-over';
     offCtx.filter = 'none';
     offCtx.clearRect(0, 0, off.width, off.height);
+    offCtx.globalCompositeOperation = S.blendMode || 'source-over';
     for (const cell of cells) {
       const subs = (cell.state === 'SPLITTING')
         ? splitVirtualCenters(cell)
@@ -969,12 +931,14 @@
       for (const b of subs) {
         const cx = (b.x * cs + cTx) * sx;
         const cy = (b.y * cs + cTy) * sx;
-        const r = b.r * 1.6 * cs * sx;
-        const g = offCtx.createRadialGradient(cx, cy - r * 0.3, 0, cx, cy, r);
+        const r = b.r * 1.4 * cs * sx;
+        const g = offCtx.createRadialGradient(cx, cy - r * 0.25, 0, cx, cy, r);
         g.addColorStop(0, cc.cytoTop);
         g.addColorStop(1, cc.cytoBot);
         offCtx.fillStyle = g;
-        offCtx.fillRect(cx - r, cy - r, r * 2, r * 2);
+        offCtx.beginPath();
+        offCtx.arc(cx, cy, r, 0, Math.PI * 2);
+        offCtx.fill();
       }
     }
     offCtx.globalCompositeOperation = 'destination-in';
@@ -999,7 +963,9 @@
         g.addColorStop(0, cc.nucleusHi);
         g.addColorStop(1, 'rgba(0,0,0,0)');
         offCtx.fillStyle = g;
-        offCtx.fillRect(x - r, y - r, r * 2, r * 2);
+        offCtx.beginPath();
+        offCtx.arc(x, y, r, 0, Math.PI * 2);
+        offCtx.fill();
       }
     }
     offCtx.globalCompositeOperation = 'destination-in';
@@ -1204,7 +1170,12 @@
   // ---------- Nuclei ----------
   function drawNuclei(ts) {
     const t = ts * 0.001;
+    ctx.save();
+    // Always slightly soft + translucent so nuclei read as organelles, not crisp disks.
+    ctx.filter = 'blur(2px)';
+    ctx.globalAlpha = 0.78;
     withCameraCtx(() => drawNucleiInner(ts, t));
+    ctx.restore();
   }
 
   function drawNucleiInner(ts, t) {
@@ -1371,14 +1342,6 @@
         ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
         ctx.stroke();
       }
-      if (S.splitMode === 'fixedGrid') {
-        ctx.fillStyle = 'rgba(255,255,255,0.25)';
-        for (const s of gridSlots) {
-          ctx.beginPath();
-          ctx.arc(s.x, s.y, 2 / camera.scale, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
       ctx.restore();
     });
     // Screen-space text overlay (not transformed)
@@ -1512,6 +1475,16 @@
   bindRange('friction', 'friction', 'frictionVal', v => v.toFixed(2));
   bindRange('bounce', 'bounce', 'bounceVal', v => v.toFixed(2));
   bindRange('throwStrength', 'throwStrength', 'throwVal', v => v.toFixed(2) + '×');
+  bindRange('wobbleAmp', 'wobbleAmp', 'wobbleVal', v => v.toFixed(2));
+
+  const blendSel = document.getElementById('blendMode');
+  if (blendSel) {
+    blendSel.value = S.blendMode || 'source-over';
+    blendSel.addEventListener('change', () => {
+      S.blendMode = blendSel.value;
+      saveSettings();
+    });
+  }
 
   function bindCheckbox(id, key, onChange) {
     const el = document.getElementById(id);
@@ -1535,15 +1508,8 @@
     r.checked = (r.value === S.splitMode);
     r.addEventListener('change', () => {
       if (!r.checked) return;
-      const prev = S.splitMode;
       S.splitMode = r.value;
       saveSettings();
-      if (S.splitMode === 'fixedGrid') {
-        buildGrid();
-      } else if (prev === 'fixedGrid') {
-        for (const s of gridSlots) s.occupiedBy = 0;
-        for (const c of cells) c.gridIndex = -1;
-      }
     });
   }
 
@@ -1671,7 +1637,7 @@
       id: 1, x: w / 2, y: h / 2, r: w * 0.32,
       type: typeKey,
       vx: 0, vy: 0, state: 'NORMAL',
-      splitTimer: 0, splitProgress: 0, splitAngle: 0, bondTimer: 0, gridIndex: -1,
+      splitTimer: 0, splitProgress: 0, splitAngle: 0, bondTimer: 0,
       phase: 0.4, orientation: 0, wobbleSeed: 7, wobbleFreq: 0.7, flash: 0,
     };
     const s = { x: fakeCell.x, y: fakeCell.y, r: fakeCell.r, cell: fakeCell };
@@ -1805,18 +1771,7 @@
   function resetSim() {
     cells.length = 0;
     cellId = 0;
-    if (gridSlots.length) for (const s of gridSlots) s.occupiedBy = 0;
-    if (S.splitMode === 'fixedGrid') buildGrid();
     const c = makeCell(W / 2, H / 2);
-    if (S.splitMode === 'fixedGrid') {
-      const idx = nearestFreeSlot(c.x, c.y);
-      if (idx >= 0) {
-        gridSlots[idx].occupiedBy = c.id;
-        c.gridIndex = idx;
-        c.x = gridSlots[idx].x;
-        c.y = gridSlots[idx].y;
-      }
-    }
     cells.push(c);
   }
 

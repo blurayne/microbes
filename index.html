@@ -43,7 +43,6 @@
         <h3>Split mode</h3>
         <label><input type="radio" name="splitMode" value="pushApart" /> Push apart with momentum</label>
         <label><input type="radio" name="splitMode" value="bondDrift" /> Bond, then drift</label>
-        <label><input type="radio" name="splitMode" value="fixedGrid" /> Fixed grid</label>
       </section>
 
       <section>
@@ -70,7 +69,26 @@
       </section>
 
       <section>
+        <h3>Cell blending</h3>
+        <select id="blendMode">
+          <option value="source-over">Replace (default)</option>
+          <option value="multiply">Multiply</option>
+          <option value="darken">Darken</option>
+          <option value="lighter">Add (Lighter)</option>
+          <option value="screen">Screen</option>
+          <option value="overlay">Overlay</option>
+          <option value="soft-light">Soft light</option>
+          <option value="hard-light">Hard light</option>
+          <option value="color-burn">Color burn</option>
+          <option value="color-dodge">Color dodge</option>
+        </select>
+      </section>
+
+      <section>
         <h3>Look</h3>
+        <label>Wobble <span id="wobbleVal" class="val"></span>
+          <input type="range" id="wobbleAmp" min="0" max="0.4" step="0.01" />
+        </label>
         <label>Background flow <span id="bgVal" class="val"></span>
           <input type="range" id="bgFlowSpeed" min="0" max="2" step="0.05" />
         </label>
