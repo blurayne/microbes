@@ -9,7 +9,7 @@
     splitMode: 'bondDrift',     // 'pushApart' | 'bondDrift'
     autoSplitSeconds: 10,
     maxCells: 32,
-    bgFlowSpeed: 1.0,
+    bgFlowSpeed: 0.55,
     outlinePx: 5,
     showDebugField: false,
     theme: 'petriDish',
@@ -17,11 +17,11 @@
     splitOnTap: false,
     randomSplit: false,
     showFPS: false,
-    friction: 0.40,         // 0=no drag, 1=instant stop (mapped: dampingPerSec = 0.05^friction)
-    bounce: 0.6,            // restitution 0..1
-    throwStrength: 1.0,     // multiplier for release velocity
-    wobbleAmp: 0.13,        // membrane wobble amplitude (0..0.4)
-    blendMode: 'source-over', // canvas globalCompositeOperation for cell cytoplasm
+    friction: 0.80,
+    bounce: 0.6,
+    throwStrength: 0.35,
+    wobbleAmp: 0.13,
+    blendMode: 'lighter',     // smooth-fade default — overlapping cells blend additively
   };
 
   function loadSettings() {
@@ -98,6 +98,8 @@
   // decoration.kind → drawDecorations() dispatch
   // granules → number of small dots inside the cell, drawn through the mask
   // description → 1-sentence role shown in the help dialog
+  const DEFAULT_MOVE = { accel: 220, maxSpeed: 100, weight: 1.0, friction: 1.0 };
+
   const CELL_TYPES = {
     neutrophil: {
       label: 'Neutrophil',
@@ -106,6 +108,7 @@
       decoration: { kind: 'none' },
       granules: 28,
       splitFactor: 1.0, brownianMul: 1.0,
+      move: { accel: 280, maxSpeed: 130, weight: 1.0,  friction: 0.9  },
       colors: { cytoTop: '#ffd28a', cytoBot: '#e58a26', nucleus: '#5a2a05', nucleusHi: '#fff0c8', accent: '#9c4513' },
       description: 'First responder; engulfs bacteria via phagocytosis. The most abundant white blood cell.',
     },
@@ -116,6 +119,7 @@
       decoration: { kind: 'none' },
       granules: 6,
       splitFactor: 1.0, brownianMul: 1.0,
+      move: { accel: 200, maxSpeed:  95, weight: 1.0,  friction: 1.0  },
       colors: { cytoTop: '#cadcfb', cytoBot: '#6d8df0', nucleus: '#1d1c5a', nucleusHi: '#dee8ff', accent: '#2b4d8e' },
       description: 'Circulating sentinel that matures into macrophages or dendritic cells once it enters tissue.',
     },
@@ -126,6 +130,7 @@
       decoration: { kind: 'none' },
       granules: 60,
       splitFactor: 1.2, brownianMul: 0.7,
+      move: { accel: 100, maxSpeed:  50, weight: 1.5,  friction: 1.2  },
       colors: { cytoTop: '#c9efd5', cytoBot: '#54a877', nucleus: '#0f4a2e', nucleusHi: '#e6fff0', accent: '#1f6b3f' },
       description: 'Tissue-resident sentinel; releases histamine to trigger inflammation and allergic responses.',
     },
@@ -136,6 +141,7 @@
       decoration: { kind: 'bigSpikes' },
       granules: 8,
       splitFactor: 1.1, brownianMul: 1.1,
+      move: { accel: 320, maxSpeed: 150, weight: 0.9,  friction: 0.85 },
       colors: { cytoTop: '#cfd0f7', cytoBot: '#7172c6', nucleus: '#291b5e', nucleusHi: '#eaeaff', accent: '#3f3f8c' },
       description: 'Patrols for virus-infected and tumour cells; kills on contact without prior sensitisation.',
     },
@@ -146,6 +152,7 @@
       decoration: { kind: 'none' },
       granules: 12,
       splitFactor: 1.4, brownianMul: 0.6,
+      move: { accel: 140, maxSpeed:  70, weight: 1.7,  friction: 1.1  },
       colors: { cytoTop: '#fbc6de', cytoBot: '#d36699', nucleus: '#3a1029', nucleusHi: '#ffe0ee', accent: '#872a59' },
       description: '"Big eater" — long-lived phagocyte that engulfs pathogens and presents antigens to T cells.',
     },
@@ -156,6 +163,7 @@
       decoration: { kind: 'tendrils' },
       granules: 0,
       splitFactor: 1.3, brownianMul: 0.8,
+      move: { accel: 220, maxSpeed: 110, weight: 1.0,  friction: 0.95 },
       colors: { cytoTop: '#bcdcf6', cytoBot: '#4d8fcf', nucleus: '#102544', nucleusHi: '#dff0ff', accent: '#1d3d68' },
       description: 'Antigen-presenting courier; samples invaders and shows them to T cells in lymph nodes.',
     },
@@ -166,6 +174,7 @@
       decoration: { kind: 'none' },
       granules: 22,
       splitFactor: 1.0, brownianMul: 1.0,
+      move: { accel: 180, maxSpeed:  90, weight: 1.0,  friction: 1.0  },
       colors: { cytoTop: '#fbcfdc', cytoBot: '#d97aa1', nucleus: '#410d2e', nucleusHi: '#ffe1ec', accent: '#4a0d31' },
       description: 'Circulating granulocyte; releases histamine and heparin to reinforce inflammation.',
     },
@@ -176,6 +185,7 @@
       decoration: { kind: 'none' },
       granules: 4,
       splitFactor: 0.9, brownianMul: 1.6,
+      move: { accel: 360, maxSpeed: 170, weight: 0.6,  friction: 0.85 },
       colors: { cytoTop: '#ffe27c', cytoBot: '#d7a614', nucleus: '#4d2f02', nucleusHi: '#fff5c4', accent: '#8a5e0a' },
       description: 'Tiny cell fragment that clots blood at injuries and helps recruit immune cells.',
     },
@@ -186,6 +196,7 @@
       decoration: { kind: 'yReceptorsFew' },
       granules: 0,
       splitFactor: 1.2, brownianMul: 0.9,
+      move: { accel: 300, maxSpeed: 140, weight: 0.95, friction: 0.9  },
       colors: { cytoTop: '#d6cdf8', cytoBot: '#8d7be0', nucleus: '#2a134d', nucleusHi: '#efeaff', accent: '#4d2c8c' },
       description: 'Adaptive killer / coordinator; recognises specific antigens and kills infected cells.',
     },
@@ -196,6 +207,7 @@
       decoration: { kind: 'yReceptorsMany' },
       granules: 0,
       splitFactor: 1.2, brownianMul: 0.9,
+      move: { accel: 240, maxSpeed: 110, weight: 1.0,  friction: 1.0  },
       colors: { cytoTop: '#fcc9cc', cytoBot: '#df8189', nucleus: '#4a1014', nucleusHi: '#ffe1e3', accent: '#8a323a' },
       description: 'Adaptive antibody factory; secretes antibodies tagged to specific pathogens.',
     },
@@ -206,6 +218,7 @@
       decoration: { kind: 'none' },
       granules: 18,
       splitFactor: 1.0, brownianMul: 1.0,
+      move: { accel: 260, maxSpeed: 120, weight: 0.95, friction: 0.95 },
       colors: { cytoTop: '#fcc8a3', cytoBot: '#e0855a', nucleus: '#4d1d09', nucleusHi: '#ffe2cd', accent: '#8c3d18' },
       description: 'Anti-parasite specialist; key in allergic responses, releases toxic granule contents.',
     },
@@ -254,9 +267,10 @@
 
   // ---------- Drag / pan state ----------
   let drag = null;          // { cell, dx, dy, started, downX, downY }
-  let pan = null;           // { lastX, lastY, button }
+  let pan = null;           // { lastX, lastY, startX, startY, moved, button }
   const activePointers = new Map();   // pointerId -> { x, y, world }
   let pinch = null;         // { startDist, startMid, startScale, startTx, startTy }
+  let selectedCell = null;  // tapped cell (visual marker + move-to target sink)
   const DRAG_THRESHOLD = 6;
 
   function resize() {
@@ -298,6 +312,7 @@
       wobbleSeed: Math.random() * 1000,
       wobbleFreq: 0.55 + Math.random() * 0.45,
       flash: 0,
+      target: null,    // {x, y} world point this cell is moving toward (set on tap-empty when selected)
     };
   }
 
@@ -361,6 +376,7 @@
     }
 
     cells.splice(idx, 1, left, right);
+    if (selectedCell === cell) selectedCell = null;
   }
 
   // ---------- Input ----------
@@ -412,7 +428,7 @@
 
     // Right mouse button → pan
     if (ev.button === 2) {
-      pan = { lastX: sp.x, lastY: sp.y, button: 2 };
+      pan = { lastX: sp.x, lastY: sp.y, startX: sp.x, startY: sp.y, moved: false, button: 2 };
       return;
     }
 
@@ -427,8 +443,9 @@
         samples: [{ x: c.x, y: c.y, t: performance.now() }],
       };
       c.vx = c.vy = 0;
+      c.target = null;          // manual drag overrides any active move-to
     } else {
-      pan = { lastX: sp.x, lastY: sp.y, button: 0 };
+      pan = { lastX: sp.x, lastY: sp.y, startX: sp.x, startY: sp.y, moved: false, button: 0 };
     }
   });
 
@@ -477,8 +494,14 @@
     if (pan && prev) {
       const dx = sp.x - pan.lastX;
       const dy = sp.y - pan.lastY;
-      camera.tx += dx;
-      camera.ty += dy;
+      if (!pan.moved) {
+        const tx = sp.x - pan.startX, ty = sp.y - pan.startY;
+        if (tx * tx + ty * ty > DRAG_THRESHOLD * DRAG_THRESHOLD) pan.moved = true;
+      }
+      if (pan.moved) {
+        camera.tx += dx;
+        camera.ty += dy;
+      }
       pan.lastX = sp.x;
       pan.lastY = sp.y;
     }
@@ -490,8 +513,8 @@
     if (activePointers.size === 0) {
       if (drag) {
         if (drag.started) {
-          // Estimate release velocity from the last ~80ms of samples and apply
-          // throw strength.
+          // Real drag → throw with momentum, clear any move-to target,
+          // selection sticks (drag does not change which cell is selected).
           const now = performance.now();
           const samples = drag.samples;
           let i = samples.length - 1;
@@ -499,12 +522,26 @@
           const a = samples[i];
           const b = samples[samples.length - 1];
           const dt = Math.max(0.016, (b.t - a.t) / 1000);
-          const vx = (b.x - a.x) / dt * S.throwStrength;
-          const vy = (b.y - a.y) / dt * S.throwStrength;
-          drag.cell.vx = vx;
-          drag.cell.vy = vy;
+          drag.cell.vx = (b.x - a.x) / dt * S.throwStrength;
+          drag.cell.vy = (b.y - a.y) / dt * S.throwStrength;
+          drag.cell.target = null;
         } else if (S.splitOnTap) {
           beginSplit(drag.cell);
+        } else {
+          // Pure tap on a cell with splitOnTap OFF → toggle selection.
+          if (selectedCell === drag.cell) {
+            selectedCell = null;
+          } else {
+            selectedCell = drag.cell;
+            drag.cell.flash = 0.4;        // ~200 ms white pop (alpha clamped to 0.6 for first half, fades for second)
+            drag.cell.target = null;      // start a fresh selection state
+          }
+        }
+      } else if (pan && !pan.moved) {
+        // Tap on empty world → if a cell is selected, send it to that point.
+        if (selectedCell) {
+          const w = screenToWorld(pan.lastX, pan.lastY);
+          selectedCell.target = { x: w.x, y: w.y };
         }
       }
       drag = null;
@@ -546,18 +583,40 @@
         }
 
         if (c !== (drag && drag.cell)) {
-          // Brownian (per-type multiplier)
-          const bMul = (CELL_TYPES[c.type] && CELL_TYPES[c.type].brownianMul) || 1.0;
-          c.vx += (Math.random() - 0.5) * BROWNIAN * bMul * dt;
-          c.vy += (Math.random() - 0.5) * BROWNIAN * bMul * dt;
+          const moveCfg = (CELL_TYPES[c.type] && CELL_TYPES[c.type].move) || DEFAULT_MOVE;
 
-          // User-controlled friction: dampingPerSec = 0.05^friction
-          // friction=0 → 1 (no drag). friction=1 → 0.05. friction=0.4 → ~0.30 (gel default).
-          let frictionEff = S.friction;
+          if (c.target) {
+            // Move-to-target seek with per-type acceleration / weight / max-speed.
+            const dx = c.target.x - c.x, dy = c.target.y - c.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < 8) {
+              c.target = null;
+            } else {
+              const ax = (dx / dist) * moveCfg.accel / moveCfg.weight;
+              const ay = (dy / dist) * moveCfg.accel / moveCfg.weight;
+              c.vx += ax * dt;
+              c.vy += ay * dt;
+              const sp = Math.hypot(c.vx, c.vy);
+              if (sp > moveCfg.maxSpeed) {
+                c.vx = c.vx / sp * moveCfg.maxSpeed;
+                c.vy = c.vy / sp * moveCfg.maxSpeed;
+              }
+            }
+          } else {
+            // Idle Brownian (per-type multiplier)
+            const bMul = (CELL_TYPES[c.type] && CELL_TYPES[c.type].brownianMul) || 1.0;
+            c.vx += (Math.random() - 0.5) * BROWNIAN * bMul * dt;
+            c.vy += (Math.random() - 0.5) * BROWNIAN * bMul * dt;
+          }
+
+          // Friction: global S.friction × per-type multiplier, mapped exponentially
+          // to a per-second damping factor (0.05^friction).
+          let frictionEff = S.friction * (moveCfg.friction || 1);
           if (S.splitMode === 'bondDrift' && c.bondTimer > 0) {
             c.bondTimer -= dt;
-            frictionEff = Math.min(1, S.friction + 0.3);
+            frictionEff = Math.min(1, frictionEff + 0.3);
           }
+          frictionEff = Math.max(0, Math.min(1, frictionEff));
           const dampingPerSec = Math.max(0.001, Math.pow(0.05, frictionEff));
           const k = Math.pow(dampingPerSec, dt);
           c.vx *= k; c.vy *= k;
@@ -648,13 +707,23 @@
     }
     ctx.fillRect(0, 0, W, H);
 
-    // Petri dish concentric rings
+    // World-space layer: spots / rings / RBC silhouettes follow the camera so
+    // panning + zooming feels like moving through a real environment.
+    ctx.save();
+    ctx.transform(camera.scale, 0, 0, camera.scale, camera.tx, camera.ty);
+    // Visible world rectangle (so fillRects cover the viewport at any zoom)
+    const wx = -camera.tx / camera.scale;
+    const wy = -camera.ty / camera.scale;
+    const ww = W / camera.scale;
+    const wh = H / camera.scale;
+
+    // Petri dish concentric rings (centred at world origin (W/2, H/2))
     if (bg.kind === 'agar') {
       ctx.save();
       ctx.strokeStyle = bg.ringColor || 'rgba(120,80,30,0.10)';
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1 / camera.scale;
       const cx = W / 2, cy = H / 2;
-      const maxR = Math.hypot(W, H) * 0.6;
+      const maxR = Math.hypot(W, H) * 0.9;
       for (let r = 32; r < maxR; r += 32) {
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -667,8 +736,8 @@
     if (bg.rbcSilhouettes) {
       ctx.save();
       const t2 = ts * 0.00025 * S.bgFlowSpeed;
-      const N = 16;
-      ctx.lineWidth = 1.4;
+      const N = 22;
+      ctx.lineWidth = 1.4 / camera.scale;
       for (let i = 0; i < N; i++) {
         const seed = i * 1.31;
         const fx = ((i / N) + 0.06 * Math.sin(t2 + seed)) % 1;
@@ -708,8 +777,9 @@
       grad.addColorStop(0, bg.spotColor);
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, W, H);
+      ctx.fillRect(wx, wy, ww, wh);
     }
+    ctx.restore();
     ctx.restore();
 
     // Vignette
@@ -1168,6 +1238,57 @@
   function frac(v) { return v - Math.floor(v); }
 
   // ---------- Nuclei ----------
+  // ---------- Selection ring + flash ----------
+  function drawSelection(shapes, t) {
+    if (!selectedCell && shapes.every(s => !s.cell.flash)) return;
+    withCameraCtx(() => {
+      // Selection ring: wobbly outline, offset 10% outward from the cell radius.
+      if (selectedCell && selectedCell.state === 'NORMAL') {
+        const c = selectedCell;
+        const cc = cellColors(c);
+        const inflated = { x: c.x, y: c.y, r: c.r * 1.10, cell: c };
+        ctx.save();
+        ctx.lineWidth = Math.max(2, S.outlinePx * 1.2) / camera.scale;
+        ctx.strokeStyle = cc.cytoBot;
+        ctx.shadowColor = cc.cytoBot;
+        ctx.shadowBlur = 14 / camera.scale;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        const N = WOBBLE_VERTS;
+        ctx.beginPath();
+        for (let i = 0; i <= N; i++) {
+          const theta = (i / N) * Math.PI * 2;
+          const v = shapeVertex(inflated, theta, t);
+          if (i === 0) ctx.moveTo(v.x, v.y);
+          else ctx.lineTo(v.x, v.y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // Flash overlay: white wobbly fill that fades from alpha 0.6 to 0 across 200 ms.
+      for (const s of shapes) {
+        const c = s.cell;
+        if (!c.flash || c.flash <= 0) continue;
+        const alpha = Math.min(1, c.flash / 0.2) * 0.6;
+        ctx.save();
+        ctx.fillStyle = `rgba(255,255,255,${alpha})`;
+        const N = WOBBLE_VERTS;
+        ctx.beginPath();
+        for (let i = 0; i <= N; i++) {
+          const theta = (i / N) * Math.PI * 2;
+          const v = shapeVertex(s, theta, t);
+          if (i === 0) ctx.moveTo(v.x, v.y);
+          else ctx.lineTo(v.x, v.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    });
+  }
+
   function drawNuclei(ts) {
     const t = ts * 0.001;
     ctx.save();
@@ -1384,6 +1505,7 @@
       drawMetaballToMain(shapes, t);
     }
     drawNuclei(ts);
+    drawSelection(shapes, t);
     if (S.showDebugField) drawDebug(shapes);
 
     updateFPS(dt, ts);
@@ -1533,7 +1655,7 @@
     opt.textContent = t.label;
     themeSelect.appendChild(opt);
   }
-  themeSelect.value = S.theme in THEMES ? S.theme : 'microbeGarden';
+  themeSelect.value = S.theme in THEMES ? S.theme : 'petriDish';
   applyThemeToCss(currentTheme());
   themeSelect.addEventListener('change', () => {
     if (THEMES[themeSelect.value]) {
