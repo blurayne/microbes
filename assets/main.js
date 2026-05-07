@@ -2128,12 +2128,6 @@
   }
   bindCheckbox('splitOnTap', 'splitOnTap');
   bindCheckbox('randomSplit', 'randomSplit');
-  bindCheckbox('allowBadGuys', 'allowBadGuys', (on) => {
-    document.body.classList.toggle('no-bad', !on);
-    if (!on && !paletteBadDialog.classList.contains('hidden')) closeAll();
-    renderHelpList();
-    renderPaletteBadGrid();
-  });
   bindCheckbox('showFPS', 'showFPS', (on) => {
     const el = document.getElementById('fps');
     if (el) el.classList.toggle('on', !!on);
@@ -2282,6 +2276,18 @@
       appendGridSection(cellGridBadEl, `${g.icon} ${g.label}`, entries);
     }
   }
+
+  // Bind the Allow-pathogens toggle now that the renderers above exist.
+  // Initial body-class is set explicitly so the FAB stack is correct on first paint.
+  document.body.classList.toggle('no-bad', !S.allowBadGuys);
+  bindCheckbox('allowBadGuys', 'allowBadGuys', (on) => {
+    document.body.classList.toggle('no-bad', !on);
+    if (!on && paletteBadDialog && !paletteBadDialog.classList.contains('hidden')) {
+      closeAll();
+    }
+    if (typeof renderHelpList === 'function') renderHelpList();
+    if (typeof renderPaletteBadGrid === 'function') renderPaletteBadGrid();
+  });
 
   function spawnAtCenter(typeKey) {
     if (cells.length >= S.maxCells) return;
