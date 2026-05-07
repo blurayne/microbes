@@ -54,7 +54,8 @@
       const knownThemes = ['petriDish','bloodstream','neonBloom','aquaticGlow',
         'crayonBox','cartoonNight','glowStick','bedtime',
         'spectrum','aurora','prism','pride',
-        'deepSpace','volcano','forestFloor','cyberGrid'];
+        'deepSpace','volcano','forestFloor','cyberGrid',
+        'lymphNode','thymus','boneMarrow','heart','gut','lung','brain','kidney','skin','liver'];
       if (parsed.theme && !knownThemes.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
       return { ...DEFAULTS, ...parsed };
     } catch { return { ...DEFAULTS }; }
@@ -172,6 +173,68 @@
       bg: { kind: 'cybergrid', base: '#000010', spotColors: ['#00ff88','#ff00aa','#00d8ff'], spotCount: 4, vignette: 0.30, gridColor: 'rgba(0,255,170,0.18)', gridStep: 48 },
       outline: { color: '#000000', defaultPx: 3, glow: '#00ff88', glowBlur: 16 },
       ui: { panelAccent: '#00ff88' },
+    },
+
+    // ----- Anatomy scenes -----
+    lymphNode: {
+      label: 'Lymph Node',
+      bg: { kind: 'gradient', topColor: '#2a0e3a', botColor: '#0a0410', spotColor: 'rgba(160,120,200,0.15)', spotCount: 5, vignette: 0.40, decor: 'lymphocytes' },
+      outline: { color: '#0a0410', defaultPx: 4 },
+      ui: { panelAccent: '#bd93e2' },
+    },
+    thymus: {
+      label: 'Thymus',
+      bg: { kind: 'gradient', topColor: '#401218', botColor: '#100204', spotColor: 'rgba(220,90,110,0.18)', spotCount: 6, vignette: 0.45, decor: 'lobules' },
+      outline: { color: '#0a0102', defaultPx: 4 },
+      ui: { panelAccent: '#e95870' },
+    },
+    boneMarrow: {
+      label: 'Bone Marrow',
+      bg: { kind: 'gradient', topColor: '#44290a', botColor: '#190a02', spotColor: 'rgba(255,180,90,0.18)', spotCount: 5, vignette: 0.40, decor: 'matrix' },
+      outline: { color: '#0a0501', defaultPx: 4 },
+      ui: { panelAccent: '#ffb95c' },
+    },
+    heart: {
+      label: 'Heart',
+      bg: { kind: 'gradient', topColor: '#4a0a0a', botColor: '#110202', spotColor: 'rgba(255,60,60,0.18)', spotCount: 4, vignette: 0.50, decor: 'pulse' },
+      outline: { color: '#0a0202', defaultPx: 4 },
+      ui: { panelAccent: '#ff4040' },
+    },
+    gut: {
+      label: 'Gut',
+      bg: { kind: 'gradient', topColor: '#3a1010', botColor: '#100404', spotColor: 'rgba(220,140,140,0.16)', spotCount: 5, vignette: 0.40, decor: 'villi' },
+      outline: { color: '#0a0202', defaultPx: 4 },
+      ui: { panelAccent: '#e08688' },
+    },
+    lung: {
+      label: 'Lung',
+      bg: { kind: 'gradient', topColor: '#082040', botColor: '#020618', spotColor: 'rgba(150,200,255,0.18)', spotCount: 5, vignette: 0.40, decor: 'alveoli' },
+      outline: { color: '#02080f', defaultPx: 4 },
+      ui: { panelAccent: '#5cb0ff' },
+    },
+    brain: {
+      label: 'Brain',
+      bg: { kind: 'gradient', topColor: '#2a142e', botColor: '#100612', spotColor: 'rgba(255,200,255,0.15)', spotCount: 6, vignette: 0.50, decor: 'neurons' },
+      outline: { color: '#08020a', defaultPx: 3, glow: '#e0a0ff', glowBlur: 14 },
+      ui: { panelAccent: '#e0a0ff' },
+    },
+    kidney: {
+      label: 'Kidney',
+      bg: { kind: 'gradient', topColor: '#2c0e08', botColor: '#0c0402', spotColor: 'rgba(255,140,90,0.16)', spotCount: 5, vignette: 0.45, decor: 'tubules' },
+      outline: { color: '#0a0202', defaultPx: 4 },
+      ui: { panelAccent: '#ff9070' },
+    },
+    skin: {
+      label: 'Skin',
+      bg: { kind: 'gradient', topColor: '#3c1c0c', botColor: '#100804', spotColor: 'rgba(255,200,160,0.18)', spotCount: 4, vignette: 0.35, decor: 'hair' },
+      outline: { color: '#0a0402', defaultPx: 4 },
+      ui: { panelAccent: '#e8a878' },
+    },
+    liver: {
+      label: 'Liver',
+      bg: { kind: 'gradient', topColor: '#2a0e0a', botColor: '#0a0202', spotColor: 'rgba(180,80,60,0.18)', spotCount: 5, vignette: 0.50, decor: 'lobules' },
+      outline: { color: '#0a0202', defaultPx: 4 },
+      ui: { panelAccent: '#c85a3c' },
     },
   };
 
@@ -781,7 +844,36 @@
   }, { passive: false });
 
   // ---------- Update ----------
+  // Centre + swarm radius (max distance from centroid) for a category. Returns
+  // null if the category has fewer than 2 cells (no cohesion needed).
+  function swarmCentroid(category) {
+    let n = 0, sx = 0, sy = 0;
+    for (const c of cells) {
+      if (c.state !== 'NORMAL' || c.category !== category) continue;
+      sx += c.x; sy += c.y; n++;
+    }
+    if (n < 2) return null;
+    const cx = sx / n, cy = sy / n;
+    let r = 0;
+    for (const c of cells) {
+      if (c.state !== 'NORMAL' || c.category !== category) continue;
+      const dx = c.x - cx, dy = c.y - cy;
+      const d = Math.hypot(dx, dy);
+      if (d > r) r = d;
+    }
+    // Floor at 200 px so a tightly-clustered swarm still has a reasonable
+    // permissible wander radius before stragglers get yanked home.
+    return { x: cx, y: cy, r: Math.max(200, r) };
+  }
+
   function update(dt) {
+    // Cohesion: stragglers wandering >1.30× the swarm radius from the centroid
+    // get their patrol target overridden back to the centroid until they're
+    // back inside that bound. Computed once per frame, separately for each
+    // category so good/bad pools cluster on their own.
+    const centroidGood = swarmCentroid('good');
+    const centroidBad  = swarmCentroid('bad');
+
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
       if (c.flash > 0) c.flash = Math.max(0, c.flash - dt * 2);
@@ -846,6 +938,18 @@
               maxV  = moveCfg.attackSpeed * sm;
               hasGoal = true;
             } else {
+              // Cohesion: if this cell has wandered >1.30× the swarm radius
+              // from its category centroid, pull it back home before doing
+              // any other patrol logic.
+              const home = (c.category === 'bad') ? centroidBad : centroidGood;
+              if (home && home.r > 0) {
+                const hdx = home.x - c.x, hdy = home.y - c.y;
+                const hd = Math.hypot(hdx, hdy);
+                if (hd > 1.30 * home.r) {
+                  c.patrolTarget = { x: home.x, y: home.y };
+                  c.patrolTimer  = 4;
+                }
+              }
               // Patrol — refresh target every 3-8s, bias toward another cell
               c.patrolTimer -= dt;
               const reached = c.patrolTarget &&
@@ -974,6 +1078,167 @@
     });
   }
 
+  // ---------- Anatomy decor (used by anatomy themes) ----------
+  // Called from drawBackground inside the camera transform; world coords.
+  function drawAnatomyDecor(ts, decor, wx, wy, ww, wh) {
+    const t = ts * 0.001 * S.bgFlowSpeed;
+    const W2 = ww || W, H2 = wh || H;
+    const sc = camera.scale;
+    switch (decor) {
+      case 'lymphocytes': {
+        const N = 22;
+        ctx.lineWidth = 1.4 / sc;
+        for (let i = 0; i < N; i++) {
+          const seed = i * 1.31;
+          const fx = ((i / N) + 0.05 * Math.sin(t + seed)) % 1;
+          const fy = (frac(seed * 0.7 + t * 0.3 + i * 0.13)) % 1;
+          const px = fx * W; const py = fy * H;
+          const r = 7 + 6 * frac(seed * 0.21);
+          ctx.fillStyle = 'rgba(220,200,255,0.18)';
+          ctx.strokeStyle = 'rgba(180,160,220,0.35)';
+          ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+          ctx.fillStyle = 'rgba(120,80,160,0.30)';
+          ctx.beginPath(); ctx.arc(px - r * 0.2, py - r * 0.1, r * 0.45, 0, Math.PI * 2); ctx.fill();
+        }
+        break;
+      }
+      case 'lobules': {
+        const N = 18;
+        ctx.lineWidth = 1 / sc;
+        ctx.strokeStyle = 'rgba(180,80,90,0.22)';
+        for (let i = 0; i < N; i++) {
+          const seed = i * 1.7;
+          const px = frac(seed) * W;
+          const py = frac(seed * 1.7) * H;
+          const r = 30 + 20 * frac(seed * 0.31);
+          const wob = Math.sin(t * 0.4 + seed) * 0.05;
+          ctx.beginPath();
+          for (let j = 0; j <= 6; j++) {
+            const a = j * Math.PI / 3 + seed + wob;
+            const x = px + Math.cos(a) * r, y = py + Math.sin(a) * r;
+            if (j === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+          }
+          ctx.closePath(); ctx.stroke();
+        }
+        break;
+      }
+      case 'matrix': {
+        ctx.strokeStyle = 'rgba(255,200,140,0.10)';
+        ctx.lineWidth = 1 / sc;
+        const step = 28;
+        for (let x = 0; x < W; x += step) {
+          const wob = Math.sin((x + t * 30) * 0.05) * 6;
+          ctx.beginPath(); ctx.moveTo(x + wob, 0); ctx.lineTo(x - wob, H); ctx.stroke();
+        }
+        // Subtle horizontal cross-ties
+        ctx.strokeStyle = 'rgba(255,200,140,0.06)';
+        for (let y = 40; y < H; y += 80) {
+          ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+        }
+        break;
+      }
+      case 'pulse': {
+        const cx = W / 2, cy = H / 2;
+        ctx.strokeStyle = 'rgba(255,80,90,0.22)';
+        ctx.lineWidth = 2 / sc;
+        for (let i = 0; i < 5; i++) {
+          const phase = ((t * 0.6 + i * 0.2) % 1);
+          const r = phase * Math.max(W, H) * 0.55;
+          const a = 1 - phase;
+          ctx.globalAlpha = a * 0.6;
+          ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'villi': {
+        ctx.fillStyle = 'rgba(220,140,140,0.20)';
+        const N = 24;
+        for (let i = 0; i < N; i++) {
+          const x = (i + 0.5) * W / N;
+          const wob = Math.sin(t * 1.4 + i * 0.7) * 5;
+          const len = 30 + 12 * Math.sin(t * 1.0 + i);
+          ctx.beginPath();
+          ctx.ellipse(x + wob, len * 0.5, 11, len, 0, 0, Math.PI * 2); ctx.fill();
+          ctx.beginPath();
+          ctx.ellipse(x - wob, H - len * 0.5, 11, len, 0, 0, Math.PI * 2); ctx.fill();
+        }
+        break;
+      }
+      case 'alveoli': {
+        ctx.strokeStyle = 'rgba(140,180,230,0.30)';
+        ctx.lineWidth = 1 / sc;
+        const N = 36;
+        for (let i = 0; i < N; i++) {
+          const seed = i * 2.31;
+          const px = frac(seed) * W;
+          const py = frac(seed * 1.31) * H;
+          const r = 20 + 16 * Math.abs(Math.sin(t * 0.6 + seed));
+          ctx.fillStyle = 'rgba(180,210,255,0.18)';
+          ctx.beginPath(); ctx.arc(px, py, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+        break;
+      }
+      case 'neurons': {
+        const N = 16;
+        ctx.lineWidth = 1.5 / sc;
+        for (let i = 0; i < N; i++) {
+          const seed = i * 1.7;
+          const x1 = frac(seed) * W, y1 = frac(seed * 1.31) * H;
+          const x2 = frac(seed * 2.3) * W, y2 = frac(seed * 1.7) * H;
+          const flash = (Math.sin(t * 2 + seed) + 1) / 2;
+          ctx.strokeStyle = `rgba(255,210,255,${0.10 + flash * 0.30})`;
+          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+          // Glowing nodes
+          ctx.fillStyle = `rgba(255,230,255,${0.20 + flash * 0.5})`;
+          ctx.beginPath(); ctx.arc(x1, y1, 3 / sc + flash * 2 / sc, 0, Math.PI * 2); ctx.fill();
+        }
+        break;
+      }
+      case 'tubules': {
+        ctx.strokeStyle = 'rgba(255,150,120,0.22)';
+        ctx.lineWidth = 2 / sc;
+        const N = 12;
+        for (let i = 0; i < N; i++) {
+          const seed = i * 1.9;
+          const x1 = frac(seed) * W;
+          const cyy = frac(seed * 1.7) * H;
+          ctx.beginPath();
+          ctx.moveTo(x1, 0);
+          ctx.bezierCurveTo(
+            x1 + 60 + 30 * Math.sin(t + seed), cyy * 0.4,
+            x1 - 60 - 30 * Math.cos(t + seed), cyy * 0.7,
+            x1, H
+          );
+          ctx.stroke();
+        }
+        break;
+      }
+      case 'hair': {
+        ctx.strokeStyle = 'rgba(120,80,40,0.45)';
+        ctx.lineWidth = 1.2 / sc;
+        const N = 56;
+        for (let i = 0; i < N; i++) {
+          const seed = i * 1.3;
+          const px = frac(seed) * W;
+          const py = frac(seed * 1.71) * H;
+          const len = 22 + 12 * frac(seed * 0.7);
+          const wob = Math.sin(t * 1.0 + seed) * 0.4;
+          const tipX = px + Math.sin(wob) * len;
+          const tipY = py - Math.cos(wob) * len;
+          ctx.beginPath();
+          ctx.moveTo(px, py);
+          ctx.quadraticCurveTo(px + Math.sin(wob) * len * 0.5, py - len * 0.5, tipX, tipY);
+          ctx.stroke();
+          // Follicle dot
+          ctx.fillStyle = 'rgba(60,30,15,0.6)';
+          ctx.beginPath(); ctx.arc(px, py, 2 / sc, 0, Math.PI * 2); ctx.fill();
+        }
+        break;
+      }
+    }
+  }
+
   function drawBackground(ts) {
     const theme = currentTheme();
     const bg = theme.bg;
@@ -1040,6 +1305,9 @@
       }
       ctx.restore();
     }
+
+    // Anatomy decor — drawn under the spots so the light wash reads on top.
+    if (bg.decor) drawAnatomyDecor(ts, bg.decor, wx, wy, ww, wh);
 
     // Cyber Grid lines (drawn before the spots so spots glow on top)
     if (bg.kind === 'cybergrid') {
