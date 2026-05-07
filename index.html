@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no" />
+  <title>Microbes</title>
+  <link rel="stylesheet" href="assets/styles.css" />
+</head>
+<body>
+  <canvas id="stage"></canvas>
+
+  <button id="gear" type="button" aria-label="Settings" title="Settings">
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <path fill="currentColor" d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9.4 4.9-.05.6 2.05 1.6-2 3.46-2.42-.97a7.7 7.7 0 0 1-1.04.6l-.36 2.57h-4l-.36-2.57a7.7 7.7 0 0 1-1.04-.6l-2.42.97-2-3.46L9.8 13.5a7.6 7.6 0 0 1 0-3l-2.05-1.6 2-3.46 2.42.97c.33-.23.68-.43 1.04-.6L13.58 3h4l.36 2.57c.36.17.71.37 1.04.6l2.42-.97 2 3.46-2.05 1.6c.06.4.06.8.05 1.24Z"/>
+    </svg>
+  </button>
+
+  <div id="settings" class="hidden" role="dialog" aria-label="Settings" aria-modal="false">
+    <div class="settings-backdrop" data-close></div>
+    <aside class="settings-panel">
+      <header>
+        <h2>Settings</h2>
+        <button type="button" class="close" data-close aria-label="Close">&times;</button>
+      </header>
+
+      <section>
+        <h3>Split mode</h3>
+        <label><input type="radio" name="splitMode" value="pushApart" /> Push apart with momentum</label>
+        <label><input type="radio" name="splitMode" value="bondDrift" /> Bond, then drift</label>
+        <label><input type="radio" name="splitMode" value="fixedGrid" /> Fixed grid</label>
+      </section>
+
+      <section>
+        <h3>Population</h3>
+        <label>Max cells <span id="maxCellsVal" class="val"></span>
+          <input type="range" id="maxCells" min="2" max="128" step="1" />
+        </label>
+        <label>Auto-split (s) <span id="autoVal" class="val"></span>
+          <input type="range" id="autoSplitSeconds" min="2" max="30" step="1" />
+        </label>
+      </section>
+
+      <section>
+        <h3>Look</h3>
+        <label>Background flow <span id="bgVal" class="val"></span>
+          <input type="range" id="bgFlowSpeed" min="0" max="2" step="0.05" />
+        </label>
+        <label>Outline px <span id="outVal" class="val"></span>
+          <input type="range" id="outlinePx" min="1" max="6" step="1" />
+        </label>
+        <label><input type="checkbox" id="showDebugField" /> Show metaball field</label>
+      </section>
+
+      <section class="actions">
+        <button type="button" id="resetSim">Reset simulation</button>
+      </section>
+    </aside>
+  </div>
+
+  <script src="assets/main.js"></script>
+</body>
+</html>

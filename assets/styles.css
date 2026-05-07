@@ -1,0 +1,150 @@
+:root {
+  color-scheme: dark;
+  --bg: #1a060c;
+  --ink: #fff5f0;
+  --panel: #1c0710e6;
+  --accent: #ff7a93;
+  --accent-ink: #2a0b14;
+  --line: #ffffff22;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+#gear {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid #000;
+  background: var(--accent);
+  color: var(--accent-ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 4px 12px #0008;
+  z-index: 10;
+  transition: transform 120ms ease;
+}
+#gear:hover { transform: rotate(20deg); }
+#gear:active { transform: rotate(40deg) scale(0.95); }
+
+#settings {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: auto;
+}
+#settings.hidden { pointer-events: none; }
+
+.settings-backdrop {
+  position: absolute;
+  inset: 0;
+  background: #0008;
+  opacity: 1;
+  transition: opacity 200ms ease;
+}
+#settings.hidden .settings-backdrop { opacity: 0; }
+
+.settings-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 92vw);
+  background: var(--panel);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  border-left: 2px solid #000;
+  padding: 16px 20px;
+  overflow-y: auto;
+  transform: translateX(0);
+  transition: transform 240ms cubic-bezier(.2,.8,.2,1);
+  box-shadow: -8px 0 24px #0008;
+}
+#settings.hidden .settings-panel { transform: translateX(100%); }
+
+.settings-panel header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.settings-panel h2 {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+}
+.settings-panel .close {
+  background: none;
+  border: 0;
+  color: var(--ink);
+  font-size: 24px;
+  width: 32px;
+  height: 32px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.settings-panel .close:hover { background: #ffffff14; }
+
+.settings-panel section {
+  border-top: 1px solid var(--line);
+  padding: 12px 0;
+}
+.settings-panel h3 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #ffd0d8aa;
+}
+.settings-panel label {
+  display: block;
+  margin: 6px 0;
+  font-size: 13px;
+}
+.settings-panel input[type="range"] {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  accent-color: var(--accent);
+}
+.settings-panel .val {
+  float: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.actions { text-align: right; }
+#resetSim {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: 2px solid #000;
+  padding: 8px 14px;
+  font-weight: 700;
+  border-radius: 8px;
+  cursor: pointer;
+}
+#resetSim:hover { filter: brightness(1.05); }
+#resetSim:active { transform: translateY(1px); }
