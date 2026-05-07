@@ -34,6 +34,12 @@
       </section>
 
       <section>
+        <h3>Splitting</h3>
+        <label><input type="checkbox" id="splitOnTap" /> Split on tap</label>
+        <label><input type="checkbox" id="randomSplit" /> Random splitting</label>
+      </section>
+
+      <section>
         <h3>Split mode</h3>
         <label><input type="radio" name="splitMode" value="pushApart" /> Push apart with momentum</label>
         <label><input type="radio" name="splitMode" value="bondDrift" /> Bond, then drift</label>
@@ -51,6 +57,19 @@
       </section>
 
       <section>
+        <h3>Physics</h3>
+        <label>Friction <span id="frictionVal" class="val"></span>
+          <input type="range" id="friction" min="0" max="1" step="0.01" />
+        </label>
+        <label>Bounce <span id="bounceVal" class="val"></span>
+          <input type="range" id="bounce" min="0" max="1" step="0.01" />
+        </label>
+        <label>Throw strength <span id="throwVal" class="val"></span>
+          <input type="range" id="throwStrength" min="0" max="3" step="0.05" />
+        </label>
+      </section>
+
+      <section>
         <h3>Look</h3>
         <label>Background flow <span id="bgVal" class="val"></span>
           <input type="range" id="bgFlowSpeed" min="0" max="2" step="0.05" />
@@ -58,6 +77,7 @@
         <label>Outline px <span id="outVal" class="val"></span>
           <input type="range" id="outlinePx" min="1" max="10" step="1" />
         </label>
+        <label><input type="checkbox" id="showFPS" /> Show FPS</label>
         <label><input type="checkbox" id="showDebugField" /> Show metaball field</label>
       </section>
 
@@ -66,6 +86,34 @@
       </section>
     </aside>
   </div>
+
+  <button id="help" class="fab" type="button" aria-label="Help" title="Help">?</button>
+  <button id="palette" class="fab" type="button" aria-label="Add cell" title="Add a cell">+</button>
+  <button id="reload" class="fab" type="button" aria-label="Reload" title="Hard reload">⟳</button>
+
+  <div id="helpDialog" class="dialog hidden" role="dialog" aria-label="Cell help">
+    <div class="dialog-backdrop" data-close></div>
+    <aside class="dialog-panel">
+      <header>
+        <h2>Cells of the immune system</h2>
+        <button type="button" class="close" data-close aria-label="Close">&times;</button>
+      </header>
+      <ul id="cellList" class="cell-list"></ul>
+    </aside>
+  </div>
+
+  <div id="paletteDialog" class="dialog hidden" role="dialog" aria-label="Add cell">
+    <div class="dialog-backdrop" data-close></div>
+    <aside class="dialog-panel">
+      <header>
+        <h2>Add a cell</h2>
+        <button type="button" class="close" data-close aria-label="Close">&times;</button>
+      </header>
+      <div id="cellGrid" class="cell-grid"></div>
+    </aside>
+  </div>
+
+  <div id="fps" aria-hidden="true"></div>
 
   <div id="build" aria-hidden="true"></div>
 
