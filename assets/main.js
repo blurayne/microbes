@@ -520,6 +520,7 @@
       alarmTarget: null,
       alarmTimer: 0,
       category: (CELL_TYPES[t] && CELL_TYPES[t].category) || 'good',
+      nextBlink: performance.now() + 1500 + Math.random() * 4500,
     };
   }
 
@@ -1746,6 +1747,172 @@
   function frac(v) { return v - Math.floor(v); }
 
   // ---------- Nuclei ----------
+  // ---------- Cartoon faces ----------
+  // Per-type face configs. Eyes / pupils sized as a fraction of cell.r.
+  // Mouths: smile / frown / snarl / fangs / tongue / drool / none.
+  const FACE = {
+    default:    { eyes: 2, eyeR: 0.18, eyeY: -0.10, pupilR: 0.07, mouth: 'smile' },
+    // Good guys default smile; ignore individual overrides for now.
+    macrophage: { eyes: 2, eyeR: 0.18, eyeY: -0.06, pupilR: 0.07, mouth: 'smile' },
+    nk:         { eyes: 2, eyeR: 0.16, eyeY: -0.10, pupilR: 0.06, mouth: 'snarl' },
+    mast:       { eyes: 2, eyeR: 0.14, eyeY: -0.08, pupilR: 0.05, mouth: 'smile' },
+    platelet:   { eyes: 0,                                          mouth: 'none' },
+    // Baddies — meaner expressions.
+    virus:      { eyes: 2, eyeR: 0.16, eyeY: -0.12, pupilR: 0.06, mouth: 'fangs' },
+    germ:       { eyes: 2, eyeR: 0.16, eyeY: -0.10, pupilR: 0.06, mouth: 'snarl' },
+    bacterium:  { eyes: 1, eyeR: 0.18, eyeY: -0.06, pupilR: 0.07, mouth: 'tongue' },
+    amoebaP:    { eyes: 2, eyeR: 0.15, eyeY: -0.06, pupilR: 0.06, mouth: 'fangs' },
+    slime:      { eyes: 2, eyeR: 0.18, eyeY: -0.04, pupilR: 0.07, mouth: 'drool' },
+    mite:       { eyes: 2, eyeR: 0.13, eyeY: -0.10, pupilR: 0.05, mouth: 'snarl' },
+    spore:      { eyes: 1, eyeR: 0.20, eyeY: -0.06, pupilR: 0.08, mouth: 'frown' },
+    toxin:      { eyes: 0,                                          mouth: 'none' },
+  };
+
+  function drawCartoonFaces(shapes, t) {
+    if (!S.cartoon || shapes.length === 0) return;
+    withCameraCtx(() => {
+      const theme = currentTheme();
+      const now = performance.now();
+      const lw = Math.max(1.5, S.outlinePx * 0.6) / camera.scale;
+
+      for (const s of shapes) {
+        const c = s.cell;
+        const cfg = FACE[c.type] || FACE.default;
+        if (!cfg.eyes && cfg.mouth === 'none') continue;
+
+        // Blink animation: when nextBlink fires, eyes squint for ~120ms then re-arm.
+        if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
+        const blinkEnd = c.nextBlink - (3000 + 3500); // start of blink in worst case approx
+        const blinking = (c.nextBlink - now) < 120 && (c.nextBlink - now) > 0;
+
+        const cx = c.x;
+        const cy = c.y;
+
+        // Pupils look toward velocity (or alarmTarget if alarmed)
+        let lookX = c.vx, lookY = c.vy;
+        if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
+          lookX = c.alarmTarget.x - cx;
+          lookY = c.alarmTarget.y - cy;
+        }
+        const lm = Math.hypot(lookX, lookY) || 1;
+
+        ctx.save();
+        ctx.lineWidth = lw;
+        ctx.strokeStyle = theme.outline.color;
+
+        if (cfg.eyes >= 1) {
+          const eyeR = c.r * cfg.eyeR;
+          const eyeY = cy + c.r * cfg.eyeY;
+          const pupilR = c.r * cfg.pupilR;
+          const pupilOff = eyeR * 0.45;
+          const pdx = (lookX / lm) * pupilOff;
+          const pdy = (lookY / lm) * pupilOff;
+          const eyeXs = cfg.eyes === 2
+            ? [cx - c.r * 0.22, cx + c.r * 0.22]
+            : [cx];
+          for (const ex of eyeXs) {
+            // Eye white
+            ctx.fillStyle = '#fff';
+            ctx.beginPath();
+            if (blinking) {
+              // Squint: thin horizontal slit
+              ctx.ellipse(ex, eyeY, eyeR, eyeR * 0.12, 0, 0, Math.PI * 2);
+            } else {
+              ctx.arc(ex, eyeY, eyeR, 0, Math.PI * 2);
+            }
+            ctx.fill();
+            ctx.stroke();
+            // Pupil
+            if (!blinking) {
+              ctx.fillStyle = '#101218';
+              ctx.beginPath();
+              ctx.arc(ex + pdx, eyeY + pdy, pupilR, 0, Math.PI * 2);
+              ctx.fill();
+              // Glint
+              ctx.fillStyle = 'rgba(255,255,255,0.85)';
+              ctx.beginPath();
+              ctx.arc(ex + pdx - pupilR * 0.35, eyeY + pdy - pupilR * 0.35, pupilR * 0.30, 0, Math.PI * 2);
+              ctx.fill();
+            }
+          }
+        }
+
+        // Mouth
+        if (cfg.mouth && cfg.mouth !== 'none') {
+          const mY = cy + c.r * 0.18;
+          const mW = c.r * 0.34;
+          const cc = cellColors(c);
+          ctx.lineWidth = lw * 1.3;
+          ctx.strokeStyle = cc.nucleus;
+          ctx.fillStyle = cc.nucleus;
+          if (cfg.mouth === 'smile') {
+            ctx.beginPath();
+            ctx.arc(cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI);
+            ctx.stroke();
+          } else if (cfg.mouth === 'frown') {
+            ctx.beginPath();
+            ctx.arc(cx, mY + mW * 0.6, mW, 1.12 * Math.PI, 1.88 * Math.PI);
+            ctx.stroke();
+          } else if (cfg.mouth === 'snarl') {
+            // zig-zag teeth
+            ctx.beginPath();
+            const N = 5;
+            for (let i = 0; i <= N; i++) {
+              const x = cx - mW + (2 * mW) * (i / N);
+              const y = mY + (i % 2 === 0 ? 0 : mW * 0.18);
+              if (i === 0) ctx.moveTo(x, y);
+              else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+          } else if (cfg.mouth === 'fangs') {
+            // Open mouth + two fangs
+            ctx.beginPath();
+            ctx.ellipse(cx, mY, mW, mW * 0.45, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = '#fff';
+            // Fangs
+            ctx.beginPath();
+            ctx.moveTo(cx - mW * 0.55, mY - mW * 0.20);
+            ctx.lineTo(cx - mW * 0.40, mY + mW * 0.45);
+            ctx.lineTo(cx - mW * 0.25, mY - mW * 0.20);
+            ctx.closePath();
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(cx + mW * 0.25, mY - mW * 0.20);
+            ctx.lineTo(cx + mW * 0.40, mY + mW * 0.45);
+            ctx.lineTo(cx + mW * 0.55, mY - mW * 0.20);
+            ctx.closePath();
+            ctx.fill();
+          } else if (cfg.mouth === 'tongue') {
+            ctx.beginPath();
+            ctx.ellipse(cx, mY, mW, mW * 0.40, 0, 0, Math.PI * 2);
+            ctx.fill();
+            // Tongue wags
+            const wag = Math.sin(t * 5 + c.phase) * mW * 0.18;
+            ctx.fillStyle = '#ff8aa0';
+            ctx.beginPath();
+            ctx.ellipse(cx + wag, mY + mW * 0.30, mW * 0.32, mW * 0.22, 0, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (cfg.mouth === 'drool') {
+            ctx.beginPath();
+            ctx.arc(cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI);
+            ctx.stroke();
+            // Drip below the smile
+            const dripPhase = ((t * 0.6 + c.phase) % 1);
+            const dripY = mY + mW * 0.25 + dripPhase * mW * 0.8;
+            const dripA = 1 - dripPhase;
+            ctx.fillStyle = `rgba(120, 220, 130, ${dripA})`;
+            ctx.beginPath();
+            ctx.ellipse(cx + mW * 0.25, dripY, mW * 0.10, mW * 0.16, 0, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
+        ctx.restore();
+      }
+    });
+  }
+
   // ---------- Selection ring + flash + target marker ----------
   function drawSelection(shapes, t) {
     const anyFlash = shapes.some(s => s.cell.flash);
@@ -2053,6 +2220,7 @@
     }
     drawNuclei(ts);
     drawSelection(shapes, t);
+    drawCartoonFaces(shapes, t);
     if (S.showDebugField) drawDebug(shapes);
 
     updateFPS(dt, ts);
@@ -2177,6 +2345,7 @@
   }
   bindCheckbox('splitOnTap', 'splitOnTap');
   bindCheckbox('randomSplit', 'randomSplit');
+  bindCheckbox('cartoon', 'cartoon');
   bindCheckbox('showFPS', 'showFPS', (on) => {
     const el = document.getElementById('fps');
     if (el) el.classList.toggle('on', !!on);
