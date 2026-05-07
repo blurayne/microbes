@@ -29,11 +29,6 @@
       </section>
 
       <section>
-        <h3>Cell types</h3>
-        <ul id="cellTypeList" class="checks"></ul>
-      </section>
-
-      <section>
         <h3>Splitting</h3>
         <label><input type="checkbox" id="splitOnTap" /> Split on tap</label>
         <label><input type="checkbox" id="randomSplit" /> Random splitting</label>
@@ -71,12 +66,12 @@
       <section>
         <h3>Cell blending</h3>
         <select id="blendMode">
-          <option value="source-over">Replace (default)</option>
+          <option value="source-over">None</option>
+          <option value="overlay">Overlay (default)</option>
           <option value="multiply">Multiply</option>
           <option value="darken">Darken</option>
           <option value="lighter">Add (Lighter)</option>
           <option value="screen">Screen</option>
-          <option value="overlay">Overlay</option>
           <option value="soft-light">Soft light</option>
           <option value="hard-light">Hard light</option>
           <option value="color-burn">Color burn</option>

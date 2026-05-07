@@ -21,7 +21,7 @@
     bounce: 0.6,
     throwStrength: 0.35,
     wobbleAmp: 0.13,
-    blendMode: 'lighter',     // smooth-fade default — overlapping cells blend additively
+    blendMode: 'overlay',     // overlapping cells get a perceptual overlay blend by default
   };
 
   function loadSettings() {
@@ -44,7 +44,10 @@
       // Drop the obsolete `fixedGrid` split-mode value
       if (parsed.splitMode === 'fixedGrid') parsed.splitMode = 'bondDrift';
       // Drop themes no longer in the registry (hard-coded list to avoid TDZ on THEMES)
-      const knownThemes = ['petriDish','bloodstream','neonBloom','aquaticGlow'];
+      const knownThemes = ['petriDish','bloodstream','neonBloom','aquaticGlow',
+        'crayonBox','cartoonNight','glowStick','bedtime',
+        'spectrum','aurora','prism','pride',
+        'deepSpace','volcano','forestFloor','cyberGrid'];
       if (parsed.theme && !knownThemes.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
       return { ...DEFAULTS, ...parsed };
     } catch { return { ...DEFAULTS }; }
@@ -85,6 +88,84 @@
       outline: { color: '#06122a', defaultPx: 3, glow: '#5ce7ff', glowBlur: 18 },
       ui: { panelAccent: '#5ce7ff' },
     },
+
+    // ----- Dark themes — children-colour palettes -----
+    crayonBox: {
+      label: 'Crayon Box',
+      bg: { kind: 'flat', base: '#0a0612', spotColors: ['#ff4d4d','#ffd84d','#4d8dff','#4dd87a'], spotCount: 6, vignette: 0.25 },
+      outline: { color: '#000000', defaultPx: 5 },
+      ui: { panelAccent: '#ffd84d' },
+    },
+    cartoonNight: {
+      label: 'Cartoon Night',
+      bg: { kind: 'flat', base: '#0c1a3a', spotColors: ['#ff7ab8','#ffb84d','#5fe3d2','#ff5d6e'], spotCount: 6, vignette: 0.30 },
+      outline: { color: '#04081a', defaultPx: 5 },
+      ui: { panelAccent: '#5fe3d2' },
+    },
+    glowStick: {
+      label: 'Glow Stick',
+      bg: { kind: 'flat', base: '#000000', spotColors: ['#ffea00','#ff00aa','#00ff88','#00d8ff'], spotCount: 7, vignette: 0.50 },
+      outline: { color: '#000000', defaultPx: 3, glow: '#ffffff', glowBlur: 12 },
+      ui: { panelAccent: '#ffea00' },
+    },
+    bedtime: {
+      label: 'Bedtime Stories',
+      bg: { kind: 'gradient', topColor: '#0e0a2c', botColor: '#1c123e', spotColors: ['#fff4c2','#ffe0a3','#cdbcff','#bff5ff'], spotCount: 8, vignette: 0.45 },
+      outline: { color: '#0c0a22', defaultPx: 3 },
+      ui: { panelAccent: '#ffe0a3' },
+    },
+
+    // ----- Dark themes — rainbow palettes -----
+    spectrum: {
+      label: 'Spectrum',
+      bg: { kind: 'flat', base: '#000000', spotColors: ['#ff003c','#ff8a00','#ffd600','#3ecf6c','#3da6ff','#a855f7'], spotCount: 6, vignette: 0.30 },
+      outline: { color: '#000000', defaultPx: 4 },
+      ui: { panelAccent: '#a855f7' },
+    },
+    aurora: {
+      label: 'Aurora',
+      bg: { kind: 'gradient', topColor: '#03081a', botColor: '#000000', spotColors: ['#3ecf6c','#5cd6ff','#a855f7','#ff5cb8','#ffe070'], spotCount: 7, vignette: 0.40 },
+      outline: { color: '#000000', defaultPx: 3, glow: '#5cd6ff', glowBlur: 16 },
+      ui: { panelAccent: '#3ecf6c' },
+    },
+    prism: {
+      label: 'Prism',
+      bg: { kind: 'flat', base: '#04020a', spotColors: ['#ff3030','#ff8800','#ffd700','#00d068','#0088ff','#7000ff'], spotCount: 6, vignette: 0.50 },
+      outline: { color: '#000000', defaultPx: 4 },
+      ui: { panelAccent: '#ff8800' },
+    },
+    pride: {
+      label: 'Pride',
+      bg: { kind: 'gradient', topColor: '#15082a', botColor: '#04010d', spotColors: ['#e40303','#ff8c00','#ffed00','#008026','#004cff','#732982'], spotCount: 6, vignette: 0.35 },
+      outline: { color: '#000000', defaultPx: 4 },
+      ui: { panelAccent: '#ff8c00' },
+    },
+
+    // ----- Misc dark themes -----
+    deepSpace: {
+      label: 'Deep Space',
+      bg: { kind: 'flat', base: '#000005', spotColors: ['#ffffff','#a0c0ff','#ffe0a0'], spotCount: 9, vignette: 0.60 },
+      outline: { color: '#000000', defaultPx: 3, glow: '#ffffff', glowBlur: 8 },
+      ui: { panelAccent: '#a0c0ff' },
+    },
+    volcano: {
+      label: 'Volcano',
+      bg: { kind: 'gradient', topColor: '#3b0a05', botColor: '#0a0202', spotColors: ['#ff5a00','#ff9933','#ffe066','#ffaa44'], spotCount: 7, vignette: 0.50 },
+      outline: { color: '#1a0606', defaultPx: 4, glow: '#ff7530', glowBlur: 14 },
+      ui: { panelAccent: '#ff5a00' },
+    },
+    forestFloor: {
+      label: 'Forest Floor',
+      bg: { kind: 'flat', base: '#091206', spotColors: ['#a8d250','#ffd24d','#5ad27a','#cfe07f'], spotCount: 6, vignette: 0.45 },
+      outline: { color: '#04080d', defaultPx: 4 },
+      ui: { panelAccent: '#a8d250' },
+    },
+    cyberGrid: {
+      label: 'Cyber Grid',
+      bg: { kind: 'cybergrid', base: '#000010', spotColors: ['#00ff88','#ff00aa','#00d8ff'], spotCount: 4, vignette: 0.30, gridColor: 'rgba(0,255,170,0.18)', gridStep: 48 },
+      outline: { color: '#000000', defaultPx: 3, glow: '#00ff88', glowBlur: 16 },
+      ui: { panelAccent: '#00ff88' },
+    },
   };
 
   function currentTheme() {
@@ -109,6 +190,7 @@
       granules: 28,
       splitFactor: 1.0, brownianMul: 1.0,
       move: { accel: 280, maxSpeed: 130, weight: 1.0,  friction: 0.9  },
+      field: { blur: 8,  contrast: 16, wobbleMul: 1.2 },
       colors: { cytoTop: '#ffd28a', cytoBot: '#e58a26', nucleus: '#5a2a05', nucleusHi: '#fff0c8', accent: '#9c4513' },
       description: 'First responder; engulfs bacteria via phagocytosis. The most abundant white blood cell.',
     },
@@ -120,6 +202,7 @@
       granules: 6,
       splitFactor: 1.0, brownianMul: 1.0,
       move: { accel: 200, maxSpeed:  95, weight: 1.0,  friction: 1.0  },
+      field: { blur: 6,  contrast: 20, wobbleMul: 0.8 },
       colors: { cytoTop: '#cadcfb', cytoBot: '#6d8df0', nucleus: '#1d1c5a', nucleusHi: '#dee8ff', accent: '#2b4d8e' },
       description: 'Circulating sentinel that matures into macrophages or dendritic cells once it enters tissue.',
     },
@@ -131,6 +214,7 @@
       granules: 60,
       splitFactor: 1.2, brownianMul: 0.7,
       move: { accel: 100, maxSpeed:  50, weight: 1.5,  friction: 1.2  },
+      field: { blur: 5,  contrast: 22, wobbleMul: 0.5 },
       colors: { cytoTop: '#c9efd5', cytoBot: '#54a877', nucleus: '#0f4a2e', nucleusHi: '#e6fff0', accent: '#1f6b3f' },
       description: 'Tissue-resident sentinel; releases histamine to trigger inflammation and allergic responses.',
     },
@@ -142,6 +226,7 @@
       granules: 8,
       splitFactor: 1.1, brownianMul: 1.1,
       move: { accel: 320, maxSpeed: 150, weight: 0.9,  friction: 0.85 },
+      field: { blur: 5,  contrast: 24, wobbleMul: 1.1 },
       colors: { cytoTop: '#cfd0f7', cytoBot: '#7172c6', nucleus: '#291b5e', nucleusHi: '#eaeaff', accent: '#3f3f8c' },
       description: 'Patrols for virus-infected and tumour cells; kills on contact without prior sensitisation.',
     },
@@ -153,6 +238,7 @@
       granules: 12,
       splitFactor: 1.4, brownianMul: 0.6,
       move: { accel: 140, maxSpeed:  70, weight: 1.7,  friction: 1.1  },
+      field: { blur: 10, contrast: 14, wobbleMul: 1.5 },
       colors: { cytoTop: '#fbc6de', cytoBot: '#d36699', nucleus: '#3a1029', nucleusHi: '#ffe0ee', accent: '#872a59' },
       description: '"Big eater" — long-lived phagocyte that engulfs pathogens and presents antigens to T cells.',
     },
@@ -164,6 +250,7 @@
       granules: 0,
       splitFactor: 1.3, brownianMul: 0.8,
       move: { accel: 220, maxSpeed: 110, weight: 1.0,  friction: 0.95 },
+      field: { blur: 8,  contrast: 18, wobbleMul: 0.9 },
       colors: { cytoTop: '#bcdcf6', cytoBot: '#4d8fcf', nucleus: '#102544', nucleusHi: '#dff0ff', accent: '#1d3d68' },
       description: 'Antigen-presenting courier; samples invaders and shows them to T cells in lymph nodes.',
     },
@@ -175,6 +262,7 @@
       granules: 22,
       splitFactor: 1.0, brownianMul: 1.0,
       move: { accel: 180, maxSpeed:  90, weight: 1.0,  friction: 1.0  },
+      field: { blur: 5,  contrast: 22, wobbleMul: 0.6 },
       colors: { cytoTop: '#fbcfdc', cytoBot: '#d97aa1', nucleus: '#410d2e', nucleusHi: '#ffe1ec', accent: '#4a0d31' },
       description: 'Circulating granulocyte; releases histamine and heparin to reinforce inflammation.',
     },
@@ -186,6 +274,7 @@
       granules: 4,
       splitFactor: 0.9, brownianMul: 1.6,
       move: { accel: 360, maxSpeed: 170, weight: 0.6,  friction: 0.85 },
+      field: { blur: 3,  contrast: 30, wobbleMul: 0.4 },
       colors: { cytoTop: '#ffe27c', cytoBot: '#d7a614', nucleus: '#4d2f02', nucleusHi: '#fff5c4', accent: '#8a5e0a' },
       description: 'Tiny cell fragment that clots blood at injuries and helps recruit immune cells.',
     },
@@ -197,6 +286,7 @@
       granules: 0,
       splitFactor: 1.2, brownianMul: 0.9,
       move: { accel: 300, maxSpeed: 140, weight: 0.95, friction: 0.9  },
+      field: { blur: 4,  contrast: 26, wobbleMul: 0.5 },
       colors: { cytoTop: '#d6cdf8', cytoBot: '#8d7be0', nucleus: '#2a134d', nucleusHi: '#efeaff', accent: '#4d2c8c' },
       description: 'Adaptive killer / coordinator; recognises specific antigens and kills infected cells.',
     },
@@ -208,6 +298,7 @@
       granules: 0,
       splitFactor: 1.2, brownianMul: 0.9,
       move: { accel: 240, maxSpeed: 110, weight: 1.0,  friction: 1.0  },
+      field: { blur: 4,  contrast: 26, wobbleMul: 0.5 },
       colors: { cytoTop: '#fcc9cc', cytoBot: '#df8189', nucleus: '#4a1014', nucleusHi: '#ffe1e3', accent: '#8a323a' },
       description: 'Adaptive antibody factory; secretes antibodies tagged to specific pathogens.',
     },
@@ -219,6 +310,7 @@
       granules: 18,
       splitFactor: 1.0, brownianMul: 1.0,
       move: { accel: 260, maxSpeed: 120, weight: 0.95, friction: 0.95 },
+      field: { blur: 5,  contrast: 22, wobbleMul: 0.6 },
       colors: { cytoTop: '#fcc8a3', cytoBot: '#e0855a', nucleus: '#4d1d09', nucleusHi: '#ffe2cd', accent: '#8c3d18' },
       description: 'Anti-parasite specialist; key in allergic responses, releases toxic granule contents.',
     },
@@ -759,9 +851,27 @@
       ctx.restore();
     }
 
+    // Cyber Grid lines (drawn before the spots so spots glow on top)
+    if (bg.kind === 'cybergrid') {
+      ctx.save();
+      const step = bg.gridStep || 48;
+      ctx.strokeStyle = bg.gridColor || 'rgba(0,255,170,0.15)';
+      ctx.lineWidth = 1 / camera.scale;
+      // Snap grid to world units
+      const x0 = Math.floor(wx / step) * step;
+      const y0 = Math.floor(wy / step) * step;
+      ctx.beginPath();
+      for (let x = x0; x < wx + ww + step; x += step) { ctx.moveTo(x, wy); ctx.lineTo(x, wy + wh); }
+      for (let y = y0; y < wy + wh + step; y += step) { ctx.moveTo(wx, y); ctx.lineTo(wx + ww, y); }
+      ctx.stroke();
+      ctx.restore();
+    }
+
     // Drifting light spots
     const t = ts * 0.001 * S.bgFlowSpeed;
     const count = Math.min(SPOTS.length, bg.spotCount || SPOTS.length);
+    const spotCols = Array.isArray(bg.spotColors) ? bg.spotColors : null;
+    const fallbackCol = bg.spotColor || 'rgba(255,255,255,0.10)';
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < count; i++) {
@@ -774,7 +884,8 @@
         + s.oy2 * Math.sin(t * s.w2 * 1.7 + s.phy * 1.3)) * H;
       const radius = s.r * Math.max(W, H);
       const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
-      grad.addColorStop(0, bg.spotColor);
+      const col = spotCols ? spotCols[i % spotCols.length] : fallbackCol;
+      grad.addColorStop(0, col);
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = grad;
       ctx.fillRect(wx, wy, ww, wh);
@@ -836,7 +947,8 @@
     const s = c.wobbleSeed;
     const w1 = Math.sin(t * 0.55 * c.wobbleFreq + theta * 3 + s);
     const w2 = Math.sin(t * 0.85 * c.wobbleFreq + theta * 5 + s * 1.31 + c.phase);
-    return (S.wobbleAmp || 0) * (w1 * 0.65 + w2 * 0.45);
+    const mul = (CELL_TYPES[c.type] && CELL_TYPES[c.type].field && CELL_TYPES[c.type].field.wobbleMul) || 1;
+    return (S.wobbleAmp || 0) * mul * (w1 * 0.65 + w2 * 0.45);
   }
 
   // Returns the world-space (x,y) of a vertex on the cell's outline at angle theta.
@@ -900,38 +1012,60 @@
   }
 
   function drawMetaballMask(shapes, t) {
+    // Each cell type gets its own metaball "field" (blur + contrast). Cells of
+    // the same type still merge with one another (shared polygon pass), but
+    // cells of different types render to distinct masks that are then unioned
+    // — so a soft amoeboid macrophage and a crisp T-cell never share an edge.
     const ow = off.width, oh = off.height;
     const sx = ow / W;
-
-    offCtx.setTransform(1, 0, 0, 1, 0, 0);
-    offCtx.globalCompositeOperation = 'source-over';
-    offCtx.filter = 'none';
-    offCtx.clearRect(0, 0, ow, oh);
-    offCtx.fillStyle = '#ffffff';
-
     const cs = camera.scale, ctx_ = camera.tx, cty = camera.ty;
     const N = WOBBLE_VERTS;
-    for (const s of shapes) {
-      offCtx.beginPath();
-      for (let i = 0; i <= N; i++) {
-        const theta = (i / N) * Math.PI * 2;
-        const v = shapeVertex(s, theta, t);
-        const px = (v.x * cs + ctx_) * sx;
-        const py = (v.y * cs + cty) * sx;
-        if (i === 0) offCtx.moveTo(px, py);
-        else offCtx.lineTo(px, py);
-      }
-      offCtx.closePath();
-      offCtx.fill();
-    }
 
-    // Filter pass: off → off2 (mask)
+    // Group shapes by cell.type
+    const groups = {};
+    for (const s of shapes) (groups[s.cell.type] ||= []).push(s);
+
+    // Clear the master mask
     off2Ctx.setTransform(1, 0, 0, 1, 0, 0);
     off2Ctx.globalCompositeOperation = 'copy';
-    off2Ctx.filter = 'blur(6px) contrast(20)';
-    off2Ctx.drawImage(off, 0, 0);
     off2Ctx.filter = 'none';
+    off2Ctx.clearRect(0, 0, off2.width, off2.height);
     off2Ctx.globalCompositeOperation = 'source-over';
+
+    for (const [typeKey, group] of Object.entries(groups)) {
+      const field = (CELL_TYPES[typeKey] && CELL_TYPES[typeKey].field) || { blur: 6, contrast: 20 };
+
+      // 1. Draw this group's polygons hard-white onto `off`
+      offCtx.setTransform(1, 0, 0, 1, 0, 0);
+      offCtx.globalCompositeOperation = 'source-over';
+      offCtx.filter = 'none';
+      offCtx.clearRect(0, 0, ow, oh);
+      offCtx.fillStyle = '#ffffff';
+      for (const s of group) {
+        offCtx.beginPath();
+        for (let i = 0; i <= N; i++) {
+          const theta = (i / N) * Math.PI * 2;
+          const v = shapeVertex(s, theta, t);
+          const px = (v.x * cs + ctx_) * sx;
+          const py = (v.y * cs + cty) * sx;
+          if (i === 0) offCtx.moveTo(px, py);
+          else offCtx.lineTo(px, py);
+        }
+        offCtx.closePath();
+        offCtx.fill();
+      }
+
+      // 2. Apply this type's filter in-place (off → off, with copy)
+      offCtx.globalCompositeOperation = 'copy';
+      offCtx.filter = `blur(${field.blur}px) contrast(${field.contrast})`;
+      offCtx.drawImage(off, 0, 0);
+      offCtx.filter = 'none';
+      offCtx.globalCompositeOperation = 'source-over';
+
+      // 3. Union the group mask into off2
+      off2Ctx.globalCompositeOperation = 'source-over';
+      off2Ctx.drawImage(off, 0, 0);
+    }
   }
 
   function tintMask(color) {
@@ -1665,34 +1799,7 @@
     }
   });
 
-  // Cell-type checklist
-  const cellTypeListEl = document.getElementById('cellTypeList');
-  const typeCheckboxes = {};
-  for (const [key, t] of Object.entries(CELL_TYPES)) {
-    const li = document.createElement('li');
-    const cb = document.createElement('input');
-    cb.type = 'checkbox';
-    cb.id = `type-${key}`;
-    cb.checked = S.activeTypes.includes(key);
-    typeCheckboxes[key] = cb;
-    const lbl = document.createElement('label');
-    lbl.htmlFor = cb.id;
-    lbl.textContent = t.label;
-    li.appendChild(cb);
-    li.appendChild(lbl);
-    cellTypeListEl.appendChild(li);
-
-    cb.addEventListener('change', () => {
-      const next = Object.keys(CELL_TYPES).filter(k => typeCheckboxes[k].checked);
-      if (next.length === 0) {
-        // Refuse to leave the list empty — bounce this checkbox back on
-        cb.checked = true;
-        return;
-      }
-      S.activeTypes = next;
-      saveSettings();
-    });
-  }
+  // (Cell-type checklist UI removed — all types are always active; spawn from the palette FAB.)
 
   // Populate the help dialog list (one entry per cell type).
   const cellListEl = document.getElementById('cellList');
