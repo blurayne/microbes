@@ -47,10 +47,31 @@ html, body {
   font: 700 18px/1 system-ui, sans-serif;
   transition: transform 120ms ease;
 }
-#gear   { bottom: 16px; }
-#reload { bottom: 66px; }
-#palette{ bottom: 116px; font-size: 22px; }
-#help   { bottom: 166px; }
+#gear       { bottom: 16px; }
+#reload     { bottom: 66px; }
+#palette    { bottom: 116px; font-size: 22px; }
+#paletteBad { bottom: 166px; font-size: 22px; background: #c72020; color: #fff; }
+#help       { bottom: 216px; }
+body.no-bad #paletteBad,
+body.no-bad #paletteBadDialog { display: none; }
+body.no-bad #help { bottom: 166px; }
+.cell-grid-section { margin-bottom: 14px; }
+.cell-grid-section > h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ffd0d8aa;
+}
+.cell-grid-section > .cell-grid { margin-bottom: 0; }
+.cell-list-section { margin-bottom: 14px; }
+.cell-list-section > h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ffd0d8aa;
+}
 .fab:hover, #gear:hover { transform: scale(1.06); }
 .fab:active, #gear:active { transform: scale(0.95); }
 #gear:hover { transform: rotate(20deg); }

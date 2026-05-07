@@ -29,6 +29,11 @@
       </section>
 
       <section>
+        <h3>Gameplay</h3>
+        <label><input type="checkbox" id="allowBadGuys" /> Allow pathogens</label>
+      </section>
+
+      <section>
         <h3>Splitting</h3>
         <label><input type="checkbox" id="splitOnTap" /> Split on tap</label>
         <label><input type="checkbox" id="randomSplit" /> Random splitting</label>
@@ -101,6 +106,7 @@
   </div>
 
   <button id="help" class="fab" type="button" aria-label="Help" title="Help">?</button>
+  <button id="paletteBad" class="fab fab-bad" type="button" aria-label="Add pathogen" title="Add a pathogen">✚</button>
   <button id="palette" class="fab" type="button" aria-label="Add cell" title="Add a cell">+</button>
   <button id="reload" class="fab" type="button" aria-label="Reload" title="Hard reload">⟳</button>
 
@@ -122,7 +128,18 @@
         <h2>Add a cell</h2>
         <button type="button" class="close" data-close aria-label="Close">&times;</button>
       </header>
-      <div id="cellGrid" class="cell-grid"></div>
+      <div id="cellGrid"></div>
+    </aside>
+  </div>
+
+  <div id="paletteBadDialog" class="dialog hidden" role="dialog" aria-label="Add pathogen">
+    <div class="dialog-backdrop" data-close></div>
+    <aside class="dialog-panel">
+      <header>
+        <h2>Add a pathogen</h2>
+        <button type="button" class="close" data-close aria-label="Close">&times;</button>
+      </header>
+      <div id="cellGridBad"></div>
     </aside>
   </div>
 

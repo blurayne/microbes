@@ -28,6 +28,7 @@
     speedMul: 1.0,            // global movement multiplier (range 0..3)
     cartoon: false,           // cartoon-face overlay
     lang: 'en',               // 'en' | 'de' | 'es' | 'brbn'
+    allowBadGuys: true,       // expose pathogen palette + spawn paths
   };
 
   function loadSettings() {
@@ -327,7 +328,7 @@
 
     // ---------- Bad guys ----------
     virus: {
-      label: 'Virus', category: 'bad',
+      label: 'Virus', category: 'bad', subcategory: 'virus',
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round-small' },
       decoration: { kind: 'spikesPulsing' },
@@ -339,7 +340,7 @@
       description: 'Spike-protein invader; hijacks cells to replicate inside them.',
     },
     germ: {
-      label: 'Germ', category: 'bad',
+      label: 'Germ', category: 'bad', subcategory: 'bacteria',
       body: { kind: 'lobed', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'none' },
@@ -351,7 +352,7 @@
       description: 'Generic bumpy microbe — opportunistic infector.',
     },
     bacterium: {
-      label: 'Bacterium', category: 'bad',
+      label: 'Bacterium', category: 'bad', subcategory: 'bacteria',
       body: { kind: 'oblong', aspect: 1.8 },
       nucleus: { kind: 'round-small' },
       decoration: { kind: 'flagellum' },
@@ -363,7 +364,7 @@
       description: 'Rod-shaped bacterium swimming with a whipping flagellum.',
     },
     amoebaP: {
-      label: 'Amoeba (✗)', category: 'bad',
+      label: 'Amoeba (✗)', category: 'bad', subcategory: 'parasite',
       body: { kind: 'pseudopod', aspect: 1.0 },
       nucleus: { kind: 'kidney' },
       decoration: { kind: 'tentaclesWiggling' },
@@ -375,7 +376,7 @@
       description: 'Amoeboid parasite that crawls and engulfs tissue.',
     },
     slime: {
-      label: 'Slime', category: 'bad',
+      label: 'Slime', category: 'bad', subcategory: 'fungus',
       body: { kind: 'lobed', aspect: 1.0 },
       nucleus: { kind: 'none' },
       decoration: { kind: 'drips' },
@@ -387,7 +388,7 @@
       description: 'Slimy biofilm globule; drips toxic ooze.',
     },
     mite: {
-      label: 'Mite', category: 'bad',
+      label: 'Mite', category: 'bad', subcategory: 'parasite',
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'legs' },
@@ -399,7 +400,7 @@
       description: 'Tiny scuttling bug; lots of little legs.',
     },
     spore: {
-      label: 'Spore', category: 'bad',
+      label: 'Spore', category: 'bad', subcategory: 'fungus',
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round-small' },
       decoration: { kind: 'fuzz' },
@@ -411,7 +412,7 @@
       description: 'Fungal spore — drifts on currents and seeds new growth.',
     },
     toxin: {
-      label: 'Toxin', category: 'bad',
+      label: 'Toxin', category: 'bad', subcategory: 'toxin',
       body: { kind: 'star', aspect: 1.0 },
       nucleus: { kind: 'none' },
       decoration: { kind: 'none' },
@@ -2017,11 +2018,13 @@
   const panelEl = settingsEl.querySelector('.settings-panel');
   const helpDialog = document.getElementById('helpDialog');
   const paletteDialog = document.getElementById('paletteDialog');
+  const paletteBadDialog = document.getElementById('paletteBadDialog');
   const helpBtn = document.getElementById('help');
   const paletteBtn = document.getElementById('palette');
+  const paletteBadBtn = document.getElementById('paletteBad');
   const reloadBtn = document.getElementById('reload');
-  const fabs = [gearBtn, helpBtn, paletteBtn, reloadBtn].filter(Boolean);
-  const allDialogs = [settingsEl, helpDialog, paletteDialog].filter(Boolean);
+  const fabs = [gearBtn, helpBtn, paletteBtn, paletteBadBtn, reloadBtn].filter(Boolean);
+  const allDialogs = [settingsEl, helpDialog, paletteDialog, paletteBadDialog].filter(Boolean);
 
   function openOnly(target) {
     for (const d of allDialogs) {
@@ -2043,6 +2046,13 @@
     if (paletteDialog.classList.contains('hidden')) {
       renderPaletteGrid();
       openOnly(paletteDialog);
+    } else closeAll();
+  });
+  if (paletteBadBtn) paletteBadBtn.addEventListener('click', () => {
+    if (!S.allowBadGuys) return;
+    if (paletteBadDialog.classList.contains('hidden')) {
+      renderPaletteBadGrid();
+      openOnly(paletteBadDialog);
     } else closeAll();
   });
   if (reloadBtn) reloadBtn.addEventListener('click', () => {
@@ -2118,6 +2128,12 @@
   }
   bindCheckbox('splitOnTap', 'splitOnTap');
   bindCheckbox('randomSplit', 'randomSplit');
+  bindCheckbox('allowBadGuys', 'allowBadGuys', (on) => {
+    document.body.classList.toggle('no-bad', !on);
+    if (!on && !paletteBadDialog.classList.contains('hidden')) closeAll();
+    renderHelpList();
+    renderPaletteBadGrid();
+  });
   bindCheckbox('showFPS', 'showFPS', (on) => {
     const el = document.getElementById('fps');
     if (el) el.classList.toggle('on', !!on);
@@ -2164,44 +2180,106 @@
 
   // (Cell-type checklist UI removed — all types are always active; spawn from the palette FAB.)
 
-  // Populate the help dialog list (one entry per cell type).
-  const cellListEl = document.getElementById('cellList');
-  if (cellListEl) {
-    cellListEl.innerHTML = '';
-    for (const [, t] of Object.entries(CELL_TYPES)) {
-      const li = document.createElement('li');
+  // ---------- Categories + groupings ----------
+  const PATHOGEN_GROUPS = [
+    { key: 'virus',    label: 'Viruses',   icon: '🦠', members: ['virus'] },
+    { key: 'bacteria', label: 'Bacteria',  icon: '🧫', members: ['germ', 'bacterium'] },
+    { key: 'parasite', label: 'Parasites', icon: '🪱', members: ['amoebaP', 'mite'] },
+    { key: 'fungus',   label: 'Fungi',     icon: '🍄', members: ['slime', 'spore'] },
+    { key: 'toxin',    label: 'Toxins',    icon: '☠️',  members: ['toxin'] },
+  ];
+
+  function makeTile(key, t) {
+    const tile = document.createElement('button');
+    tile.className = 'cell-tile';
+    tile.type = 'button';
+    tile.title = t.description;
+    const c = document.createElement('canvas');
+    c.width = 128; c.height = 128;
+    tile.appendChild(c);
+    const span = document.createElement('span');
+    span.textContent = t.label;
+    tile.appendChild(span);
+    tile.addEventListener('click', () => {
+      spawnAtCenter(key);
+      closeAll();
+    });
+    renderCellPreview(c, key);
+    return tile;
+  }
+
+  function appendGridSection(parent, title, entries) {
+    if (!entries.length) return;
+    const section = document.createElement('div');
+    section.className = 'cell-grid-section';
+    const h = document.createElement('h3');
+    h.textContent = title;
+    section.appendChild(h);
+    const grid = document.createElement('div');
+    grid.className = 'cell-grid';
+    for (const [key, t] of entries) grid.appendChild(makeTile(key, t));
+    section.appendChild(grid);
+    parent.appendChild(section);
+  }
+
+  function appendHelpSection(parent, title, entries) {
+    if (!entries.length) return;
+    const section = document.createElement('li');
+    section.className = 'cell-list-section';
+    section.style.listStyle = 'none';
+    const h = document.createElement('h3');
+    h.textContent = title;
+    section.appendChild(h);
+    for (const [, t] of entries) {
+      const row = document.createElement('div');
       const b = document.createElement('b');
       b.textContent = t.label;
       const span = document.createElement('span');
       span.textContent = ' ' + t.description;
-      li.appendChild(b);
-      li.appendChild(span);
-      cellListEl.appendChild(li);
+      row.appendChild(b);
+      row.appendChild(span);
+      row.style.padding = '6px 0';
+      row.style.borderTop = '1px solid var(--line)';
+      row.style.fontSize = '13px';
+      section.appendChild(row);
     }
+    parent.appendChild(section);
   }
 
-  // Palette grid: a tile per cell type, click to spawn.
+  // Populate the help dialog list, category + sub-category grouped.
+  const cellListEl = document.getElementById('cellList');
+  function renderHelpList() {
+    if (!cellListEl) return;
+    cellListEl.innerHTML = '';
+    const goodEntries = Object.entries(CELL_TYPES).filter(([, t]) => t.category === 'good');
+    appendHelpSection(cellListEl, 'Good (Immune system)', goodEntries);
+    if (S.allowBadGuys) {
+      for (const g of PATHOGEN_GROUPS) {
+        const entries = g.members.map(k => [k, CELL_TYPES[k]]).filter(([, t]) => t);
+        appendHelpSection(cellListEl, `${g.icon} ${g.label}`, entries);
+      }
+    }
+  }
+  renderHelpList();
+
+  // Palette grids: good-only + bad-only (sub-categorised by pathogen kind).
   const cellGridEl = document.getElementById('cellGrid');
+  const cellGridBadEl = document.getElementById('cellGridBad');
+
   function renderPaletteGrid() {
     if (!cellGridEl) return;
     cellGridEl.innerHTML = '';
-    for (const [key, t] of Object.entries(CELL_TYPES)) {
-      const tile = document.createElement('button');
-      tile.className = 'cell-tile';
-      tile.type = 'button';
-      tile.title = t.description;
-      const c = document.createElement('canvas');
-      c.width = 128; c.height = 128;
-      tile.appendChild(c);
-      const span = document.createElement('span');
-      span.textContent = t.label;
-      tile.appendChild(span);
-      tile.addEventListener('click', () => {
-        spawnAtCenter(key);
-        closeAll();
-      });
-      cellGridEl.appendChild(tile);
-      renderCellPreview(c, key);
+    const goodEntries = Object.entries(CELL_TYPES).filter(([, t]) => t.category === 'good');
+    appendGridSection(cellGridEl, 'Good (Immune system)', goodEntries);
+  }
+
+  function renderPaletteBadGrid() {
+    if (!cellGridBadEl) return;
+    cellGridBadEl.innerHTML = '';
+    if (!S.allowBadGuys) return;
+    for (const g of PATHOGEN_GROUPS) {
+      const entries = g.members.map(k => [k, CELL_TYPES[k]]).filter(([, t]) => t);
+      appendGridSection(cellGridBadEl, `${g.icon} ${g.label}`, entries);
     }
   }
 
