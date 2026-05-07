@@ -4,7 +4,10 @@
   // ---------- Settings ----------
   const SETTINGS_KEY = 'microbes.settings.v2';
   const SETTINGS_KEY_V1 = 'microbes.settings.v1';
-  const ALL_CELL_KEYS = ['neutrophil','monocyte','mast','nk','macrophage','dendritic','basophil','platelet','tcell','bcell','eosinophil'];
+  const ALL_CELL_KEYS = [
+    'neutrophil','monocyte','mast','nk','macrophage','dendritic','basophil','platelet','tcell','bcell','eosinophil',
+    'virus','germ','bacterium','amoebaP','slime','mite','spore','toxin',
+  ];
   const DEFAULTS = {
     splitMode: 'bondDrift',     // 'pushApart' | 'bondDrift'
     autoSplitSeconds: 10,
@@ -22,6 +25,9 @@
     throwStrength: 0.35,
     wobbleAmp: 0.13,
     blendMode: 'overlay',     // overlapping cells get a perceptual overlay blend by default
+    speedMul: 1.0,            // global movement multiplier (range 0..3)
+    cartoon: false,           // cartoon-face overlay
+    lang: 'en',               // 'en' | 'de' | 'es' | 'brbn'
   };
 
   function loadSettings() {
@@ -179,140 +185,242 @@
   // decoration.kind → drawDecorations() dispatch
   // granules → number of small dots inside the cell, drawn through the mask
   // description → 1-sentence role shown in the help dialog
-  const DEFAULT_MOVE = { accel: 220, maxSpeed: 100, weight: 1.0, friction: 1.0 };
+  const DEFAULT_MOVE = {
+    patrolSpeed: 50, attackSpeed: 110, patrolAccel: 90, alarmAccel: 240,
+    weight: 1.0, friction: 1.0, hostility: 'idle',
+  };
+  const ALARM_RADIUS = 240;
 
   const CELL_TYPES = {
     neutrophil: {
-      label: 'Neutrophil',
+      label: 'Neutrophil', category: 'good',
       body: { kind: 'lobed', aspect: 1.0 },
       nucleus: { kind: 'multilobed' },
       decoration: { kind: 'none' },
       granules: 28,
       splitFactor: 1.0, brownianMul: 1.0,
-      move: { accel: 280, maxSpeed: 130, weight: 1.0,  friction: 0.9  },
+      move: { patrolSpeed: 60, attackSpeed: 150, patrolAccel: 110, alarmAccel: 320, weight: 1.0, friction: 0.9, hostility: 'attack' },
       field: { blur: 8,  contrast: 16, wobbleMul: 1.2 },
       colors: { cytoTop: '#ffd28a', cytoBot: '#e58a26', nucleus: '#5a2a05', nucleusHi: '#fff0c8', accent: '#9c4513' },
       description: 'First responder; engulfs bacteria via phagocytosis. The most abundant white blood cell.',
     },
     monocyte: {
-      label: 'Monocyte',
+      label: 'Monocyte', category: 'good',
       body: { kind: 'rippled', aspect: 1.0 },
       nucleus: { kind: 'kidney' },
       decoration: { kind: 'none' },
       granules: 6,
       splitFactor: 1.0, brownianMul: 1.0,
-      move: { accel: 200, maxSpeed:  95, weight: 1.0,  friction: 1.0  },
+      move: { patrolSpeed: 50, attackSpeed: 110, patrolAccel: 90,  alarmAccel: 230, weight: 1.0, friction: 1.0, hostility: 'attack' },
       field: { blur: 6,  contrast: 20, wobbleMul: 0.8 },
       colors: { cytoTop: '#cadcfb', cytoBot: '#6d8df0', nucleus: '#1d1c5a', nucleusHi: '#dee8ff', accent: '#2b4d8e' },
       description: 'Circulating sentinel that matures into macrophages or dendritic cells once it enters tissue.',
     },
     mast: {
-      label: 'Mast cell',
+      label: 'Mast cell', category: 'good',
       body: { kind: 'oblong', aspect: 1.4 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'none' },
       granules: 60,
       splitFactor: 1.2, brownianMul: 0.7,
-      move: { accel: 100, maxSpeed:  50, weight: 1.5,  friction: 1.2  },
+      move: { patrolSpeed: 28, attackSpeed: 60,  patrolAccel: 50,  alarmAccel: 130, weight: 1.5, friction: 1.2, hostility: 'idle' },
       field: { blur: 5,  contrast: 22, wobbleMul: 0.5 },
       colors: { cytoTop: '#c9efd5', cytoBot: '#54a877', nucleus: '#0f4a2e', nucleusHi: '#e6fff0', accent: '#1f6b3f' },
       description: 'Tissue-resident sentinel; releases histamine to trigger inflammation and allergic responses.',
     },
     nk: {
-      label: 'NK cell',
+      label: 'NK cell', category: 'good',
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'bigSpikes' },
       granules: 8,
       splitFactor: 1.1, brownianMul: 1.1,
-      move: { accel: 320, maxSpeed: 150, weight: 0.9,  friction: 0.85 },
+      move: { patrolSpeed: 70, attackSpeed: 170, patrolAccel: 140, alarmAccel: 360, weight: 0.9, friction: 0.85, hostility: 'attack' },
       field: { blur: 5,  contrast: 24, wobbleMul: 1.1 },
       colors: { cytoTop: '#cfd0f7', cytoBot: '#7172c6', nucleus: '#291b5e', nucleusHi: '#eaeaff', accent: '#3f3f8c' },
       description: 'Patrols for virus-infected and tumour cells; kills on contact without prior sensitisation.',
     },
     macrophage: {
-      label: 'Macrophage',
+      label: 'Macrophage', category: 'good',
       body: { kind: 'pseudopod', aspect: 1.0 },
       nucleus: { kind: 'kidney' },
       decoration: { kind: 'none' },
       granules: 12,
       splitFactor: 1.4, brownianMul: 0.6,
-      move: { accel: 140, maxSpeed:  70, weight: 1.7,  friction: 1.1  },
+      move: { patrolSpeed: 40, attackSpeed: 90,  patrolAccel: 70,  alarmAccel: 180, weight: 1.7, friction: 1.1, hostility: 'attack' },
       field: { blur: 10, contrast: 14, wobbleMul: 1.5 },
       colors: { cytoTop: '#fbc6de', cytoBot: '#d36699', nucleus: '#3a1029', nucleusHi: '#ffe0ee', accent: '#872a59' },
       description: '"Big eater" — long-lived phagocyte that engulfs pathogens and presents antigens to T cells.',
     },
     dendritic: {
-      label: 'Dendritic cell',
+      label: 'Dendritic cell', category: 'good',
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round-small' },
       decoration: { kind: 'tendrils' },
       granules: 0,
       splitFactor: 1.3, brownianMul: 0.8,
-      move: { accel: 220, maxSpeed: 110, weight: 1.0,  friction: 0.95 },
+      move: { patrolSpeed: 50, attackSpeed: 110, patrolAccel: 100, alarmAccel: 240, weight: 1.0, friction: 0.95, hostility: 'attack' },
       field: { blur: 8,  contrast: 18, wobbleMul: 0.9 },
       colors: { cytoTop: '#bcdcf6', cytoBot: '#4d8fcf', nucleus: '#102544', nucleusHi: '#dff0ff', accent: '#1d3d68' },
       description: 'Antigen-presenting courier; samples invaders and shows them to T cells in lymph nodes.',
     },
     basophil: {
-      label: 'Basophil',
+      label: 'Basophil', category: 'good',
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'bilobed' },
       decoration: { kind: 'none' },
       granules: 22,
       splitFactor: 1.0, brownianMul: 1.0,
-      move: { accel: 180, maxSpeed:  90, weight: 1.0,  friction: 1.0  },
+      move: { patrolSpeed: 45, attackSpeed: 95,  patrolAccel: 80,  alarmAccel: 200, weight: 1.0, friction: 1.0, hostility: 'idle' },
       field: { blur: 5,  contrast: 22, wobbleMul: 0.6 },
       colors: { cytoTop: '#fbcfdc', cytoBot: '#d97aa1', nucleus: '#410d2e', nucleusHi: '#ffe1ec', accent: '#4a0d31' },
       description: 'Circulating granulocyte; releases histamine and heparin to reinforce inflammation.',
     },
     platelet: {
-      label: 'Platelet',
+      label: 'Platelet', category: 'good',
       body: { kind: 'star', aspect: 1.0 },
       nucleus: { kind: 'none' },
       decoration: { kind: 'none' },
       granules: 4,
       splitFactor: 0.9, brownianMul: 1.6,
-      move: { accel: 360, maxSpeed: 170, weight: 0.6,  friction: 0.85 },
+      move: { patrolSpeed: 80, attackSpeed: 190, patrolAccel: 160, alarmAccel: 400, weight: 0.6, friction: 0.85, hostility: 'idle' },
       field: { blur: 3,  contrast: 30, wobbleMul: 0.4 },
       colors: { cytoTop: '#ffe27c', cytoBot: '#d7a614', nucleus: '#4d2f02', nucleusHi: '#fff5c4', accent: '#8a5e0a' },
       description: 'Tiny cell fragment that clots blood at injuries and helps recruit immune cells.',
     },
     tcell: {
-      label: 'T-cell',
+      label: 'T-cell', category: 'good',
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'yReceptorsFew' },
       granules: 0,
       splitFactor: 1.2, brownianMul: 0.9,
-      move: { accel: 300, maxSpeed: 140, weight: 0.95, friction: 0.9  },
+      move: { patrolSpeed: 70, attackSpeed: 160, patrolAccel: 130, alarmAccel: 340, weight: 0.95, friction: 0.9, hostility: 'attack' },
       field: { blur: 4,  contrast: 26, wobbleMul: 0.5 },
       colors: { cytoTop: '#d6cdf8', cytoBot: '#8d7be0', nucleus: '#2a134d', nucleusHi: '#efeaff', accent: '#4d2c8c' },
       description: 'Adaptive killer / coordinator; recognises specific antigens and kills infected cells.',
     },
     bcell: {
-      label: 'B-cell',
+      label: 'B-cell', category: 'good',
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'yReceptorsMany' },
       granules: 0,
       splitFactor: 1.2, brownianMul: 0.9,
-      move: { accel: 240, maxSpeed: 110, weight: 1.0,  friction: 1.0  },
+      move: { patrolSpeed: 55, attackSpeed: 120, patrolAccel: 100, alarmAccel: 260, weight: 1.0, friction: 1.0, hostility: 'attack' },
       field: { blur: 4,  contrast: 26, wobbleMul: 0.5 },
       colors: { cytoTop: '#fcc9cc', cytoBot: '#df8189', nucleus: '#4a1014', nucleusHi: '#ffe1e3', accent: '#8a323a' },
       description: 'Adaptive antibody factory; secretes antibodies tagged to specific pathogens.',
     },
     eosinophil: {
-      label: 'Eosinophil',
+      label: 'Eosinophil', category: 'good',
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'bilobed' },
       decoration: { kind: 'none' },
       granules: 18,
       splitFactor: 1.0, brownianMul: 1.0,
-      move: { accel: 260, maxSpeed: 120, weight: 0.95, friction: 0.95 },
+      move: { patrolSpeed: 60, attackSpeed: 130, patrolAccel: 110, alarmAccel: 280, weight: 0.95, friction: 0.95, hostility: 'attack' },
       field: { blur: 5,  contrast: 22, wobbleMul: 0.6 },
       colors: { cytoTop: '#fcc8a3', cytoBot: '#e0855a', nucleus: '#4d1d09', nucleusHi: '#ffe2cd', accent: '#8c3d18' },
       description: 'Anti-parasite specialist; key in allergic responses, releases toxic granule contents.',
+    },
+
+    // ---------- Bad guys ----------
+    virus: {
+      label: 'Virus', category: 'bad',
+      body: { kind: 'round', aspect: 1.0 },
+      nucleus: { kind: 'round-small' },
+      decoration: { kind: 'spikesPulsing' },
+      granules: 0,
+      splitFactor: 1.0, brownianMul: 1.0,
+      move: { patrolSpeed: 70, attackSpeed: 160, patrolAccel: 130, alarmAccel: 320, weight: 0.8, friction: 0.85, hostility: 'attack' },
+      field: { blur: 5,  contrast: 24, wobbleMul: 0.5 },
+      colors: { cytoTop: '#e9b8ff', cytoBot: '#9c2dbe', nucleus: '#3a0552', nucleusHi: '#ffd6f7', accent: '#ff3aaa' },
+      description: 'Spike-protein invader; hijacks cells to replicate inside them.',
+    },
+    germ: {
+      label: 'Germ', category: 'bad',
+      body: { kind: 'lobed', aspect: 1.0 },
+      nucleus: { kind: 'round' },
+      decoration: { kind: 'none' },
+      granules: 14,
+      splitFactor: 1.0, brownianMul: 1.0,
+      move: { patrolSpeed: 45, attackSpeed: 100, patrolAccel: 80,  alarmAccel: 200, weight: 1.0, friction: 1.0, hostility: 'idle' },
+      field: { blur: 7,  contrast: 18, wobbleMul: 1.0 },
+      colors: { cytoTop: '#c4ec88', cytoBot: '#5fa030', nucleus: '#234008', nucleusHi: '#e5ffc8', accent: '#7ab53a' },
+      description: 'Generic bumpy microbe — opportunistic infector.',
+    },
+    bacterium: {
+      label: 'Bacterium', category: 'bad',
+      body: { kind: 'oblong', aspect: 1.8 },
+      nucleus: { kind: 'round-small' },
+      decoration: { kind: 'flagellum' },
+      granules: 8,
+      splitFactor: 0.9, brownianMul: 1.0,
+      move: { patrolSpeed: 75, attackSpeed: 170, patrolAccel: 140, alarmAccel: 340, weight: 0.9, friction: 0.85, hostility: 'attack' },
+      field: { blur: 5,  contrast: 22, wobbleMul: 0.7 },
+      colors: { cytoTop: '#a8e6f5', cytoBot: '#3aa0c7', nucleus: '#06324a', nucleusHi: '#dff8ff', accent: '#0c5e85' },
+      description: 'Rod-shaped bacterium swimming with a whipping flagellum.',
+    },
+    amoebaP: {
+      label: 'Amoeba (✗)', category: 'bad',
+      body: { kind: 'pseudopod', aspect: 1.0 },
+      nucleus: { kind: 'kidney' },
+      decoration: { kind: 'tentaclesWiggling' },
+      granules: 6,
+      splitFactor: 1.4, brownianMul: 0.6,
+      move: { patrolSpeed: 35, attackSpeed: 75,  patrolAccel: 60,  alarmAccel: 150, weight: 1.6, friction: 1.1, hostility: 'attack' },
+      field: { blur: 9,  contrast: 16, wobbleMul: 1.4 },
+      colors: { cytoTop: '#dabaff', cytoBot: '#7e3df0', nucleus: '#260a4a', nucleusHi: '#f1d8ff', accent: '#a065ff' },
+      description: 'Amoeboid parasite that crawls and engulfs tissue.',
+    },
+    slime: {
+      label: 'Slime', category: 'bad',
+      body: { kind: 'lobed', aspect: 1.0 },
+      nucleus: { kind: 'none' },
+      decoration: { kind: 'drips' },
+      granules: 8,
+      splitFactor: 1.5, brownianMul: 0.5,
+      move: { patrolSpeed: 30, attackSpeed: 65,  patrolAccel: 50,  alarmAccel: 130, weight: 1.6, friction: 1.15, hostility: 'attack' },
+      field: { blur: 9,  contrast: 16, wobbleMul: 1.3 },
+      colors: { cytoTop: '#e4ff8d', cytoBot: '#7ab323', nucleus: '#1d3a05', nucleusHi: '#f6ffd0', accent: '#9fd83b' },
+      description: 'Slimy biofilm globule; drips toxic ooze.',
+    },
+    mite: {
+      label: 'Mite', category: 'bad',
+      body: { kind: 'round', aspect: 1.0 },
+      nucleus: { kind: 'round' },
+      decoration: { kind: 'legs' },
+      granules: 4,
+      splitFactor: 1.0, brownianMul: 1.4,
+      move: { patrolSpeed: 90, attackSpeed: 200, patrolAccel: 180, alarmAccel: 420, weight: 0.7, friction: 0.85, hostility: 'attack' },
+      field: { blur: 4,  contrast: 26, wobbleMul: 0.4 },
+      colors: { cytoTop: '#ffd49a', cytoBot: '#cc6a14', nucleus: '#4a1c02', nucleusHi: '#ffe9c2', accent: '#8a3d05' },
+      description: 'Tiny scuttling bug; lots of little legs.',
+    },
+    spore: {
+      label: 'Spore', category: 'bad',
+      body: { kind: 'round', aspect: 1.0 },
+      nucleus: { kind: 'round-small' },
+      decoration: { kind: 'fuzz' },
+      granules: 22,
+      splitFactor: 1.2, brownianMul: 1.2,
+      move: { patrolSpeed: 50, attackSpeed: 110, patrolAccel: 90,  alarmAccel: 220, weight: 0.9, friction: 0.95, hostility: 'idle' },
+      field: { blur: 6,  contrast: 20, wobbleMul: 0.6 },
+      colors: { cytoTop: '#fff097', cytoBot: '#caa221', nucleus: '#3d2900', nucleusHi: '#fff5c5', accent: '#aa7704' },
+      description: 'Fungal spore — drifts on currents and seeds new growth.',
+    },
+    toxin: {
+      label: 'Toxin', category: 'bad',
+      body: { kind: 'star', aspect: 1.0 },
+      nucleus: { kind: 'none' },
+      decoration: { kind: 'none' },
+      granules: 0,
+      splitFactor: 0.7, brownianMul: 1.4,
+      move: { patrolSpeed: 30, attackSpeed: 80,  patrolAccel: 60,  alarmAccel: 150, weight: 1.4, friction: 1.2, hostility: 'idle' },
+      field: { blur: 3,  contrast: 30, wobbleMul: 0.3 },
+      colors: { cytoTop: '#bdf3ff', cytoBot: '#ff5cb1', nucleus: '#3a0533', nucleusHi: '#fff', accent: '#3aa0c7' },
+      description: 'Jagged toxin crystal that drifts and burns on contact.',
     },
   };
 
@@ -405,6 +513,11 @@
       wobbleFreq: 0.55 + Math.random() * 0.45,
       flash: 0,
       target: null,    // {x, y} world point this cell is moving toward (set on tap-empty when selected)
+      patrolTarget: null,
+      patrolTimer: 0,
+      alarmTarget: null,
+      alarmTimer: 0,
+      category: (CELL_TYPES[t] && CELL_TYPES[t].category) || 'good',
     };
   }
 
@@ -676,29 +789,94 @@
 
         if (c !== (drag && drag.cell)) {
           const moveCfg = (CELL_TYPES[c.type] && CELL_TYPES[c.type].move) || DEFAULT_MOVE;
+          const sm = S.speedMul || 1;
+
+          // Decay alarm timer
+          if (c.alarmTimer > 0) c.alarmTimer = Math.max(0, c.alarmTimer - dt);
+
+          let goalX = 0, goalY = 0, accel = 0, maxV = 0, hasGoal = false;
 
           if (c.target) {
-            // Move-to-target seek with per-type acceleration / weight / max-speed.
+            // Manual move-to (commanded by user)
             const dx = c.target.x - c.x, dy = c.target.y - c.y;
-            const dist = Math.hypot(dx, dy);
-            if (dist < 8) {
+            const d = Math.hypot(dx, dy);
+            if (d < 12) {
               c.target = null;
             } else {
-              const ax = (dx / dist) * moveCfg.accel / moveCfg.weight;
-              const ay = (dy / dist) * moveCfg.accel / moveCfg.weight;
-              c.vx += ax * dt;
-              c.vy += ay * dt;
-              const sp = Math.hypot(c.vx, c.vy);
-              if (sp > moveCfg.maxSpeed) {
-                c.vx = c.vx / sp * moveCfg.maxSpeed;
-                c.vy = c.vy / sp * moveCfg.maxSpeed;
-              }
+              goalX = dx / d; goalY = dy / d;
+              accel = moveCfg.alarmAccel * sm;
+              maxV  = moveCfg.attackSpeed * sm;
+              hasGoal = true;
             }
-          } else {
-            // Idle Brownian (per-type multiplier)
-            const bMul = (CELL_TYPES[c.type] && CELL_TYPES[c.type].brownianMul) || 1.0;
-            c.vx += (Math.random() - 0.5) * BROWNIAN * bMul * dt;
-            c.vy += (Math.random() - 0.5) * BROWNIAN * bMul * dt;
+          }
+
+          if (!hasGoal) {
+            // Look for hostile within alarm radius (idle types ignore)
+            if (c.alarmTimer === 0 && moveCfg.hostility !== 'idle') {
+              let bestD = ALARM_RADIUS * ALARM_RADIUS, enemy = null;
+              for (let j = 0; j < cells.length; j++) {
+                const o = cells[j];
+                if (o === c || o.state !== 'NORMAL') continue;
+                if ((o.category || (CELL_TYPES[o.type] && CELL_TYPES[o.type].category)) === c.category) continue;
+                const dx = o.x - c.x, dy = o.y - c.y;
+                const d2 = dx*dx + dy*dy;
+                if (d2 < bestD) { bestD = d2; enemy = o; }
+              }
+              if (enemy) { c.alarmTarget = enemy; c.alarmTimer = 1.6; }
+            }
+
+            if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
+              const dx = c.alarmTarget.x - c.x, dy = c.alarmTarget.y - c.y;
+              const d = Math.hypot(dx, dy) || 1;
+              const sign = (moveCfg.hostility === 'flee') ? -1 : 1;
+              goalX = sign * dx / d; goalY = sign * dy / d;
+              accel = moveCfg.alarmAccel * sm;
+              maxV  = moveCfg.attackSpeed * sm;
+              hasGoal = true;
+            } else {
+              // Patrol — refresh target every 3-8s, bias toward another cell
+              c.patrolTimer -= dt;
+              const reached = c.patrolTarget &&
+                ((c.x - c.patrolTarget.x) ** 2 + (c.y - c.patrolTarget.y) ** 2) < 30 * 30;
+              if (!c.patrolTarget || c.patrolTimer <= 0 || reached) {
+                let pt = null;
+                if (cells.length > 1 && Math.random() < 0.6) {
+                  let other = null, tries = 6;
+                  while (tries-- > 0) {
+                    const o = cells[Math.floor(Math.random() * cells.length)];
+                    if (o !== c && o.state === 'NORMAL') { other = o; break; }
+                  }
+                  if (other) pt = { x: other.x, y: other.y };
+                }
+                if (!pt) {
+                  pt = {
+                    x: c.x + (Math.random() - 0.5) * c.r * 12,
+                    y: c.y + (Math.random() - 0.5) * c.r * 12,
+                  };
+                }
+                c.patrolTarget = pt;
+                c.patrolTimer = 3 + Math.random() * 5;
+              }
+              const dx = c.patrolTarget.x - c.x, dy = c.patrolTarget.y - c.y;
+              const d = Math.hypot(dx, dy) || 1;
+              goalX = dx / d; goalY = dy / d;
+              accel = moveCfg.patrolAccel * sm;
+              maxV  = moveCfg.patrolSpeed * sm;
+              hasGoal = true;
+
+              // small Brownian jitter for life
+              const bMul = (CELL_TYPES[c.type] && CELL_TYPES[c.type].brownianMul) || 1.0;
+              c.vx += (Math.random() - 0.5) * BROWNIAN * bMul * dt * 0.3;
+              c.vy += (Math.random() - 0.5) * BROWNIAN * bMul * dt * 0.3;
+            }
+          }
+
+          if (hasGoal) {
+            const w = moveCfg.weight || 1;
+            c.vx += goalX * accel * dt / w;
+            c.vy += goalY * accel * dt / w;
+            const sp = Math.hypot(c.vx, c.vy);
+            if (sp > maxV) { c.vx = c.vx / sp * maxV; c.vy = c.vy / sp * maxV; }
           }
 
           // Friction: global S.friction × per-type multiplier, mapped exponentially
@@ -1210,7 +1388,13 @@
         const kind = (type.decoration && type.decoration.kind) || 'none';
         switch (kind) {
           case 'bigSpikes':       drawBigSpikes(s, theme, t); break;
+          case 'spikesPulsing':   drawSpikesPulsing(s, theme, t); break;
           case 'tendrils':        drawTendrils(s, theme, t); break;
+          case 'tentaclesWiggling': drawTentaclesWiggling(s, theme, t); break;
+          case 'flagellum':       drawFlagellum(s, theme, t); break;
+          case 'drips':           drawDrips(s, theme, t); break;
+          case 'legs':            drawLegs(s, theme, t); break;
+          case 'fuzz':            drawFuzz(s, theme, t); break;
           case 'yReceptorsFew':   drawYReceptors(s, theme, t, 6); break;
           case 'yReceptorsMany':  drawYReceptors(s, theme, t, 14); break;
           case 'none':
@@ -1311,6 +1495,185 @@
       ctx.lineTo(tipX + Math.cos(lAng) * arms, tipY + Math.sin(lAng) * arms);
       ctx.moveTo(tipX, tipY);
       ctx.lineTo(tipX + Math.cos(rAng) * arms, tipY + Math.sin(rAng) * arms);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ---------- Animated baddie decorations ----------
+  function drawSpikesPulsing(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const px = S.outlinePx;
+    const N = 10;
+    ctx.save();
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(1.5, px * 0.7) / camera.scale;
+    ctx.strokeStyle = theme.outline.color;
+    ctx.fillStyle = cc.accent;
+    const baseHalf = s.r * 0.09;
+    for (let i = 0; i < N; i++) {
+      const jitter = (frac(c.id * 0.31 + i * 0.71) - 0.5) * 0.18;
+      const theta = (i / N) * Math.PI * 2 + jitter;
+      const tipLen = s.r * (0.45 + 0.18 * Math.sin(t * 2.5 + i * 0.7 + (c.wobbleSeed || 0)));
+      const base = shapeVertex(s, theta, t);
+      const tipX = base.x + Math.cos(theta) * tipLen;
+      const tipY = base.y + Math.sin(theta) * tipLen;
+      ctx.beginPath();
+      ctx.moveTo(
+        base.x + Math.cos(theta + Math.PI / 2) * baseHalf,
+        base.y + Math.sin(theta + Math.PI / 2) * baseHalf
+      );
+      ctx.lineTo(tipX, tipY);
+      ctx.lineTo(
+        base.x + Math.cos(theta - Math.PI / 2) * baseHalf,
+        base.y + Math.sin(theta - Math.PI / 2) * baseHalf
+      );
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawTentaclesWiggling(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const px = S.outlinePx;
+    const N = 6;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(2, px * 0.7) / camera.scale;
+    ctx.strokeStyle = cc.cytoBot;
+    for (let i = 0; i < N; i++) {
+      const baseAng = (i / N) * Math.PI * 2 + c.phase;
+      const base = shapeVertex(s, baseAng, t);
+      const len = s.r * (1.0 + 0.5 * frac(c.id * 0.13 + i * 0.7));
+      const sway = 0.7 * Math.sin(t * 1.6 + i * 1.3 + c.wobbleSeed);
+      const curl = 0.6 * Math.sin(t * 1.1 + i * 0.5);
+      const midAng = baseAng + sway;
+      const midX = base.x + Math.cos(midAng) * len * 0.6;
+      const midY = base.y + Math.sin(midAng) * len * 0.6;
+      const tipAng = baseAng + sway + curl;
+      const tipX = base.x + Math.cos(tipAng) * len;
+      const tipY = base.y + Math.sin(tipAng) * len;
+      ctx.beginPath();
+      ctx.moveTo(base.x, base.y);
+      ctx.quadraticCurveTo(midX, midY, tipX, tipY);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawFlagellum(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const px = S.outlinePx;
+    const ang = (c.orientation || 0) + Math.PI;
+    // Tail starts at the cell's "back" along orientation+π
+    const startV = shapeVertex(s, ang, t);
+    const dirX = Math.cos(ang), dirY = Math.sin(ang);
+    const perpX = -dirY, perpY = dirX;
+    const length = s.r * 1.6;
+    const N = 24;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(2, px * 0.6) / camera.scale;
+    ctx.strokeStyle = cc.accent;
+    ctx.beginPath();
+    for (let i = 0; i <= N; i++) {
+      const u = i / N;                                        // 0..1 along tail
+      const along = length * u;
+      const wave = Math.sin(u * Math.PI * 3 - t * 6) * (s.r * 0.18) * u;
+      const x = startV.x + dirX * along + perpX * wave;
+      const y = startV.y + dirY * along + perpY * wave;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawDrips(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const N = 5;
+    ctx.save();
+    ctx.fillStyle = cc.cytoBot;
+    ctx.strokeStyle = theme.outline.color;
+    ctx.lineWidth = Math.max(1.5, S.outlinePx * 0.5) / camera.scale;
+    for (let i = 0; i < N; i++) {
+      // Drips hang from the bottom-arc of the cell (theta from ~50° to 130°)
+      const theta = (Math.PI * 0.30) + (i / (N - 1)) * (Math.PI * 0.40);   // 0.30π..0.70π
+      const ang = Math.PI * 0.5 + theta - Math.PI * 0.5;                    // re-centered around 0.5π (down)
+      const dirAng = Math.PI * 0.5 - 0.40 + (i / (N - 1)) * 0.80;          // sweep around straight-down
+      const base = shapeVertex(s, dirAng, t);
+      const drop = s.r * 0.22 + s.r * 0.06 * Math.sin(t * 1.8 + i);
+      const tipX = base.x;
+      const tipY = base.y + drop;
+      ctx.beginPath();
+      ctx.moveTo(base.x - s.r * 0.06, base.y);
+      ctx.quadraticCurveTo(base.x, tipY + drop * 0.2, base.x + s.r * 0.06, base.y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // small bobbing droplet below
+      const bobY = tipY + s.r * 0.10 + s.r * 0.05 * Math.sin(t * 2.2 + i * 0.7);
+      ctx.beginPath();
+      ctx.arc(tipX, bobY, s.r * 0.07, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawLegs(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const px = S.outlinePx;
+    const N = 10;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(2, px * 0.6) / camera.scale;
+    ctx.strokeStyle = theme.outline.color;
+    for (let i = 0; i < N; i++) {
+      const theta = (i / N) * Math.PI * 2;
+      const wiggle = 0.25 * Math.sin(t * 6 + i * 0.8);
+      const base = shapeVertex(s, theta, t);
+      const dir = theta + wiggle;
+      const len = s.r * 0.4;
+      const kneeX = base.x + Math.cos(dir) * len * 0.55;
+      const kneeY = base.y + Math.sin(dir) * len * 0.55;
+      const tipX = base.x + Math.cos(dir + 0.3 * Math.sin(t * 5 + i)) * len;
+      const tipY = base.y + Math.sin(dir + 0.3 * Math.sin(t * 5 + i)) * len;
+      ctx.beginPath();
+      ctx.moveTo(base.x, base.y);
+      ctx.lineTo(kneeX, kneeY);
+      ctx.lineTo(tipX, tipY);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawFuzz(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const px = S.outlinePx;
+    const N = 22;
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineWidth = Math.max(1.4, px * 0.4) / camera.scale;
+    ctx.strokeStyle = cc.accent;
+    ctx.globalAlpha = 0.85;
+    for (let i = 0; i < N; i++) {
+      const theta = (i / N) * Math.PI * 2;
+      const base = shapeVertex(s, theta, t);
+      const len = s.r * (0.18 + 0.10 * Math.sin(t * 1.2 + i * 0.7));
+      const tipX = base.x + Math.cos(theta) * len;
+      const tipY = base.y + Math.sin(theta) * len;
+      ctx.beginPath();
+      ctx.moveTo(base.x, base.y);
+      ctx.lineTo(tipX, tipY);
       ctx.stroke();
     }
     ctx.restore();
