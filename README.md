@@ -1,5 +1,7 @@
 # Microbes
 
+[![Deploy to GitHub Pages](https://github.com/blurayne/microbes/actions/workflows/pages.yml/badge.svg?branch=main)](https://github.com/blurayne/microbes/actions/workflows/pages.yml)
+
 Standalone canvas simulation: biological cells that split into two when tapped, or randomly every ~10 seconds. Splits are rendered with a coarse-grid metaball algorithm so daughters visually pinch off from the parent. Retro look — thick black outlines, darker nucleus, warm "inside-of-a-vessel" background.
 
 ## Live demo
