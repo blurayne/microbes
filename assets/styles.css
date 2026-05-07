@@ -130,11 +130,45 @@ html, body {
   margin-top: 4px;
   accent-color: var(--accent);
 }
+.settings-panel input[type="checkbox"],
+.settings-panel input[type="radio"] {
+  accent-color: var(--accent);
+}
 .settings-panel .val {
   float: right;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
 }
+
+.settings-panel select {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  background: #00000044;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+.settings-panel select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.checks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.checks li input { margin: 0; }
 
 .actions { text-align: right; }
 #resetSim {
@@ -148,3 +182,17 @@ html, body {
 }
 #resetSim:hover { filter: brightness(1.05); }
 #resetSim:active { transform: translateY(1px); }
+
+#build {
+  position: fixed;
+  bottom: 10px;
+  left: 12px;
+  z-index: 9;
+  font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink);
+  opacity: 0.45;
+  pointer-events: none;
+  user-select: none;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 2px #0008;
+}

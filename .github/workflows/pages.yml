@@ -26,6 +26,17 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      - name: Stamp build info
+        run: |
+          DATE_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          cat > assets/build.js <<EOF
+          window.__BUILD__ = {
+            sha: '${{ github.sha }}',
+            run: ${{ github.run_number }},
+            dateUtc: '${DATE_UTC}'
+          };
+          EOF
+
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
