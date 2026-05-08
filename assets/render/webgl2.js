@@ -11,7 +11,7 @@
 // files, no build step.
 
 import {
-  CELL_TYPES, currentBackground, currentTheme,
+  S, CELL_TYPES, currentBackground, currentTheme,
 } from '../core/state.js';
 import { RendererBase } from './renderer.js';
 
@@ -104,21 +104,85 @@ void main() {
   gl_Position = vec4(p, 0.0, 1.0);
 }`;
 
-const FRAG_BG_FLAT = `#version 300 es
+// One combined background shader. v_uv is screen-space 0..1.
+// All bg variants compose into the same pass to keep state changes
+// minimal: flat, gradient, agar rings, cybergrid, drifting spots,
+// vignette. The decor patterns (lobules / villi / neurons / etc.)
+// are intentionally skipped; they're per-theme flair that's costly
+// to port and not visible in most palettes.
+const MAX_SPOTS = 8;
+const FRAG_BG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
-uniform vec3 u_color;
-out vec4 outColor;
-void main() { outColor = vec4(u_color, 1.0); }`;
 
-const FRAG_BG_GRADIENT = `#version 300 es
-precision highp float;
-in vec2 v_uv;
+uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid
+uniform vec3 u_base;
 uniform vec3 u_top;
 uniform vec3 u_bot;
+uniform vec3 u_ringColor;
+uniform vec3 u_gridColor;
+uniform float u_gridStep;
+uniform float u_vignette;
+uniform vec3 u_camera;       // (scale, tx, ty)
+uniform vec2 u_viewport;     // (W, H)
+uniform float u_time;        // seconds
+uniform int u_spotCount;
+uniform vec4 u_spots[${MAX_SPOTS}];      // (cx, cy, r, _) screen 0..1
+uniform vec3 u_spotCols[${MAX_SPOTS}];
+
 out vec4 outColor;
+
 void main() {
-  outColor = vec4(mix(u_top, u_bot, v_uv.y), 1.0);
+  // Base.
+  vec3 col = u_base;
+  if (u_kind == 1) col = mix(u_top, u_bot, v_uv.y);
+
+  // World-space pixel — screen px → world px through camera.
+  vec2 screenPx = v_uv * u_viewport;
+  vec2 worldPx = (screenPx - u_camera.yz) / u_camera.x;
+
+  // Petri-dish concentric rings — 1px thin at every 32 world units,
+  // centred on the world middle. Matches Canvas2D's stroke loop.
+  if (u_kind == 2) {
+    vec2 ctr = u_viewport * 0.5;
+    float r = length(worldPx - ctr);
+    float nearestRing = floor(r / 32.0 + 0.5) * 32.0;
+    float dToRing = abs(r - nearestRing);
+    float pxWorld = 1.0 / u_camera.x;
+    float band = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.5, dToRing);
+    col = mix(col, u_ringColor, band * 0.18);
+  }
+
+  // Cyber grid: thin lines every gridStep world units, in both axes.
+  if (u_kind == 3) {
+    vec2 g = mod(worldPx, u_gridStep);
+    vec2 dToLine = min(g, u_gridStep - g);
+    float pxWorld = 1.0 / u_camera.x;
+    float lineX = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.x);
+    float lineY = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.y);
+    float line = max(lineX, lineY);
+    col = mix(col, u_gridColor, line * 0.30);
+  }
+
+  // Drifting light spots — additive, screen-space coords. Each spot
+  // colour was pre-multiplied by its source alpha on the JS side, so
+  // we just add directly without re-scaling.
+  for (int i = 0; i < ${MAX_SPOTS}; i++) {
+    if (i >= u_spotCount) break;
+    vec4 s = u_spots[i];
+    float d = distance(v_uv, s.xy);
+    float a = 1.0 - smoothstep(0.0, s.z, d);
+    col += u_spotCols[i] * a;
+  }
+
+  // Vignette: darken the corners.
+  if (u_vignette > 0.0) {
+    float v = length(v_uv - 0.5) * 1.4;
+    float vAmt = u_vignette * smoothstep(0.4, 1.0, v);
+    col *= 1.0 - vAmt;
+  }
+
+  outColor = vec4(col, 1.0);
 }`;
 
 const INSTANCE_FLOATS = 16; // see _diskVao layout in init()
@@ -130,6 +194,26 @@ function hexToVec3(hex) {
     parseInt(h.slice(0, 2), 16) / 255,
     parseInt(h.slice(2, 4), 16) / 255,
     parseInt(h.slice(4, 6), 16) / 255,
+  ];
+}
+
+// Theme `ringColor` / `spotColor` / `gridColor` strings, returning rgb +
+// optional alpha (defaulting to 1 for hex / no-alpha rgba).
+function rgbaStringToVec3(s) {
+  const v = rgbaStringToVec4(s);
+  return [v[0], v[1], v[2]];
+}
+
+function rgbaStringToVec4(s) {
+  if (!s) return [0, 0, 0, 1];
+  if (s[0] === '#') { const v = hexToVec3(s); return [v[0], v[1], v[2], 1]; }
+  const m = s.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*,\s*([\d.]+))?/);
+  if (!m) return [1, 1, 1, 1];
+  return [
+    parseInt(m[1], 10) / 255,
+    parseInt(m[2], 10) / 255,
+    parseInt(m[3], 10) / 255,
+    m[4] != null ? parseFloat(m[4]) : 1,
   ];
 }
 
@@ -181,11 +265,25 @@ export class WebGL2Renderer extends RendererBase {
     this._instanceCapacity = 0;
     this._instanceData = new Float32Array(0);
 
-    this._bgFlatProg = null;
-    this._bgFlatU = {};
-    this._bgGradProg = null;
-    this._bgGradU = {};
+    this._bgProg = null;
+    this._bgU = {};
     this._bgVao = null;
+
+    // One-time random light spots, matching Canvas2D's SPOTS layout.
+    this._spots = [];
+    for (let i = 0; i < MAX_SPOTS; i++) {
+      this._spots.push({
+        ax: 0.15 + Math.random() * 0.7,
+        ay: 0.15 + Math.random() * 0.7,
+        ox1: 0.12 + Math.random() * 0.18,
+        oy1: 0.12 + Math.random() * 0.18,
+        w1: 0.10 + Math.random() * 0.18,
+        w2: 0.05 + Math.random() * 0.10,
+        phx: Math.random() * Math.PI * 2,
+        phy: Math.random() * Math.PI * 2,
+        r: 0.32 + Math.random() * 0.30,
+      });
+    }
   }
 
   init() {
@@ -243,14 +341,29 @@ export class WebGL2Renderer extends RendererBase {
     attr(5, 3); // a_outline
     gl.bindVertexArray(null);
 
-    // ---- background programs ----
-    this._bgFlatProg = link(gl, VERT_FULLSCREEN, FRAG_BG_FLAT);
-    this._bgFlatU.color = gl.getUniformLocation(this._bgFlatProg, 'u_color');
-    this._bgGradProg = link(gl, VERT_FULLSCREEN, FRAG_BG_GRADIENT);
-    this._bgGradU.top = gl.getUniformLocation(this._bgGradProg, 'u_top');
-    this._bgGradU.bot = gl.getUniformLocation(this._bgGradProg, 'u_bot');
+    // ---- background program ----
+    this._bgProg = link(gl, VERT_FULLSCREEN, FRAG_BG);
+    const bu = (n) => gl.getUniformLocation(this._bgProg, n);
+    this._bgU.kind = bu('u_kind');
+    this._bgU.base = bu('u_base');
+    this._bgU.top = bu('u_top');
+    this._bgU.bot = bu('u_bot');
+    this._bgU.ringColor = bu('u_ringColor');
+    this._bgU.gridColor = bu('u_gridColor');
+    this._bgU.gridStep = bu('u_gridStep');
+    this._bgU.vignette = bu('u_vignette');
+    this._bgU.camera = bu('u_camera');
+    this._bgU.viewport = bu('u_viewport');
+    this._bgU.time = bu('u_time');
+    this._bgU.spotCount = bu('u_spotCount');
+    this._bgU.spots = bu('u_spots');
+    this._bgU.spotCols = bu('u_spotCols');
 
     this._bgVao = gl.createVertexArray();
+
+    // Reusable arrays for the per-frame spot-uniform upload.
+    this._spotsBuf = new Float32Array(MAX_SPOTS * 4);
+    this._spotColsBuf = new Float32Array(MAX_SPOTS * 3);
   }
 
   resize(W, H, dpr, renderScale) {
@@ -268,24 +381,60 @@ export class WebGL2Renderer extends RendererBase {
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
   }
 
-  drawBackground(/* timeMs */) {
+  drawBackground(timeMs) {
     const gl = this.gl;
     const bg = currentBackground();
-    gl.bindVertexArray(this._bgVao);
+    const t = timeMs * 0.001 * (S.bgFlowSpeed || 1);
 
-    if (bg.kind === 'gradient') {
-      gl.useProgram(this._bgGradProg);
-      gl.uniform3fv(this._bgGradU.top, hexToVec3(bg.topColor));
-      gl.uniform3fv(this._bgGradU.bot, hexToVec3(bg.botColor));
-    } else {
-      gl.useProgram(this._bgFlatProg);
-      gl.uniform3fv(this._bgFlatU.color, hexToVec3(bg.base || '#000'));
+    let kind = 0; // flat
+    if (bg.kind === 'gradient') kind = 1;
+    else if (bg.kind === 'agar') kind = 2;
+    else if (bg.kind === 'cybergrid') kind = 3;
+    // 'flat' / 'navy-ghost' / unknown all fall through to flat.
+
+    // Compute drifting-spot positions in screen UV (matches Canvas2D).
+    const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
+    const spotCols = Array.isArray(bg.spotColors) ? bg.spotColors : null;
+    const fallbackCol = bg.spotColor;
+    for (let i = 0; i < MAX_SPOTS; i++) {
+      const s = this._spots[i];
+      const cx = s.ax + s.ox1 * Math.sin(t * s.w1 + s.phx);
+      const cy = s.ay + s.oy1 * Math.cos(t * s.w2 + s.phy);
+      this._spotsBuf[i * 4]     = cx;
+      this._spotsBuf[i * 4 + 1] = cy;
+      this._spotsBuf[i * 4 + 2] = s.r;
+      this._spotsBuf[i * 4 + 3] = 0;
+      const colSrc = spotCols ? spotCols[i % spotCols.length] : fallbackCol;
+      const v4 = colSrc ? rgbaStringToVec4(colSrc) : [1, 1, 1, 0.10];
+      // Pre-multiply rgb by source alpha so the shader can add directly.
+      this._spotColsBuf[i * 3]     = v4[0] * v4[3];
+      this._spotColsBuf[i * 3 + 1] = v4[1] * v4[3];
+      this._spotColsBuf[i * 3 + 2] = v4[2] * v4[3];
     }
+
+    gl.useProgram(this._bgProg);
+    gl.uniform1i(this._bgU.kind, kind);
+    gl.uniform3fv(this._bgU.base, hexToVec3(bg.base || '#000000'));
+    gl.uniform3fv(this._bgU.top, hexToVec3(bg.topColor || bg.base || '#000000'));
+    gl.uniform3fv(this._bgU.bot, hexToVec3(bg.botColor || bg.base || '#000000'));
+    gl.uniform3fv(this._bgU.ringColor, rgbaStringToVec3(bg.ringColor || 'rgba(120,80,30,0.5)'));
+    gl.uniform3fv(this._bgU.gridColor, rgbaStringToVec3(bg.gridColor || 'rgba(0,255,170,0.5)'));
+    gl.uniform1f(this._bgU.gridStep, bg.gridStep || 48);
+    gl.uniform1f(this._bgU.vignette, bg.vignette || 0);
+    gl.uniform3f(this._bgU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform2f(this._bgU.viewport, this.W, this.H);
+    gl.uniform1f(this._bgU.time, t);
+    gl.uniform1i(this._bgU.spotCount, count);
+    gl.uniform4fv(this._bgU.spots, this._spotsBuf);
+    gl.uniform3fv(this._bgU.spotCols, this._spotColsBuf);
+
+    gl.bindVertexArray(this._bgVao);
     gl.disable(gl.BLEND);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.enable(gl.BLEND);
     gl.bindVertexArray(null);
-    // TODO Phase 4a: spots / agar rings / cybergrid / decor.
+    // Decor (lobules, villi, neurons, …) intentionally not ported —
+    // background flair only visible in a handful of themes.
   }
 
   _growInstanceBuffer(targetCount) {
@@ -347,8 +496,7 @@ export class WebGL2Renderer extends RendererBase {
     const gl = this.gl;
     if (!gl) return;
     if (this._diskProg) gl.deleteProgram(this._diskProg);
-    if (this._bgFlatProg) gl.deleteProgram(this._bgFlatProg);
-    if (this._bgGradProg) gl.deleteProgram(this._bgGradProg);
+    if (this._bgProg) gl.deleteProgram(this._bgProg);
     if (this._cornerVbo) gl.deleteBuffer(this._cornerVbo);
     if (this._instanceVbo) gl.deleteBuffer(this._instanceVbo);
     if (this._diskVao) gl.deleteVertexArray(this._diskVao);
