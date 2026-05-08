@@ -7,7 +7,7 @@
 
 import {
   S, FACE, CELL_TYPES, NUCLEUS_RATIO, WOBBLE_VERTS, THETA_TABLE, DOWNSAMPLE,
-  cellColors, currentTheme, currentBackground, hexToRgba, frac,
+  cellColors, currentTheme, currentBackground, currentHighlightColor, hexToRgba, frac,
 } from '../core/state.js';
 import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
 import { RendererBase } from './renderer.js';
@@ -464,6 +464,8 @@ export class Canvas2DRenderer extends RendererBase {
         ? splitVirtualCenters(cell)
         : [{ x: cell.x, y: cell.y, r: cell.r }];
       const cc = cellColors(cell);
+      const cType = CELL_TYPES[cell.type] || CELL_TYPES.neutrophil;
+      const hollow = !!cType.bodyHollow;
       for (const b of subs) {
         const cx = (b.x * cs + cTx) * sx;
         const cy = (b.y * cs + cTy) * sx;
@@ -476,6 +478,19 @@ export class Canvas2DRenderer extends RendererBase {
         offCtx.beginPath();
         offCtx.arc(cx, cy, r, 0, Math.PI * 2);
         offCtx.fill();
+        // Donut-hole effect for cells flagged bodyHollow (e.g. RBCs).
+        // Paint a smaller darker radial gradient on top, sinking the
+        // centre toward cytoBot.
+        if (hollow) {
+          const innerR = b.r * 0.45 * cs * sx;
+          const g2 = offCtx.createRadialGradient(cx, cy, 0, cx, cy, innerR);
+          g2.addColorStop(0, hexToRgba(cc.cytoBot, 0.55));
+          g2.addColorStop(1, hexToRgba(cc.cytoBot, 0));
+          offCtx.fillStyle = g2;
+          offCtx.beginPath();
+          offCtx.arc(cx, cy, innerR, 0, Math.PI * 2);
+          offCtx.fill();
+        }
       }
     }
     offCtx.globalCompositeOperation = 'destination-in';
@@ -1023,7 +1038,7 @@ export class Canvas2DRenderer extends RendererBase {
 
     this.withCameraCtx(() => {
       const N = WOBBLE_VERTS;
-      const hl = S.highlightColor || '#ffffff';
+      const hl = currentHighlightColor();
       for (const c of sim.selectedCells) {
         if (c.state !== 'NORMAL') continue;
         const cc = cellColors(c);

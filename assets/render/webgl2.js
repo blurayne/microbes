@@ -11,7 +11,7 @@
 // files, no build step.
 
 import {
-  S, FACE, CELL_TYPES, currentBackground, currentTheme, cellColors, frac,
+  S, FACE, CELL_TYPES, currentBackground, currentTheme, currentHighlightColor, cellColors, frac,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { RendererBase } from './renderer.js';
@@ -77,10 +77,12 @@ uniform vec3 u_highlight;   // S.highlightColor as rgb
 uniform float u_membraneIntensity; // S.membraneIntensity 0..1
 out vec4 outColor;
 
-// v_kind packs: body (0..5) + nucleus (0..5) * 16 + selected (0..1) * 256.
+// v_kind packs:
+//   body (0..5) + nucleus (0..5) * 16 + selected (0..1) * 256 + hollow (0..1) * 4096
 int bodyKind()    { return int(mod(v_kind + 0.5, 16.0)); }
 int nucKind()     { return int(mod((v_kind + 0.5) / 16.0, 16.0)); }
-int isSelected()  { return int((v_kind + 0.5) / 256.0); }
+int isSelected()  { return int(mod((v_kind + 0.5) / 256.0, 16.0)); }
+int isHollow()    { return int((v_kind + 0.5) / 4096.0); }
 
 float bodyScale(vec2 uv) {
   int kind = bodyKind();
@@ -147,6 +149,12 @@ void main() {
   vec3 cyto = mix(v_cytoTop, v_cytoBot, gradT);
   float topLift = max(0.0, 0.55 - distance(v_uv, vec2(-0.30, -0.40))) * 0.65;
   cyto = mix(cyto, v_cytoTop, topLift);
+
+  // Donut-hole darkening for cells flagged bodyHollow (RBCs).
+  if (isHollow() == 1) {
+    float holeT = 1.0 - smoothstep(0.0, 0.40, length(v_uv));
+    cyto = mix(cyto, v_cytoBot * 0.55, holeT * 0.65);
+  }
 
   // Bold membrane band straddling the body edge, in the cell's own deep
   // colour (a darkened cytoBot). Slider gates the alpha for parity with
@@ -1025,7 +1033,8 @@ export class WebGL2Renderer extends RendererBase {
       const bodyK = BODY_KIND_FLOAT[(type.body && type.body.kind) || 'round'] || 0;
       const nucK = NUC_KIND_FLOAT[(type.nucleus && type.nucleus.kind) || 'none'] || 0;
       const sel = this.sim.selectedCells.has(c) ? 1 : 0;
-      const kind = bodyK + nucK * 16 + sel * 256;
+      const hollow = type.bodyHollow ? 1 : 0;
+      const kind = bodyK + nucK * 16 + sel * 256 + hollow * 4096;
       const wobMul = (type.field && type.field.wobbleMul) || 1.0;
       const j = i * INSTANCE_FLOATS;
       data[j]     = s.x;
@@ -1050,7 +1059,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform2f(this._diskU.viewport, this.W, this.H);
     gl.uniform1f(this._diskU.time, time);
     gl.uniform1f(this._diskU.wobbleAmp, S.wobbleAmp || 0);
-    gl.uniform3fv(this._diskU.highlight, hexToVec3(S.highlightColor || '#ffffff'));
+    gl.uniform3fv(this._diskU.highlight, hexToVec3(currentHighlightColor()));
     gl.uniform1f(this._diskU.membraneIntensity,
       (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
     gl.bindVertexArray(this._diskVao);

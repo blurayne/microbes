@@ -6,7 +6,7 @@ import {
   S, saveSettings, applyI18n,
   THEMES, BACKGROUNDS, CELL_TYPES, PATHOGEN_GROUPS, LOCALES,
   T, cellLabel, cellDesc,
-  currentTheme, currentBackground,
+  currentTheme, currentBackground, colorNameFor,
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { Sim } from './core/sim.js';
@@ -356,11 +356,11 @@ if (blendSel) {
   });
 }
 
-const hcEl = document.getElementById('highlightColor');
-if (hcEl) {
-  hcEl.value = S.highlightColor || '#ffffff';
-  hcEl.addEventListener('input', () => {
-    S.highlightColor = hcEl.value;
+const useHl = document.getElementById('useHighlight');
+if (useHl) {
+  useHl.checked = !!S.useHighlight;
+  useHl.addEventListener('change', () => {
+    S.useHighlight = useHl.checked;
     saveSettings();
   });
 }
@@ -429,7 +429,7 @@ for (const [key, t] of Object.entries(THEMES)) {
   opt.value = key;
   // Append the theme's accent colour in parens so users can scan by hue.
   const accent = (t.ui && t.ui.panelAccent) || '';
-  opt.textContent = accent ? `${t.label} (${accent})` : t.label;
+  opt.textContent = accent ? `${t.label} (${colorNameFor(accent)})` : t.label;
   themeSelect.appendChild(opt);
 }
 themeSelect.value = S.theme in THEMES ? S.theme : 'petriDish';
@@ -597,7 +597,10 @@ renderHelpList();
 // Language selector — re-renders dialogs on change.
 const langSelect = document.getElementById('langSelect');
 if (langSelect) {
-  const langs = [['en','English'],['de','Deutsch'],['es','Español'],['brbn','Barbarian']];
+  const langs = [
+    ['en','English'], ['de','Deutsch'], ['es','Español'],
+    ['bar','Bayrisch'], ['latin','Latina'],
+  ];
   for (const [k, label] of langs) {
     const opt = document.createElement('option');
     opt.value = k;

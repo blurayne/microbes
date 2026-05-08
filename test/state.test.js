@@ -25,8 +25,10 @@ test('T() interpolates {name}-style placeholders', () => {
   assert.equal(T('adding', { name: 'Foo' }), 'Adding: Foo');
   S.lang = 'de';
   assert.equal(T('adding', { name: 'Foo' }), 'Hinzufügen: Foo');
-  S.lang = 'brbn';
-  assert.equal(T('adding', { name: 'Foo' }), 'STUFF NEW: Foo');
+  S.lang = 'bar';
+  assert.equal(T('adding', { name: 'Foo' }), 'Dazua: Foo');
+  S.lang = 'latin';
+  assert.equal(T('adding', { name: 'Foo' }), 'Addendo: Foo');
   S.lang = 'en';
 });
 
