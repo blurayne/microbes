@@ -124,9 +124,10 @@
         <h3 data-i18n="performance">Performance</h3>
         <label><span data-i18n="render_scale">Render scale</span>
           <select id="renderScale">
-            <option value="1">100%</option>
-            <option value="0.75">75%</option>
-            <option value="0.5">50%</option>
+            <option value="1">1:1</option>
+            <option value="0.5">1:2</option>
+            <option value="0.25">1:4</option>
+            <option value="0.125">1:8</option>
           </select>
         </label>
         <label><span data-i18n="upscale">Upscale</span>
@@ -183,6 +184,15 @@
       <div id="cellGridBad"></div>
       <p class="palette-footer"><a href="#" id="paletteBadToHelp" data-i18n="palette_bad_to_help">Learn what each pathogen does →</a></p>
     </aside>
+  </div>
+
+  <div id="modeToggle" class="mode-toggle">
+    <button id="modeTarget" type="button" class="mode-btn"
+            aria-label="Target mode" title="Tap to select / send selected cells"
+            data-i18n-attr="aria-label=mode_target,title=mode_target_tip">🎯</button>
+    <button id="modeSplit" type="button" class="mode-btn"
+            aria-label="Split mode" title="Tap a cell to split it"
+            data-i18n-attr="aria-label=mode_split,title=mode_split_tip">✂</button>
   </div>
 
   <div id="fps" aria-hidden="true"></div>

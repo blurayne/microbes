@@ -67,6 +67,10 @@
       // Background was bundled into theme before the split — fall back to the
       // matching bg key when an old save has no `background` set.
       if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
+      // Render-scale options are now powers-of-two ratios; snap any stale value
+      // (e.g. legacy 0.75) to the closest supported step.
+      const rsValid = [1, 0.5, 0.25, 0.125];
+      if (!rsValid.includes(parsed.renderScale)) parsed.renderScale = 1;
       return { ...DEFAULTS, ...parsed };
     } catch { return { ...DEFAULTS }; }
   }
@@ -104,6 +108,8 @@
       friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
       wobble: 'Wobble', bg_flow: 'Background flow', outline_px: 'Outline px',
       membrane: 'Membrane', cell_size: 'Cell size', highlight_color: 'Highlight colour',
+      mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
+      mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
       cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS',
       show_field: 'Show metaball field', render_scale: 'Render scale',
       upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
@@ -176,6 +182,8 @@
       friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
       wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
       membrane: 'Membran', cell_size: 'Zellgröße', highlight_color: 'Akzentfarbe',
+      mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
+      mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
       cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen',
       show_field: 'Metaball-Feld zeigen', render_scale: 'Renderskala',
       upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',
@@ -248,6 +256,8 @@
       friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
       wobble: 'Oscilación', bg_flow: 'Flujo de fondo', outline_px: 'Contorno px',
       membrane: 'Membrana', cell_size: 'Tamaño de célula', highlight_color: 'Color de selección',
+      mode_target: 'Modo objetivo', mode_target_tip: 'Toca para seleccionar / enviar',
+      mode_split: 'Modo división', mode_split_tip: 'Toca una célula para dividirla',
       cartoon_mode: 'Modo dibujo (caras)', show_fps: 'Mostrar FPS',
       show_field: 'Mostrar campo metaball', render_scale: 'Escala de render',
       upscale: 'Reescalar', scanlines: 'Líneas de barrido (CRT)',
@@ -320,6 +330,8 @@
       friction: 'STICKY WORLD', bounce: 'SPRING POWER', throw_strength: 'ROCK THROW POWER',
       wobble: 'JIGGLE', bg_flow: 'WORLD MOVE', outline_px: 'EDGE THICK',
       membrane: 'SKIN', cell_size: 'BIG CELL OR SMOL CELL', highlight_color: 'PICK SHINY COLOR',
+      mode_target: 'POINT MODE', mode_target_tip: 'TAP PICK GUY OR SET PLACE',
+      mode_split: 'SMASH MODE', mode_split_tip: 'TAP CELL MAKE TWO',
       cartoon_mode: 'BIG SILLY FACES', show_fps: 'SHOW FAST NUMBER',
       show_field: 'SHOW BLOB GRID', render_scale: 'BIG MAKE SIZE',
       upscale: 'BIG GROW', scanlines: 'TV LINE THING',
@@ -911,7 +923,7 @@
     H = window.innerHeight;
     // Render-scale multiplier on the backing-store; CSS keeps the canvas the
     // same display size, so the browser upscales the lower-res render.
-    const rs = Math.max(0.25, Math.min(1, S.renderScale || 1));
+    const rs = Math.max(0.125, Math.min(1, S.renderScale || 1));
     canvas.width  = Math.max(2, Math.floor(W * dpr * rs));
     canvas.height = Math.max(2, Math.floor(H * dpr * rs));
     canvas.style.width = W + 'px';
@@ -3159,7 +3171,23 @@
       if (onChange) onChange(el.checked);
     });
   }
-  bindCheckbox('splitOnTap', 'splitOnTap');
+  const modeTargetBtn = document.getElementById('modeTarget');
+  const modeSplitBtn  = document.getElementById('modeSplit');
+  function applyModeUi() {
+    if (modeTargetBtn) modeTargetBtn.classList.toggle('active', !S.splitOnTap);
+    if (modeSplitBtn)  modeSplitBtn.classList.toggle('active',  !!S.splitOnTap);
+  }
+  function setSplitOnTap(on) {
+    S.splitOnTap = !!on;
+    saveSettings();
+    applyModeUi();
+    const cb = document.getElementById('splitOnTap');
+    if (cb) cb.checked = S.splitOnTap;
+  }
+  if (modeTargetBtn) modeTargetBtn.addEventListener('click', () => setSplitOnTap(false));
+  if (modeSplitBtn)  modeSplitBtn.addEventListener('click',  () => setSplitOnTap(true));
+  bindCheckbox('splitOnTap', 'splitOnTap', applyModeUi);
+  applyModeUi();
   bindCheckbox('randomSplit', 'randomSplit');
   bindCheckbox('cartoon', 'cartoon');
   bindCheckbox('showFPS', 'showFPS', (on) => {
@@ -3240,7 +3268,7 @@
     renderScaleEl.addEventListener('change', () => {
       const v = parseFloat(renderScaleEl.value);
       if (!isNaN(v)) {
-        S.renderScale = Math.max(0.25, Math.min(1, v));
+        S.renderScale = Math.max(0.125, Math.min(1, v));
         saveSettings();
         resize();
       }
@@ -3577,24 +3605,18 @@
     if (!el) return;
     const b = window.__BUILD__ || { sha: 'dev', run: 0, dateUtc: null };
     const sha = (b.sha || 'dev').slice(0, 7);
-    const run = (b.run !== undefined && b.run !== null) ? b.run : 0;
-    let when = '—';
+    let when = '';
     if (b.dateUtc) {
       const d = new Date(b.dateUtc);
       if (!isNaN(d.getTime())) {
-        const offMin = -d.getTimezoneOffset();
-        const sign = offMin >= 0 ? '+' : '-';
-        const abs = Math.abs(offMin);
-        const oh = String(Math.floor(abs / 60)).padStart(2, '0');
-        const om = String(abs % 60).padStart(2, '0');
-        const local = d.toLocaleString(undefined, {
-          year: 'numeric', month: '2-digit', day: '2-digit',
-          hour: '2-digit', minute: '2-digit', hour12: false,
-        });
-        when = `${local} UTC${sign}${oh}:${om}`;
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mi = String(d.getMinutes()).padStart(2, '0');
+        when = `${mm}-${dd} ${hh}:${mi}`;
       }
     }
-    el.textContent = `sha ${sha} · build #${run} · ${when}`;
+    el.textContent = when ? `${sha} · ${when}` : sha;
   }
   renderBuildStamp();
 
