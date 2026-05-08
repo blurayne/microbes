@@ -64,6 +64,19 @@ body.no-bad #help { bottom: 166px; }
   color: #ffd0d8aa;
 }
 .cell-grid-section > .cell-grid { margin-bottom: 0; }
+
+.palette-footer {
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  text-align: right;
+  font-size: 12px;
+}
+.palette-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.palette-footer a:hover { text-decoration: underline; }
 .cell-list-section { margin-bottom: 14px; }
 .cell-list-section > h3 {
   margin: 0 0 6px;
@@ -212,16 +225,19 @@ body.no-bad #help { bottom: 166px; }
 
 #build {
   position: fixed;
-  bottom: 10px;
-  left: 12px;
+  top: 10px;
+  left: 70px;
   z-index: 9;
   font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--ink);
-  opacity: 0.45;
+  opacity: 0.55;
   pointer-events: none;
   user-select: none;
   letter-spacing: 0.02em;
   text-shadow: 0 1px 2px #0008;
+  background: #00000044;
+  padding: 3px 8px;
+  border-radius: 6px;
 }
 
 #fps {
@@ -285,7 +301,6 @@ body.scanlines #scanlines { display: block; }
 }
 body.adding #addBadge { display: inline-flex; }
 body.adding #stage    { cursor: crosshair; }
-body.adding #build    { bottom: 14px; }
 #addBadge .x {
   display: inline-grid;
   place-items: center;
@@ -300,6 +315,36 @@ body.adding #build    { bottom: 14px; }
   padding: 0;
 }
 #addBadge .x:hover { background: rgba(0,0,0,0.5); }
+
+.mode-toggle {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 11;
+  display: flex;
+  gap: 8px;
+}
+.mode-btn {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px solid #000;
+  background: #ffffff14;
+  color: var(--ink);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  font: 600 18px/1 system-ui, sans-serif;
+  box-shadow: 0 2px 8px #0008;
+  transition: transform 100ms ease, background 120ms ease;
+  padding: 0;
+}
+.mode-btn:hover  { transform: scale(1.05); }
+.mode-btn:active { transform: scale(0.95); }
+.mode-btn.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
 
 /* Generic dialog (help + palette) — same chrome as the settings dialog */
 .dialog {
@@ -348,12 +393,32 @@ body.adding #build    { bottom: 14px; }
   font-size: 13px;
 }
 .cell-list li:first-child { border-top: 0; }
-.cell-list li b {
+.cell-list-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.cell-list-section .cell-list-row:first-of-type { border-top: 0; }
+.cell-list-icon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  display: block;
+}
+.cell-list-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.cell-list-text b {
   display: block;
   color: var(--accent);
   margin-bottom: 2px;
   font-size: 13px;
 }
+.cell-list-text span { display: block; }
 
 .cell-grid {
   display: grid;
