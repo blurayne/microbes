@@ -10,7 +10,7 @@
   <canvas id="stage"></canvas>
   <div id="scanlines" aria-hidden="true"></div>
 
-  <button id="gear" type="button" aria-label="Settings" title="Settings">
+  <button id="gear" type="button" aria-label="Settings" title="Settings" data-i18n-attr="aria-label=nav_settings,title=nav_settings">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
       <path fill="currentColor" d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9.4 4.9-.05.6 2.05 1.6-2 3.46-2.42-.97a7.7 7.7 0 0 1-1.04.6l-.36 2.57h-4l-.36-2.57a7.7 7.7 0 0 1-1.04-.6l-2.42.97-2-3.46L9.8 13.5a7.6 7.6 0 0 1 0-3l-2.05-1.6 2-3.46 2.42.97c.33-.23.68-.43 1.04-.6L13.58 3h4l.36 2.57c.36.17.71.37 1.04.6l2.42-.97 2 3.46-2.05 1.6c.06.4.06.8.05 1.24Z"/>
     </svg>
@@ -20,133 +20,141 @@
     <div class="settings-backdrop" data-close></div>
     <aside class="settings-panel">
       <header>
-        <h2>Settings</h2>
+        <h2 data-i18n="settings_title">Settings</h2>
         <button type="button" class="close" data-close aria-label="Close">&times;</button>
       </header>
 
       <section>
-        <h3>Theme</h3>
+        <h3 data-i18n="language">Language</h3>
+        <select id="langSelect"></select>
+      </section>
+
+      <section>
+        <h3 data-i18n="theme">Theme</h3>
         <select id="themeSelect"></select>
       </section>
 
       <section>
-        <h3>Background</h3>
+        <h3 data-i18n="background">Background</h3>
         <select id="bgSelect"></select>
       </section>
 
       <section>
-        <h3>Gameplay</h3>
-        <label><input type="checkbox" id="allowBadGuys" /> Allow pathogens</label>
+        <h3 data-i18n="gameplay">Gameplay</h3>
+        <label><input type="checkbox" id="allowBadGuys" /> <span data-i18n="allow_pathogens">Allow pathogens</span></label>
       </section>
 
       <section>
-        <h3>Splitting</h3>
-        <label><input type="checkbox" id="splitOnTap" /> Split on tap</label>
-        <label><input type="checkbox" id="randomSplit" /> Random splitting</label>
+        <h3 data-i18n="splitting">Splitting</h3>
+        <label><input type="checkbox" id="splitOnTap" /> <span data-i18n="split_on_tap">Split on tap</span></label>
+        <label><input type="checkbox" id="randomSplit" /> <span data-i18n="random_split">Random splitting</span></label>
       </section>
 
       <section>
-        <h3>Split mode</h3>
-        <label><input type="radio" name="splitMode" value="pushApart" /> Push apart with momentum</label>
-        <label><input type="radio" name="splitMode" value="bondDrift" /> Bond, then drift</label>
+        <h3 data-i18n="split_mode">Split mode</h3>
+        <label><input type="radio" name="splitMode" value="pushApart" /> <span data-i18n="split_push">Push apart with momentum</span></label>
+        <label><input type="radio" name="splitMode" value="bondDrift" /> <span data-i18n="split_bond">Bond, then drift</span></label>
       </section>
 
       <section>
-        <h3>Population</h3>
-        <label>Max cells <span id="maxCellsVal" class="val"></span>
+        <h3 data-i18n="population">Population</h3>
+        <label><span data-i18n="max_cells">Max cells</span> <span id="maxCellsVal" class="val"></span>
           <input type="range" id="maxCells" min="2" max="128" step="1" />
         </label>
-        <label>Auto-split (s) <span id="autoVal" class="val"></span>
+        <label><span data-i18n="auto_split">Auto-split (s)</span> <span id="autoVal" class="val"></span>
           <input type="range" id="autoSplitSeconds" min="2" max="30" step="1" />
         </label>
       </section>
 
       <section>
-        <h3>Physics</h3>
-        <label>Friction <span id="frictionVal" class="val"></span>
+        <h3 data-i18n="physics">Physics</h3>
+        <label><span data-i18n="friction">Friction</span> <span id="frictionVal" class="val"></span>
           <input type="range" id="friction" min="0" max="1" step="0.01" />
         </label>
-        <label>Bounce <span id="bounceVal" class="val"></span>
+        <label><span data-i18n="bounce">Bounce</span> <span id="bounceVal" class="val"></span>
           <input type="range" id="bounce" min="0" max="1" step="0.01" />
         </label>
-        <label>Throw strength <span id="throwVal" class="val"></span>
+        <label><span data-i18n="throw_strength">Throw strength</span> <span id="throwVal" class="val"></span>
           <input type="range" id="throwStrength" min="0" max="3" step="0.05" />
         </label>
       </section>
 
       <section>
-        <h3>Cell blending</h3>
+        <h3 data-i18n="cell_blending">Cell blending</h3>
         <select id="blendMode">
-          <option value="source-over">None</option>
-          <option value="overlay">Overlay (default)</option>
-          <option value="multiply">Multiply</option>
-          <option value="darken">Darken</option>
-          <option value="lighter">Add (Lighter)</option>
-          <option value="screen">Screen</option>
-          <option value="soft-light">Soft light</option>
-          <option value="hard-light">Hard light</option>
-          <option value="color-burn">Color burn</option>
-          <option value="color-dodge">Color dodge</option>
+          <option value="source-over" data-i18n="blend_none">None</option>
+          <option value="overlay" data-i18n="blend_overlay">Overlay (default)</option>
+          <option value="multiply" data-i18n="blend_multiply">Multiply</option>
+          <option value="darken" data-i18n="blend_darken">Darken</option>
+          <option value="lighter" data-i18n="blend_lighter">Add (Lighter)</option>
+          <option value="screen" data-i18n="blend_screen">Screen</option>
+          <option value="soft-light" data-i18n="blend_softlight">Soft light</option>
+          <option value="hard-light" data-i18n="blend_hardlight">Hard light</option>
+          <option value="color-burn" data-i18n="blend_burn">Color burn</option>
+          <option value="color-dodge" data-i18n="blend_dodge">Color dodge</option>
         </select>
       </section>
 
       <section>
-        <h3>Look</h3>
-        <label>Wobble <span id="wobbleVal" class="val"></span>
+        <h3 data-i18n="look">Look</h3>
+        <label><span data-i18n="wobble">Wobble</span> <span id="wobbleVal" class="val"></span>
           <input type="range" id="wobbleAmp" min="0" max="0.4" step="0.01" />
         </label>
-        <label>Background flow <span id="bgVal" class="val"></span>
+        <label><span data-i18n="bg_flow">Background flow</span> <span id="bgVal" class="val"></span>
           <input type="range" id="bgFlowSpeed" min="0" max="2" step="0.05" />
         </label>
-        <label>Outline px <span id="outVal" class="val"></span>
+        <label><span data-i18n="outline_px">Outline px</span> <span id="outVal" class="val"></span>
           <input type="range" id="outlinePx" min="1" max="10" step="1" />
         </label>
-        <label>Membrane <span id="membraneVal" class="val"></span>
+        <label><span data-i18n="membrane">Membrane</span> <span id="membraneVal" class="val"></span>
           <input type="range" id="membraneIntensity" min="0" max="1" step="0.05" />
         </label>
-        <label>Cell size <span id="cellSizeVal" class="val"></span>
+        <label><span data-i18n="cell_size">Cell size</span> <span id="cellSizeVal" class="val"></span>
           <input type="range" id="cellSizeMul" min="0.4" max="2.0" step="0.05" />
         </label>
-        <label><input type="checkbox" id="cartoon" /> Cartoon mode (faces)</label>
-        <label><input type="checkbox" id="showFPS" /> Show FPS</label>
-        <label><input type="checkbox" id="showDebugField" /> Show metaball field</label>
+        <label><span data-i18n="highlight_color">Highlight colour</span>
+          <input type="color" id="highlightColor" />
+        </label>
+        <label><input type="checkbox" id="cartoon" /> <span data-i18n="cartoon_mode">Cartoon mode (faces)</span></label>
+        <label><input type="checkbox" id="showFPS" /> <span data-i18n="show_fps">Show FPS</span></label>
+        <label><input type="checkbox" id="showDebugField" /> <span data-i18n="show_field">Show metaball field</span></label>
       </section>
 
       <section>
-        <h3>Performance</h3>
-        <label>Render scale
+        <h3 data-i18n="performance">Performance</h3>
+        <label><span data-i18n="render_scale">Render scale</span>
           <select id="renderScale">
             <option value="1">100%</option>
             <option value="0.75">75%</option>
             <option value="0.5">50%</option>
           </select>
         </label>
-        <label>Upscale
+        <label><span data-i18n="upscale">Upscale</span>
           <select id="upscaleMode">
-            <option value="blur">Blur (smooth)</option>
-            <option value="pixel">Pixel (crisp)</option>
+            <option value="blur" data-i18n="upscale_blur">Blur (smooth)</option>
+            <option value="pixel" data-i18n="upscale_pixel">Pixel (crisp)</option>
           </select>
         </label>
-        <label><input type="checkbox" id="scanlines" /> Scanlines (CRT)</label>
+        <label><input type="checkbox" id="scanlines" /> <span data-i18n="scanlines">Scanlines (CRT)</span></label>
       </section>
       </section>
 
       <section class="actions">
-        <button type="button" id="resetSim">Reset simulation</button>
+        <button type="button" id="resetSim" data-i18n="reset_sim">Reset simulation</button>
       </section>
     </aside>
   </div>
 
-  <button id="help" class="fab" type="button" aria-label="Help" title="Help">?</button>
-  <button id="paletteBad" class="fab fab-bad" type="button" aria-label="Add pathogen" title="Add a pathogen">✚</button>
-  <button id="palette" class="fab" type="button" aria-label="Add cell" title="Add a cell">+</button>
-  <button id="reload" class="fab" type="button" aria-label="Reload" title="Hard reload">⟳</button>
+  <button id="help" class="fab" type="button" aria-label="Help" title="Help" data-i18n-attr="aria-label=nav_help,title=nav_help">?</button>
+  <button id="paletteBad" class="fab fab-bad" type="button" aria-label="Add pathogen" title="Add a pathogen" data-i18n-attr="aria-label=nav_add_pathogen,title=nav_add_pathogen">✚</button>
+  <button id="palette" class="fab" type="button" aria-label="Add cell" title="Add a cell" data-i18n-attr="aria-label=nav_add_cell,title=nav_add_cell">+</button>
+  <button id="reload" class="fab" type="button" aria-label="Reload" title="Hard reload" data-i18n-attr="aria-label=nav_reload,title=nav_reload">⟳</button>
 
   <div id="helpDialog" class="dialog hidden" role="dialog" aria-label="Cell help">
     <div class="dialog-backdrop" data-close></div>
     <aside class="dialog-panel">
       <header>
-        <h2>Cells of the immune system</h2>
+        <h2 data-i18n="help_title">Cells of the immune system</h2>
         <button type="button" class="close" data-close aria-label="Close">&times;</button>
       </header>
       <ul id="cellList" class="cell-list"></ul>
@@ -157,10 +165,11 @@
     <div class="dialog-backdrop" data-close></div>
     <aside class="dialog-panel">
       <header>
-        <h2>Add a cell</h2>
+        <h2 data-i18n="add_cell">Add a cell</h2>
         <button type="button" class="close" data-close aria-label="Close">&times;</button>
       </header>
       <div id="cellGrid"></div>
+      <p class="palette-footer"><a href="#" id="paletteToHelp" data-i18n="palette_to_help">Learn what each cell does →</a></p>
     </aside>
   </div>
 
@@ -168,10 +177,11 @@
     <div class="dialog-backdrop" data-close></div>
     <aside class="dialog-panel">
       <header>
-        <h2>Add a pathogen</h2>
+        <h2 data-i18n="add_pathogen">Add a pathogen</h2>
         <button type="button" class="close" data-close aria-label="Close">&times;</button>
       </header>
       <div id="cellGridBad"></div>
+      <p class="palette-footer"><a href="#" id="paletteBadToHelp" data-i18n="palette_bad_to_help">Learn what each pathogen does →</a></p>
     </aside>
   </div>
 

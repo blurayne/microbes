@@ -64,6 +64,19 @@ body.no-bad #help { bottom: 166px; }
   color: #ffd0d8aa;
 }
 .cell-grid-section > .cell-grid { margin-bottom: 0; }
+
+.palette-footer {
+  margin: 16px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  text-align: right;
+  font-size: 12px;
+}
+.palette-footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.palette-footer a:hover { text-decoration: underline; }
 .cell-list-section { margin-bottom: 14px; }
 .cell-list-section > h3 {
   margin: 0 0 6px;
@@ -348,12 +361,32 @@ body.adding #build    { bottom: 14px; }
   font-size: 13px;
 }
 .cell-list li:first-child { border-top: 0; }
-.cell-list li b {
+.cell-list-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+}
+.cell-list-section .cell-list-row:first-of-type { border-top: 0; }
+.cell-list-icon {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  display: block;
+}
+.cell-list-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+}
+.cell-list-text b {
   display: block;
   color: var(--accent);
   margin-bottom: 2px;
   font-size: 13px;
 }
+.cell-list-text span { display: block; }
 
 .cell-grid {
   display: grid;

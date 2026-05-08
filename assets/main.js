@@ -35,6 +35,7 @@
     renderScale: 1.0,         // 1.0 | 0.75 | 0.5 — backing canvas scale
     upscaleMode: 'blur',      // 'blur' | 'pixel' — image-rendering on the canvas
     scanlines: false,         // CRT-style scanline overlay
+    highlightColor: '#ffffff',// colour of the selection brighten overlay
   };
 
   function loadSettings() {
@@ -75,6 +76,341 @@
   }
 
   const S = loadSettings();
+
+  // First-run language auto-detect: if the saved settings didn't specify a
+  // language explicitly, take it from the browser. Done after loadSettings so
+  // it only fires when no preference exists.
+  if (!S._langSet) {
+    const nav = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : 'en';
+    if (nav.startsWith('de')) S.lang = 'de';
+    else if (nav.startsWith('es')) S.lang = 'es';
+    else S.lang = 'en';
+    S._langSet = true;
+    saveSettings();
+  }
+
+  // ---------- i18n ----------
+  const LOCALES = {
+    en: {
+      settings_title: 'Settings',
+      theme: 'Theme', background: 'Background', gameplay: 'Gameplay',
+      splitting: 'Splitting', split_mode: 'Split mode', population: 'Population',
+      physics: 'Physics', cell_blending: 'Cell blending', look: 'Look',
+      performance: 'Performance', language: 'Language',
+      allow_pathogens: 'Allow pathogens',
+      split_on_tap: 'Split on tap', random_split: 'Random splitting',
+      split_push: 'Push apart with momentum', split_bond: 'Bond, then drift',
+      max_cells: 'Max cells', auto_split: 'Auto-split (s)',
+      friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
+      wobble: 'Wobble', bg_flow: 'Background flow', outline_px: 'Outline px',
+      membrane: 'Membrane', cell_size: 'Cell size', highlight_color: 'Highlight colour',
+      cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS',
+      show_field: 'Show metaball field', render_scale: 'Render scale',
+      upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
+      reset_sim: 'Reset simulation',
+      help_title: 'Cells of the immune system',
+      add_cell: 'Add a cell', add_pathogen: 'Add a pathogen',
+      palette_to_help: 'Learn what each cell does →',
+      palette_bad_to_help: 'Learn what each pathogen does →',
+      nav_settings: 'Settings', nav_help: 'Help', nav_add_cell: 'Add a cell',
+      nav_add_pathogen: 'Add a pathogen', nav_reload: 'Hard reload',
+      adding: 'Adding: {name}',
+      fps_line: '{fps} fps · cells {n}',
+      help_group_good: 'Good (Immune system)',
+      blend_none: 'None', blend_overlay: 'Overlay (default)', blend_multiply: 'Multiply',
+      blend_darken: 'Darken', blend_lighter: 'Add (Lighter)', blend_screen: 'Screen',
+      blend_softlight: 'Soft light', blend_hardlight: 'Hard light',
+      blend_burn: 'Color burn', blend_dodge: 'Color dodge',
+      upscale_blur: 'Blur (smooth)', upscale_pixel: 'Pixel (crisp)',
+      pgroup_virus: 'Viruses', pgroup_bacteria: 'Bacteria',
+      pgroup_parasite: 'Parasites', pgroup_fungus: 'Fungi', pgroup_toxin: 'Toxins',
+      cell_neutrophil_label: 'Neutrophil',
+      cell_neutrophil_desc: 'First responder; engulfs bacteria via phagocytosis. The most abundant white blood cell.',
+      cell_monocyte_label: 'Monocyte',
+      cell_monocyte_desc: 'Circulating sentinel that matures into macrophages or dendritic cells once it enters tissue.',
+      cell_mast_label: 'Mast Cell',
+      cell_mast_desc: 'Tissue-resident sentinel; releases histamine to trigger inflammation and allergic responses.',
+      cell_nk_label: 'Natural Killer',
+      cell_nk_desc: 'Patrols for virus-infected and tumour cells; kills on contact without prior sensitisation.',
+      cell_macrophage_label: 'Macrophage',
+      cell_macrophage_desc: '"Big eater" — long-lived phagocyte that engulfs pathogens and presents antigens to T cells.',
+      cell_dendritic_label: 'Dendritic Cell',
+      cell_dendritic_desc: 'Antigen-presenting courier; samples invaders and shows them to T cells in lymph nodes.',
+      cell_basophil_label: 'Basophil',
+      cell_basophil_desc: 'Circulating granulocyte; releases histamine and heparin to reinforce inflammation.',
+      cell_platelet_label: 'Platelet',
+      cell_platelet_desc: 'Tiny cell fragment that clots blood at injuries and helps recruit immune cells.',
+      cell_tcell_label: 'T Cell',
+      cell_tcell_desc: 'Adaptive killer / coordinator; recognises specific antigens and kills infected cells.',
+      cell_bcell_label: 'B Cell',
+      cell_bcell_desc: 'Adaptive antibody factory; secretes antibodies tagged to specific pathogens.',
+      cell_eosinophil_label: 'Eosinophil',
+      cell_eosinophil_desc: 'Anti-parasite specialist; key in allergic responses, releases toxic granule contents.',
+      cell_virus_label: 'Virus',
+      cell_virus_desc: 'Spike-protein invader; hijacks cells to replicate inside them.',
+      cell_germ_label: 'Germ',
+      cell_germ_desc: 'Generic bumpy microbe — opportunistic infector.',
+      cell_bacterium_label: 'Bacterium',
+      cell_bacterium_desc: 'Rod-shaped bacterium swimming with a whipping flagellum.',
+      cell_amoebaP_label: 'Amoeba (parasite)',
+      cell_amoebaP_desc: 'Amoeboid parasite that crawls and engulfs tissue.',
+      cell_slime_label: 'Slime',
+      cell_slime_desc: 'Slimy biofilm globule; drips toxic ooze.',
+      cell_mite_label: 'Mite',
+      cell_mite_desc: 'Tiny scuttling bug; lots of little legs.',
+      cell_spore_label: 'Spore',
+      cell_spore_desc: 'Fungal spore — drifts on currents and seeds new growth.',
+      cell_toxin_label: 'Toxin',
+      cell_toxin_desc: 'Jagged toxin crystal that drifts and burns on contact.',
+    },
+    de: {
+      settings_title: 'Einstellungen',
+      theme: 'Thema', background: 'Hintergrund', gameplay: 'Spiel',
+      splitting: 'Teilung', split_mode: 'Teilungsmodus', population: 'Population',
+      physics: 'Physik', cell_blending: 'Zellüberblendung', look: 'Aussehen',
+      performance: 'Leistung', language: 'Sprache',
+      allow_pathogens: 'Krankheitserreger erlauben',
+      split_on_tap: 'Bei Antippen teilen', random_split: 'Zufällige Teilung',
+      split_push: 'Mit Schwung auseinander', split_bond: 'Verbinden, dann driften',
+      max_cells: 'Max. Zellen', auto_split: 'Auto-Teilung (s)',
+      friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
+      wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
+      membrane: 'Membran', cell_size: 'Zellgröße', highlight_color: 'Akzentfarbe',
+      cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen',
+      show_field: 'Metaball-Feld zeigen', render_scale: 'Renderskala',
+      upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',
+      reset_sim: 'Simulation zurücksetzen',
+      help_title: 'Zellen des Immunsystems',
+      add_cell: 'Zelle hinzufügen', add_pathogen: 'Erreger hinzufügen',
+      palette_to_help: 'Was macht jede Zelle? →',
+      palette_bad_to_help: 'Was macht jeder Erreger? →',
+      nav_settings: 'Einstellungen', nav_help: 'Hilfe', nav_add_cell: 'Zelle hinzufügen',
+      nav_add_pathogen: 'Erreger hinzufügen', nav_reload: 'Neu laden',
+      adding: 'Hinzufügen: {name}',
+      fps_line: '{fps} fps · Zellen {n}',
+      help_group_good: 'Gut (Immunsystem)',
+      blend_none: 'Keine', blend_overlay: 'Overlay (Standard)', blend_multiply: 'Multiplizieren',
+      blend_darken: 'Abdunkeln', blend_lighter: 'Heller', blend_screen: 'Aufhellen',
+      blend_softlight: 'Weiches Licht', blend_hardlight: 'Hartes Licht',
+      blend_burn: 'Nachbelichten', blend_dodge: 'Abwedeln',
+      upscale_blur: 'Weichzeichnen', upscale_pixel: 'Pixel (knackig)',
+      pgroup_virus: 'Viren', pgroup_bacteria: 'Bakterien',
+      pgroup_parasite: 'Parasiten', pgroup_fungus: 'Pilze', pgroup_toxin: 'Toxine',
+      cell_neutrophil_label: 'Neutrophil',
+      cell_neutrophil_desc: 'Erste Verteidigung; verschlingt Bakterien per Phagozytose. Häufigste weiße Blutzelle.',
+      cell_monocyte_label: 'Monozyt',
+      cell_monocyte_desc: 'Wachposten im Blut; reift im Gewebe zu Makrophagen oder dendritischen Zellen.',
+      cell_mast_label: 'Mastzelle',
+      cell_mast_desc: 'Gewebewächter; setzt Histamin frei und löst Entzündung und Allergie aus.',
+      cell_nk_label: 'Natürliche Killerzelle',
+      cell_nk_desc: 'Patrouilliert nach virusinfizierten und Tumorzellen; tötet bei Kontakt ohne Vorprägung.',
+      cell_macrophage_label: 'Makrophage',
+      cell_macrophage_desc: '"Großfresser" — langlebiger Phagozyt; verdaut Erreger und präsentiert Antigene den T-Zellen.',
+      cell_dendritic_label: 'Dendritische Zelle',
+      cell_dendritic_desc: 'Antigen-präsentierender Kurier; bringt Erregerproben zu den T-Zellen in den Lymphknoten.',
+      cell_basophil_label: 'Basophiler Granulozyt',
+      cell_basophil_desc: 'Kreisender Granulozyt; setzt Histamin und Heparin frei und verstärkt Entzündung.',
+      cell_platelet_label: 'Blutplättchen',
+      cell_platelet_desc: 'Winziges Zellfragment; gerinnt Blut an Wunden und hilft, Immunzellen zu rekrutieren.',
+      cell_tcell_label: 'T-Zelle',
+      cell_tcell_desc: 'Adaptiver Killer/Koordinator; erkennt spezifische Antigene und tötet infizierte Zellen.',
+      cell_bcell_label: 'B-Zelle',
+      cell_bcell_desc: 'Adaptive Antikörperfabrik; produziert Antikörper passend zu jedem Erreger.',
+      cell_eosinophil_label: 'Eosinophiler Granulozyt',
+      cell_eosinophil_desc: 'Spezialist gegen Parasiten; wichtig bei Allergien, setzt giftige Granulen frei.',
+      cell_virus_label: 'Virus',
+      cell_virus_desc: 'Spike-Eindringling; kapert Zellen, um sich darin zu vermehren.',
+      cell_germ_label: 'Keim',
+      cell_germ_desc: 'Allgemeine knubbelige Mikrobe — opportunistischer Erreger.',
+      cell_bacterium_label: 'Bakterium',
+      cell_bacterium_desc: 'Stäbchenbakterium, schwimmt mit peitschendem Flagellum.',
+      cell_amoebaP_label: 'Amöbe (Parasit)',
+      cell_amoebaP_desc: 'Amöboider Parasit; kriecht und verschlingt Gewebe.',
+      cell_slime_label: 'Schleim',
+      cell_slime_desc: 'Schleimige Biofilm-Kugel; tropft giftige Brühe.',
+      cell_mite_label: 'Milbe',
+      cell_mite_desc: 'Winziger Krabbler; viele kleine Beine.',
+      cell_spore_label: 'Spore',
+      cell_spore_desc: 'Pilzspore — treibt mit der Strömung und sät neues Wachstum.',
+      cell_toxin_label: 'Toxin',
+      cell_toxin_desc: 'Zackiger Giftkristall; treibt umher und verbrennt bei Kontakt.',
+    },
+    es: {
+      settings_title: 'Ajustes',
+      theme: 'Tema', background: 'Fondo', gameplay: 'Juego',
+      splitting: 'División', split_mode: 'Modo de división', population: 'Población',
+      physics: 'Física', cell_blending: 'Mezcla de células', look: 'Estilo',
+      performance: 'Rendimiento', language: 'Idioma',
+      allow_pathogens: 'Permitir patógenos',
+      split_on_tap: 'Dividir al tocar', random_split: 'División aleatoria',
+      split_push: 'Empujar con impulso', split_bond: 'Unir, luego separar',
+      max_cells: 'Células máx.', auto_split: 'Auto-división (s)',
+      friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
+      wobble: 'Oscilación', bg_flow: 'Flujo de fondo', outline_px: 'Contorno px',
+      membrane: 'Membrana', cell_size: 'Tamaño de célula', highlight_color: 'Color de selección',
+      cartoon_mode: 'Modo dibujo (caras)', show_fps: 'Mostrar FPS',
+      show_field: 'Mostrar campo metaball', render_scale: 'Escala de render',
+      upscale: 'Reescalar', scanlines: 'Líneas de barrido (CRT)',
+      reset_sim: 'Reiniciar simulación',
+      help_title: 'Células del sistema inmunitario',
+      add_cell: 'Añadir célula', add_pathogen: 'Añadir patógeno',
+      palette_to_help: 'Aprende qué hace cada célula →',
+      palette_bad_to_help: 'Aprende qué hace cada patógeno →',
+      nav_settings: 'Ajustes', nav_help: 'Ayuda', nav_add_cell: 'Añadir célula',
+      nav_add_pathogen: 'Añadir patógeno', nav_reload: 'Recargar',
+      adding: 'Añadiendo: {name}',
+      fps_line: '{fps} fps · células {n}',
+      help_group_good: 'Buenas (sistema inmunitario)',
+      blend_none: 'Ninguno', blend_overlay: 'Superponer (predet.)', blend_multiply: 'Multiplicar',
+      blend_darken: 'Oscurecer', blend_lighter: 'Sumar (más claro)', blend_screen: 'Trama',
+      blend_softlight: 'Luz suave', blend_hardlight: 'Luz fuerte',
+      blend_burn: 'Subexponer color', blend_dodge: 'Sobreexponer color',
+      upscale_blur: 'Difuminado', upscale_pixel: 'Píxel (nítido)',
+      pgroup_virus: 'Virus', pgroup_bacteria: 'Bacterias',
+      pgroup_parasite: 'Parásitos', pgroup_fungus: 'Hongos', pgroup_toxin: 'Toxinas',
+      cell_neutrophil_label: 'Neutrófilo',
+      cell_neutrophil_desc: 'Primera respuesta; engulle bacterias por fagocitosis. La célula blanca más abundante.',
+      cell_monocyte_label: 'Monocito',
+      cell_monocyte_desc: 'Centinela en sangre; madura en macrófagos o células dendríticas al entrar en tejido.',
+      cell_mast_label: 'Mastocito',
+      cell_mast_desc: 'Centinela en tejidos; libera histamina para inflamación y respuestas alérgicas.',
+      cell_nk_label: 'Asesina natural',
+      cell_nk_desc: 'Patrulla células infectadas por virus y tumorales; mata por contacto sin sensibilización previa.',
+      cell_macrophage_label: 'Macrófago',
+      cell_macrophage_desc: '"Gran comedor" — fagocito longevo; engulle patógenos y presenta antígenos a las células T.',
+      cell_dendritic_label: 'Célula dendrítica',
+      cell_dendritic_desc: 'Mensajera presentadora de antígenos; muestra invasores a células T en ganglios linfáticos.',
+      cell_basophil_label: 'Basófilo',
+      cell_basophil_desc: 'Granulocito circulante; libera histamina y heparina para reforzar la inflamación.',
+      cell_platelet_label: 'Plaqueta',
+      cell_platelet_desc: 'Fragmento celular diminuto; coagula sangre y ayuda a reclutar células inmunitarias.',
+      cell_tcell_label: 'Linfocito T',
+      cell_tcell_desc: 'Asesino/coordinador adaptativo; reconoce antígenos específicos y mata células infectadas.',
+      cell_bcell_label: 'Linfocito B',
+      cell_bcell_desc: 'Fábrica adaptativa de anticuerpos; secreta anticuerpos para patógenos específicos.',
+      cell_eosinophil_label: 'Eosinófilo',
+      cell_eosinophil_desc: 'Especialista anti-parásitos; clave en alergias, libera gránulos tóxicos.',
+      cell_virus_label: 'Virus',
+      cell_virus_desc: 'Invasor de espícula; secuestra células para replicarse en su interior.',
+      cell_germ_label: 'Germen',
+      cell_germ_desc: 'Microbio rugoso genérico — infector oportunista.',
+      cell_bacterium_label: 'Bacteria',
+      cell_bacterium_desc: 'Bacteria con forma de bastón que nada con un flagelo en látigo.',
+      cell_amoebaP_label: 'Ameba (parásito)',
+      cell_amoebaP_desc: 'Parásito ameboide que repta y engulle tejido.',
+      cell_slime_label: 'Limo',
+      cell_slime_desc: 'Glóbulo de biofilm viscoso; gotea baba tóxica.',
+      cell_mite_label: 'Ácaro',
+      cell_mite_desc: 'Bicho minúsculo y rápido; muchas patitas.',
+      cell_spore_label: 'Espora',
+      cell_spore_desc: 'Espora fúngica — flota con las corrientes y siembra nuevo crecimiento.',
+      cell_toxin_label: 'Toxina',
+      cell_toxin_desc: 'Cristal tóxico dentado; deriva y quema al contacto.',
+    },
+    brbn: {
+      settings_title: 'BARBARIAN SMASH SETTINGS',
+      theme: 'WORLD COLOR', background: 'WORLD PICTURE', gameplay: 'PLAY RULE',
+      splitting: 'CELL MAKE TWO', split_mode: 'TWO-MAKE STYLE', population: 'CELL CROWD',
+      physics: 'WORLD PUSH RULE', cell_blending: 'CELL MIX', look: 'EYE STUFF',
+      performance: 'GO FAST', language: 'TALK WAY',
+      allow_pathogens: 'LET BAD GUY IN',
+      split_on_tap: 'POKE MAKE TWO', random_split: 'CELL TWO BY SELF',
+      split_push: 'PUSH AND THROW', split_bond: 'STICK THEN FLOAT',
+      max_cells: 'MOST CELLS', auto_split: 'AUTO TWO TIME',
+      friction: 'STICKY WORLD', bounce: 'SPRING POWER', throw_strength: 'ROCK THROW POWER',
+      wobble: 'JIGGLE', bg_flow: 'WORLD MOVE', outline_px: 'EDGE THICK',
+      membrane: 'SKIN', cell_size: 'BIG CELL OR SMOL CELL', highlight_color: 'PICK SHINY COLOR',
+      cartoon_mode: 'BIG SILLY FACES', show_fps: 'SHOW FAST NUMBER',
+      show_field: 'SHOW BLOB GRID', render_scale: 'BIG MAKE SIZE',
+      upscale: 'BIG GROW', scanlines: 'TV LINE THING',
+      reset_sim: 'MAKE WORLD NEW',
+      help_title: 'GOOD CELLS LIST',
+      add_cell: 'MAKE GOOD CELL', add_pathogen: 'MAKE BAD CELL',
+      palette_to_help: 'LEARN WHAT CELL DO →',
+      palette_bad_to_help: 'LEARN WHAT BAD GUY DO →',
+      nav_settings: 'CONTROL ROOM', nav_help: 'BIG QUESTION', nav_add_cell: 'MAKE GOOD CELL',
+      nav_add_pathogen: 'MAKE BAD CELL', nav_reload: 'WORLD RESTART',
+      adding: 'STUFF NEW: {name}',
+      fps_line: '{fps} FAST · CELLS {n}',
+      help_group_good: 'FRIENDLY GUYS (BODY ARMY)',
+      blend_none: 'NO MIX', blend_overlay: 'MIX (NORMAL)', blend_multiply: 'DARK MIX',
+      blend_darken: 'GO DARK', blend_lighter: 'GO BRIGHT', blend_screen: 'BIG BRIGHT',
+      blend_softlight: 'SOFT GLOW', blend_hardlight: 'HARD GLOW',
+      blend_burn: 'COLOR BURN', blend_dodge: 'COLOR SHINE',
+      upscale_blur: 'SMOOSH SMOOTH', upscale_pixel: 'BLOCKY CRISP',
+      pgroup_virus: 'TINY SPIKE GUYS', pgroup_bacteria: 'WIGGLE STICKS',
+      pgroup_parasite: 'CRAWL BUGS', pgroup_fungus: 'MOLD STUFF', pgroup_toxin: 'BURN ROCKS',
+      cell_neutrophil_label: 'NEUTROPHIL',
+      cell_neutrophil_desc: 'FIRST GUY ON SCENE. EAT BACTERIA. MOST COMMON WHITE BLOB.',
+      cell_monocyte_label: 'MONOCYTE',
+      cell_monocyte_desc: 'BLOOD GUARD. GROW UP INTO BIG EATER OR SHOW-AND-TELL CELL.',
+      cell_mast_label: 'MAST CELL',
+      cell_mast_desc: 'TISSUE WATCH. THROW HISTAMINE. MAKE SWELL AND ITCH.',
+      cell_nk_label: 'NATURAL KILLER',
+      cell_nk_desc: 'PATROL FOR SICK CELL. KILL ON SIGHT. NO QUESTION.',
+      cell_macrophage_label: 'MACROPHAGE',
+      cell_macrophage_desc: 'BIG EATER. CHOMP BUGS. SHOW CHEW BITS TO T-CELL.',
+      cell_dendritic_label: 'DENDRITIC CELL',
+      cell_dendritic_desc: 'COURIER GUY. GRAB BUG BIT. RUN TELL T-CELL IN LYMPH FORT.',
+      cell_basophil_label: 'BASOPHIL',
+      cell_basophil_desc: 'BLOOD GRAIN. SPRAY HISTAMINE. MAKE INFLAME LOUDER.',
+      cell_platelet_label: 'PLATELET',
+      cell_platelet_desc: 'TINY CRUMB. PLUG BLEED. CALL FRIENDS TO WOUND.',
+      cell_tcell_label: 'T CELL',
+      cell_tcell_desc: 'SMART KILLER. KNOW BAD GUY BY NAME. SMASH SICK CELL.',
+      cell_bcell_label: 'B CELL',
+      cell_bcell_desc: 'ARROW MAKER. SPIT STICKY ARROW THAT TAG BAD GUY.',
+      cell_eosinophil_label: 'EOSINOPHIL',
+      cell_eosinophil_desc: 'WORM SLAYER. THROW BURN BAG. ALSO MAKE ALLERGY HURT.',
+      cell_virus_label: 'VIRUS',
+      cell_virus_desc: 'SPIKE BALL. SNEAK IN CELL. MAKE MORE SELF.',
+      cell_germ_label: 'GERM',
+      cell_germ_desc: 'BUMPY BUG. JUST WANT EAT YOU.',
+      cell_bacterium_label: 'BACTERIUM',
+      cell_bacterium_desc: 'STICK BUG WITH WHIPPY TAIL. SWIM FAST.',
+      cell_amoebaP_label: 'AMOEBA',
+      cell_amoebaP_desc: 'BLOB CRAWLER. EAT FLESH BIT BY BIT.',
+      cell_slime_label: 'SLIME',
+      cell_slime_desc: 'GROSS GOO BLOB. DRIP NASTY DROP.',
+      cell_mite_label: 'MITE',
+      cell_mite_desc: 'TINY MANY-LEG SCURRY GUY.',
+      cell_spore_label: 'SPORE',
+      cell_spore_desc: 'MOLD SEED. FLOAT ON BREEZE. MAKE NEW MOLD.',
+      cell_toxin_label: 'TOXIN',
+      cell_toxin_desc: 'POINTY BURN ROCK. DRIFT AROUND. HURT ON TOUCH.',
+    },
+  };
+  function T(key, vars) {
+    const dict = LOCALES[S.lang] || LOCALES.en;
+    let s = dict[key];
+    if (s == null) s = LOCALES.en[key];
+    if (s == null) s = key;
+    if (vars) {
+      for (const k in vars) {
+        s = s.split('{' + k + '}').join(vars[k]);
+      }
+    }
+    return s;
+  }
+  function applyI18n() {
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      el.textContent = T(el.getAttribute('data-i18n'));
+    });
+    document.querySelectorAll('[data-i18n-attr]').forEach(el => {
+      const spec = el.getAttribute('data-i18n-attr');
+      // Format: "attr=key,attr2=key2"
+      for (const pair of spec.split(',')) {
+        const [attr, key] = pair.split('=').map(s => s && s.trim());
+        if (attr && key) el.setAttribute(attr, T(key));
+      }
+    });
+  }
+  function cellLabel(typeKey) {
+    return T('cell_' + typeKey + '_label') || (CELL_TYPES[typeKey] && CELL_TYPES[typeKey].label) || typeKey;
+  }
+  function cellDesc(typeKey) {
+    return T('cell_' + typeKey + '_desc') || (CELL_TYPES[typeKey] && CELL_TYPES[typeKey].description) || '';
+  }
 
   // ---------- Themes ----------
   // Themes paint the *world* (background + outline style + neutral helpers).
@@ -731,9 +1067,10 @@
   function enterAddMode(typeKey) {
     const t = CELL_TYPES[typeKey];
     if (!t) return;
-    addMode = { type: typeKey, label: t.label };
+    const localised = cellLabel(typeKey);
+    addMode = { type: typeKey, label: localised };
     const lbl = document.getElementById('addBadgeLabel');
-    if (lbl) lbl.textContent = `Adding: ${t.label}`;
+    if (lbl) lbl.textContent = T('adding', { name: localised });
     document.body.classList.add('adding');
   }
   function cancelAddMode() {
@@ -927,6 +1264,39 @@
     return { x: cx, y: cy, r: Math.max(200, r) };
   }
 
+  // Uniform-grid spatial hash, rebuilt each frame. Lets the alarm scan and
+  // pairwise-collision pass query just nearby buckets instead of every cell.
+  const HASH_CELL = 120;
+  const spatialGrid = new Map();
+  function rebuildSpatialGrid() {
+    spatialGrid.clear();
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      if (c.state !== 'NORMAL') continue;
+      const gx = (c.x / HASH_CELL) | 0;
+      const gy = (c.y / HASH_CELL) | 0;
+      const k = gx + ',' + gy;
+      let arr = spatialGrid.get(k);
+      if (!arr) { arr = []; spatialGrid.set(k, arr); }
+      arr.push(c);
+    }
+  }
+  function forEachNeighbour(c, radius, fn) {
+    const span = Math.max(1, Math.ceil(radius / HASH_CELL));
+    const gx = (c.x / HASH_CELL) | 0;
+    const gy = (c.y / HASH_CELL) | 0;
+    for (let ix = -span; ix <= span; ix++) {
+      for (let iy = -span; iy <= span; iy++) {
+        const arr = spatialGrid.get((gx + ix) + ',' + (gy + iy));
+        if (!arr) continue;
+        for (let i = 0; i < arr.length; i++) {
+          const o = arr[i];
+          if (o !== c) fn(o);
+        }
+      }
+    }
+  }
+
   function update(dt) {
     // Cohesion: stragglers wandering >1.30× the swarm radius from the centroid
     // get their patrol target overridden back to the centroid until they're
@@ -934,6 +1304,7 @@
     // category so good/bad pools cluster on their own.
     const centroidGood = swarmCentroid('good');
     const centroidBad  = swarmCentroid('bad');
+    rebuildSpatialGrid();
 
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
@@ -979,14 +1350,13 @@
             // Look for hostile within alarm radius (idle types ignore)
             if (c.alarmTimer === 0 && moveCfg.hostility !== 'idle') {
               let bestD = ALARM_RADIUS * ALARM_RADIUS, enemy = null;
-              for (let j = 0; j < cells.length; j++) {
-                const o = cells[j];
-                if (o === c || o.state !== 'NORMAL') continue;
-                if ((o.category || (CELL_TYPES[o.type] && CELL_TYPES[o.type].category)) === c.category) continue;
+              forEachNeighbour(c, ALARM_RADIUS, (o) => {
+                if (o.state !== 'NORMAL') return;
+                if ((o.category || (CELL_TYPES[o.type] && CELL_TYPES[o.type].category)) === c.category) return;
                 const dx = o.x - c.x, dy = o.y - c.y;
                 const d2 = dx*dx + dy*dy;
                 if (d2 < bestD) { bestD = d2; enemy = o; }
-              }
+              });
               if (enemy) { c.alarmTarget = enemy; c.alarmTimer = 1.6; }
             }
 
@@ -1079,23 +1449,27 @@
       }
     }
 
-    // Pairwise collision response (skip pairs while bonded)
+    // Pairwise collision response (skip pairs while bonded). Uses the spatial
+    // hash: each cell only checks neighbours within its own hash window, and
+    // the id<id guard ensures each pair is resolved at most once per frame.
     {
       const e = S.bounce;
+      // Rebuild the grid against current positions (cells moved during the
+      // per-cell update loop above) so neighbour queries don't miss cells.
+      rebuildSpatialGrid();
       for (let i = 0; i < cells.length; i++) {
         const a = cells[i];
         if (a.state !== 'NORMAL') continue;
-        for (let j = i + 1; j < cells.length; j++) {
-          const b = cells[j];
-          if (b.state !== 'NORMAL') continue;
-          if (S.splitMode === 'bondDrift' && (a.bondTimer > 0 || b.bondTimer > 0)) continue;
+        forEachNeighbour(a, HASH_CELL, (b) => {
+          if (b.state !== 'NORMAL') return;
+          if (b.id <= a.id) return;
+          if (S.splitMode === 'bondDrift' && (a.bondTimer > 0 || b.bondTimer > 0)) return;
           const dx = b.x - a.x, dy = b.y - a.y;
           const d2 = dx * dx + dy * dy;
           const minD = a.r + b.r;
           if (d2 < minD * minD && d2 > 1) {
             const d = Math.sqrt(d2);
             const nx = dx / d, ny = dy / d;
-            // Position correction (split overlap)
             const overlap = minD - d;
             const aFixed = (drag && drag.cell === a);
             const bFixed = (drag && drag.cell === b);
@@ -1107,7 +1481,6 @@
               a.x -= nx * overlap * 0.5; a.y -= ny * overlap * 0.5;
               b.x += nx * overlap * 0.5; b.y += ny * overlap * 0.5;
             }
-            // Velocity reflection (impulse, equal mass)
             const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
             const velAlongNormal = rvx * nx + rvy * ny;
             if (velAlongNormal < 0) {
@@ -1116,7 +1489,7 @@
               if (!bFixed) { b.vx += j * nx; b.vy += j * ny; }
             }
           }
-        }
+        });
       }
     }
   }
@@ -2315,17 +2688,39 @@
     const anyFlash = shapes.some(s => s.cell.flash);
     if (selectedCells.size === 0 && !anyFlash && !targetMarker) return;
     withCameraCtx(() => {
-      // Selection rings: wobbly outline 10% outward in each cell's own colour.
+      // Selection rings: wobbly outline 30% outward in each cell's own colour,
+      // plus a translucent brighten-fill of the cell body so selected cells
+      // stand out from the swarm.
       const N = WOBBLE_VERTS;
+      const hl = S.highlightColor || '#ffffff';
       for (const c of selectedCells) {
         if (c.state !== 'NORMAL') continue;
         const cc = cellColors(c);
-        const inflated = { x: c.x, y: c.y, r: c.r * 1.10, cell: c };
+
+        // (a) brightness wash inside the actual cell shape — translucent
+        // highlight colour painted at 30% alpha, source-atop-style by using
+        // a fill on the wobbly polygon.
+        const shapeRef = { x: c.x, y: c.y, r: c.r, cell: c };
         ctx.save();
-        ctx.lineWidth = Math.max(2, S.outlinePx * 1.2) / camera.scale;
+        ctx.fillStyle = hexToRgba(hl, 0.30);
+        ctx.beginPath();
+        for (let i = 0; i <= N; i++) {
+          const v = shapeVertex(shapeRef, THETA_TABLE[i], t);
+          if (i === 0) ctx.moveTo(v.x, v.y);
+          else ctx.lineTo(v.x, v.y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+
+        // (b) outer ring at 30% offset, in the cell's own dark colour with
+        // a soft glow.
+        const inflated = { x: c.x, y: c.y, r: c.r * 1.30, cell: c };
+        ctx.save();
+        ctx.lineWidth = Math.max(2, S.outlinePx * 1.4) / camera.scale;
         ctx.strokeStyle = cc.cytoBot;
-        ctx.shadowColor = cc.cytoBot;
-        ctx.shadowBlur = 14 / camera.scale;
+        ctx.shadowColor = hl;
+        ctx.shadowBlur = 18 / camera.scale;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.beginPath();
@@ -2596,7 +2991,7 @@
     for (const v of fpsBuf) sum += v;
     const avg = sum / fpsBuf.length;
     const fps = avg > 0 ? Math.round(1 / avg) : 0;
-    fpsEl.textContent = `${fps} fps · cells ${cells.length}`;
+    fpsEl.textContent = T('fps_line', { fps, n: cells.length });
   }
 
   function frame(ts) {
@@ -2667,6 +3062,16 @@
       openOnly(paletteBadDialog);
     } else closeAll();
   });
+  // "Learn what each cell does →" footer links — close the palette and open help.
+  function gotoHelp(ev) {
+    if (ev) ev.preventDefault();
+    openOnly(helpDialog);
+  }
+  const p2h = document.getElementById('paletteToHelp');
+  if (p2h) p2h.addEventListener('click', gotoHelp);
+  const pb2h = document.getElementById('paletteBadToHelp');
+  if (pb2h) pb2h.addEventListener('click', gotoHelp);
+
   if (reloadBtn) reloadBtn.addEventListener('click', () => {
     const u = new URL(location.href);
     u.searchParams.set('_', Date.now().toString(36));
@@ -2730,6 +3135,15 @@
     blendSel.value = S.blendMode || 'source-over';
     blendSel.addEventListener('change', () => {
       S.blendMode = blendSel.value;
+      saveSettings();
+    });
+  }
+
+  const hcEl = document.getElementById('highlightColor');
+  if (hcEl) {
+    hcEl.value = S.highlightColor || '#ffffff';
+    hcEl.addEventListener('input', () => {
+      S.highlightColor = hcEl.value;
       saveSettings();
     });
   }
@@ -2858,12 +3272,12 @@
     const tile = document.createElement('button');
     tile.className = 'cell-tile';
     tile.type = 'button';
-    tile.title = t.description;
+    tile.title = cellDesc(key);
     const c = document.createElement('canvas');
     c.width = 128; c.height = 128;
     tile.appendChild(c);
     const span = document.createElement('span');
-    span.textContent = t.label;
+    span.textContent = cellLabel(key);
     tile.appendChild(span);
     tile.addEventListener('click', () => {
       enterAddMode(key);
@@ -2895,18 +3309,25 @@
     const h = document.createElement('h3');
     h.textContent = title;
     section.appendChild(h);
-    for (const [, t] of entries) {
+    for (const [key, t] of entries) {
       const row = document.createElement('div');
+      row.className = 'cell-list-row';
+      const cv = document.createElement('canvas');
+      cv.width = 96;
+      cv.height = 96;
+      cv.className = 'cell-list-icon';
+      const text = document.createElement('div');
+      text.className = 'cell-list-text';
       const b = document.createElement('b');
-      b.textContent = t.label;
+      b.textContent = cellLabel(key);
       const span = document.createElement('span');
-      span.textContent = ' ' + t.description;
-      row.appendChild(b);
-      row.appendChild(span);
-      row.style.padding = '6px 0';
-      row.style.borderTop = '1px solid var(--line)';
-      row.style.fontSize = '13px';
+      span.textContent = cellDesc(key);
+      text.appendChild(b);
+      text.appendChild(span);
+      row.appendChild(cv);
+      row.appendChild(text);
       section.appendChild(row);
+      renderCellPreview(cv, key);
     }
     parent.appendChild(section);
   }
@@ -2917,15 +3338,38 @@
     if (!cellListEl) return;
     cellListEl.innerHTML = '';
     const goodEntries = Object.entries(CELL_TYPES).filter(([, t]) => t.category === 'good');
-    appendHelpSection(cellListEl, 'Good (Immune system)', goodEntries);
+    appendHelpSection(cellListEl, T('help_group_good'), goodEntries);
     if (S.allowBadGuys) {
       for (const g of PATHOGEN_GROUPS) {
         const entries = g.members.map(k => [k, CELL_TYPES[k]]).filter(([, t]) => t);
-        appendHelpSection(cellListEl, `${g.icon} ${g.label}`, entries);
+        appendHelpSection(cellListEl, `${g.icon} ${T('pgroup_' + g.key)}`, entries);
       }
     }
   }
   renderHelpList();
+
+  // Language select — populate, sync from S, re-render dynamic dialogs on change.
+  const langSelect = document.getElementById('langSelect');
+  if (langSelect) {
+    const langs = [['en','English'],['de','Deutsch'],['es','Español'],['brbn','Barbarian']];
+    for (const [k, label] of langs) {
+      const opt = document.createElement('option');
+      opt.value = k;
+      opt.textContent = label;
+      langSelect.appendChild(opt);
+    }
+    langSelect.value = (LOCALES[S.lang] ? S.lang : 'en');
+    langSelect.addEventListener('change', () => {
+      S.lang = LOCALES[langSelect.value] ? langSelect.value : 'en';
+      saveSettings();
+      applyI18n();
+      renderHelpList();
+      // Re-render the open palette dialog if any so the localised labels show.
+      if (typeof renderPaletteGrid === 'function') renderPaletteGrid();
+      if (typeof renderPaletteBadGrid === 'function') renderPaletteBadGrid();
+    });
+  }
+  applyI18n();
 
   // Palette grids: good-only + bad-only (sub-categorised by pathogen kind).
   const cellGridEl = document.getElementById('cellGrid');
@@ -2935,7 +3379,7 @@
     if (!cellGridEl) return;
     cellGridEl.innerHTML = '';
     const goodEntries = Object.entries(CELL_TYPES).filter(([, t]) => t.category === 'good');
-    appendGridSection(cellGridEl, 'Good (Immune system)', goodEntries);
+    appendGridSection(cellGridEl, T('help_group_good'), goodEntries);
   }
 
   function renderPaletteBadGrid() {
@@ -2944,7 +3388,7 @@
     if (!S.allowBadGuys) return;
     for (const g of PATHOGEN_GROUPS) {
       const entries = g.members.map(k => [k, CELL_TYPES[k]]).filter(([, t]) => t);
-      appendGridSection(cellGridBadEl, `${g.icon} ${g.label}`, entries);
+      appendGridSection(cellGridBadEl, `${g.icon} ${T('pgroup_' + g.key)}`, entries);
     }
   }
 
