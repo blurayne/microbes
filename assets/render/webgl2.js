@@ -15,79 +15,135 @@ import {
 } from '../core/state.js';
 import { RendererBase } from './renderer.js';
 
-// Each cell is one instanced quad. The shader computes a soft disk +
-// radial gradient (cytoTop at top, cytoBot at the body), a thin
-// outline ring, and an inner nucleus indicator. This is a "close-
-// enough" approximation of the Canvas2D metaball + outline + nucleus
-// passes, all in one draw call.
+// Each cell is one instanced quad. The fragment shader computes the
+// per-pixel body SDF for the cell's `body.kind` (round / lobed /
+// rippled / oblong / pseudopod / star), giving organic polygon
+// shapes without uploading vertex data per type. All pure math —
+// no FBO, no mesh.
 const VERT_DISK = `#version 300 es
 precision highp float;
-layout(location=0) in vec2 a_corner;       // unit-square corner in [-1,1]
-layout(location=1) in vec4 a_inst;         // (worldX, worldY, r, _)
-layout(location=2) in vec3 a_cytoTop;
-layout(location=3) in vec3 a_cytoBot;
-layout(location=4) in vec3 a_nucleus;
-layout(location=5) in vec3 a_outline;
+layout(location=0) in vec2 a_corner;        // unit-square corner [-1,1]
+layout(location=1) in vec4 a_inst;          // (x, y, r, kindAsFloat)
+layout(location=2) in vec4 a_phase;         // (phase, seed, freq, wobbleMul)
+layout(location=3) in vec3 a_cytoTop;
+layout(location=4) in vec3 a_cytoBot;
+layout(location=5) in vec3 a_nucleus;
+layout(location=6) in vec3 a_outline;
 
-uniform vec3 u_camera;                      // (scale, tx, ty)
-uniform vec2 u_viewport;                    // (W, H) in CSS px
+uniform vec3 u_camera;
+uniform vec2 u_viewport;
 
 out vec2 v_uv;
+out float v_kind;
+out vec4 v_phase;
 out vec3 v_cytoTop;
 out vec3 v_cytoBot;
 out vec3 v_nucleus;
 out vec3 v_outline;
 
 void main() {
-  // 1.05× quad so the soft edge isn't clipped.
-  vec2 worldPos = a_inst.xy + a_corner * a_inst.z * 1.05;
+  // The corner quad is sized to a generous 1.30× r so wobble + lobed
+  // / star extents (which can reach 1.30) aren't clipped.
+  float quadR = a_inst.z * 1.30;
+  vec2 worldPos = a_inst.xy + a_corner * quadR;
   vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
-  v_uv = a_corner * 1.05;     // -1.05..+1.05; disc ends at length 1.0
+  // v_uv ranges -1.30..+1.30 in body-radius units.
+  v_uv = a_corner * 1.30;
+  v_kind = a_inst.w;
+  v_phase = a_phase;
   v_cytoTop = a_cytoTop;
   v_cytoBot = a_cytoBot;
   v_nucleus = a_nucleus;
   v_outline = a_outline;
 }`;
 
+// Body-kind constants (must match TS-side encoding in drawCells).
+//   0=round  1=lobed  2=rippled  3=oblong  4=pseudopod  5=star
 const FRAG_DISK = `#version 300 es
 precision highp float;
 in vec2 v_uv;
+in float v_kind;
+in vec4 v_phase;        // (phase, seed, freq, wobbleMul)
 in vec3 v_cytoTop;
 in vec3 v_cytoBot;
 in vec3 v_nucleus;
 in vec3 v_outline;
+uniform float u_time;       // seconds
+uniform float u_wobbleAmp;  // S.wobbleAmp
 out vec4 outColor;
+
+float bodyScale(vec2 uv) {
+  int kind = int(v_kind + 0.5);
+  float ang = atan(uv.y, uv.x);
+  float phi = v_phase.x;
+  float seed = v_phase.y;
+  float freq = v_phase.z;
+  float wobMul = v_phase.w;
+  float t = u_time;
+
+  float scale = 1.0;
+  bool addWob = true;
+  float wobShareForLobed = 0.4;
+
+  if (kind == 1) {                 // lobed
+    scale = 1.0 + 0.16 * sin(3.0*ang + phi) + 0.08 * sin(5.0*ang + phi*1.7);
+    addWob = true;                 // 40% of base wobble overlay
+  } else if (kind == 2) {          // rippled
+    scale = 1.0 + 0.04 * sin(24.0*ang + phi) + 0.015 * sin(8.0*ang + phi*0.7);
+  } else if (kind == 4) {          // pseudopod (animated)
+    scale = 1.0
+          + 0.20 * sin(3.0*ang + 0.8*t*freq + phi)
+          + 0.06 * sin(5.0*ang - 0.5*t*freq + seed);
+    addWob = false;
+  } else if (kind == 5) {          // star (10-pointed)
+    scale = 0.85 + 0.45 * abs(sin(5.0*ang + phi));
+    addWob = false;
+  }
+  // round (0) and oblong (3) start at 1.0 with full wobble.
+
+  if (addWob) {
+    float w1 = sin(t * 0.55 * freq + ang*3.0 + seed);
+    float w2 = sin(t * 0.85 * freq + ang*5.0 + seed*1.31 + phi);
+    float wob = u_wobbleAmp * wobMul * (w1 * 0.65 + w2 * 0.45);
+    if (kind == 1) scale += wob * wobShareForLobed;  // lobed gets a small overlay
+    else scale += wob;                                // round / oblong / rippled
+  }
+  return scale;
+}
+
 void main() {
   float d = length(v_uv);
-  if (d > 1.02) discard;
+  float bodyR = bodyScale(v_uv);
+  // Distance-from-rim in body-radius units (signed, <0 inside).
+  float sdf = d - bodyR;
 
-  // Cytoplasm radial gradient: highlight (cytoTop) toward upper-left,
-  // body fill (cytoBot) elsewhere, fades softly toward the rim.
-  float gradT = clamp((d - 0.0) / 0.65, 0.0, 1.0);
+  // Soft body edge (anti-aliased over ~2 pixels in body-r units).
+  float bodyA = 1.0 - smoothstep(-0.005, 0.015, sdf);
+  if (bodyA <= 0.0) discard;
+
+  // Cytoplasm gradient — top-left highlight, body fill toward rim.
+  float gradT = clamp(d / max(0.001, bodyR * 0.65), 0.0, 1.0);
   vec3 cyto = mix(v_cytoTop, v_cytoBot, gradT);
-  // Lift the highlight further toward the top-left like the C2D pass.
-  float topLift = max(0.0, 0.6 - distance(v_uv, vec2(-0.3, -0.4))) * 0.6;
+  float topLift = max(0.0, 0.55 - distance(v_uv, vec2(-0.30, -0.40))) * 0.65;
   cyto = mix(cyto, v_cytoTop, topLift);
 
-  // Thin outline at the rim (0.86..1.0), darkening to v_outline.
-  float outlineMask = smoothstep(0.86, 0.96, d);
+  // Outline ring (thin band straddling the body edge).
+  float outlineMask = smoothstep(-0.04, -0.005, sdf) * (1.0 - smoothstep(0.0, 0.015, sdf));
 
-  // Nucleus blob (radius ~0.30 of the cell, soft edge).
-  float nucleusMask = 1.0 - smoothstep(0.26, 0.34, d);
-  // Soft inner highlight on the nucleus (top-left dot).
+  // Nucleus disc (round, radius ~30% of cell).
+  float dNuc = d / max(0.001, bodyR);
+  float nucleusMask = 1.0 - smoothstep(0.26, 0.34, dNuc);
   float nucGlint = max(0.0, 0.18 - distance(v_uv, vec2(-0.10, -0.13))) * 4.0;
   vec3 nucColor = mix(v_nucleus, vec3(1.0), clamp(nucGlint, 0.0, 0.35));
 
   vec3 col = cyto;
   col = mix(col, nucColor, nucleusMask);
-  col = mix(col, v_outline, outlineMask);
+  col = mix(col, v_outline, clamp(outlineMask, 0.0, 1.0));
 
-  // Soft alpha falloff at the very edge for AA.
-  float a = 1.0 - smoothstep(0.96, 1.02, d);
-  outColor = vec4(col, a);
+  outColor = vec4(col, bodyA);
 }`;
 
 // Full-screen quad: uses gl_VertexID to fabricate the four corners.
@@ -185,7 +241,10 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
-const INSTANCE_FLOATS = 16; // see _diskVao layout in init()
+const INSTANCE_FLOATS = 20; // see _diskVao layout in init()
+const BODY_KIND_FLOAT = {
+  round: 0, lobed: 1, rippled: 2, oblong: 3, pseudopod: 4, star: 5,
+};
 
 function hexToVec3(hex) {
   let h = (hex || '#000').replace('#', '');
@@ -299,6 +358,8 @@ export class WebGL2Renderer extends RendererBase {
     this._diskProg = link(gl, VERT_DISK, FRAG_DISK);
     this._diskU.camera = gl.getUniformLocation(this._diskProg, 'u_camera');
     this._diskU.viewport = gl.getUniformLocation(this._diskProg, 'u_viewport');
+    this._diskU.time = gl.getUniformLocation(this._diskProg, 'u_time');
+    this._diskU.wobbleAmp = gl.getUniformLocation(this._diskProg, 'u_wobbleAmp');
 
     // Static unit-square corners (two triangles).
     const corners = new Float32Array([
@@ -320,12 +381,13 @@ export class WebGL2Renderer extends RendererBase {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceVbo);
-    // Instance layout: 16 floats per cell —
-    //   0..3  inst:    (x, y, r, _)
-    //   4..6  cytoTop  (rgb)
-    //   7..9  cytoBot  (rgb)
-    //  10..12 nucleus  (rgb)
-    //  13..15 outline  (rgb)
+    // Instance layout: 20 floats per cell —
+    //   0..3   inst:    (x, y, r, kindAsFloat)
+    //   4..7   phase:   (phase, seed, freq, wobbleMul)
+    //   8..10  cytoTop  (rgb)
+    //  11..13  cytoBot  (rgb)
+    //  14..16  nucleus  (rgb)
+    //  17..19  outline  (rgb)
     const stride = INSTANCE_FLOATS * 4;
     let off = 0;
     function attr(loc, size) {
@@ -335,10 +397,11 @@ export class WebGL2Renderer extends RendererBase {
       off += size * 4;
     }
     attr(1, 4); // a_inst
-    attr(2, 3); // a_cytoTop
-    attr(3, 3); // a_cytoBot
-    attr(4, 3); // a_nucleus
-    attr(5, 3); // a_outline
+    attr(2, 4); // a_phase
+    attr(3, 3); // a_cytoTop
+    attr(4, 3); // a_cytoBot
+    attr(5, 3); // a_nucleus
+    attr(6, 3); // a_outline
     gl.bindVertexArray(null);
 
     // ---- background program ----
@@ -447,7 +510,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.bufferData(gl.ARRAY_BUFFER, this._instanceData.byteLength, gl.DYNAMIC_DRAW);
   }
 
-  drawCells(shapes /*, time, timeMs */) {
+  drawCells(shapes, time /*, timeMs */) {
     if (shapes.length === 0) return;
     const gl = this.gl;
     this._growInstanceBuffer(shapes.length);
@@ -455,19 +518,27 @@ export class WebGL2Renderer extends RendererBase {
     const outlineRgb = hexToVec3(currentTheme().outline.color);
     for (let i = 0; i < shapes.length; i++) {
       const s = shapes[i];
-      const cc = (CELL_TYPES[s.cell.type] || CELL_TYPES.neutrophil).colors;
+      const c = s.cell;
+      const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+      const cc = type.colors;
       const top = hexToVec3(cc.cytoTop);
       const bot = hexToVec3(cc.cytoBot);
       const nuc = hexToVec3(cc.nucleus);
+      const kind = BODY_KIND_FLOAT[(type.body && type.body.kind) || 'round'] || 0;
+      const wobMul = (type.field && type.field.wobbleMul) || 1.0;
       const j = i * INSTANCE_FLOATS;
       data[j]     = s.x;
       data[j + 1] = s.y;
       data[j + 2] = s.r;
-      data[j + 3] = 0;
-      data[j + 4] = top[0];  data[j + 5] = top[1];  data[j + 6] = top[2];
-      data[j + 7] = bot[0];  data[j + 8] = bot[1];  data[j + 9] = bot[2];
-      data[j + 10] = nuc[0]; data[j + 11] = nuc[1]; data[j + 12] = nuc[2];
-      data[j + 13] = outlineRgb[0]; data[j + 14] = outlineRgb[1]; data[j + 15] = outlineRgb[2];
+      data[j + 3] = kind;
+      data[j + 4] = c.phase || 0;
+      data[j + 5] = c.wobbleSeed || 0;
+      data[j + 6] = c.wobbleFreq || 1;
+      data[j + 7] = wobMul;
+      data[j + 8] = top[0];  data[j + 9] = top[1];  data[j + 10] = top[2];
+      data[j + 11] = bot[0]; data[j + 12] = bot[1]; data[j + 13] = bot[2];
+      data[j + 14] = nuc[0]; data[j + 15] = nuc[1]; data[j + 16] = nuc[2];
+      data[j + 17] = outlineRgb[0]; data[j + 18] = outlineRgb[1]; data[j + 19] = outlineRgb[2];
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceVbo);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, shapes.length * INSTANCE_FLOATS);
@@ -475,11 +546,13 @@ export class WebGL2Renderer extends RendererBase {
     gl.useProgram(this._diskProg);
     gl.uniform3f(this._diskU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
     gl.uniform2f(this._diskU.viewport, this.W, this.H);
+    gl.uniform1f(this._diskU.time, time);
+    gl.uniform1f(this._diskU.wobbleAmp, S.wobbleAmp || 0);
     gl.bindVertexArray(this._diskVao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, shapes.length);
     gl.bindVertexArray(null);
-    // TODO Phase 4b: real metaball pipeline (FBO mask + blur + contrast)
-    // for inter-cell merging, decorations, cartoon faces.
+    // TODO Phase 4c-d: per-type nucleus shapes (kidney / bilobed /
+    // multilobed), granules, decorations.
   }
 
   drawSelection(/* shapes, time */) {
