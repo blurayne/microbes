@@ -10,11 +10,16 @@ import {
   cellColors, currentTheme, currentBackground, hexToRgba, frac,
 } from '../core/state.js';
 import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
+import { RendererBase } from './renderer.js';
 
-export class Canvas2DRenderer {
+/**
+ * Canvas2D implementation of the IRenderer interface (see renderer.js).
+ *
+ * @implements {import('./renderer.js').IRenderer}
+ */
+export class Canvas2DRenderer extends RendererBase {
   constructor(canvas, sim) {
-    this.canvas = canvas;
-    this.sim = sim;
+    super(canvas, sim);
     this.ctx = canvas.getContext('2d');
     this.off = document.createElement('canvas');
     this.offCtx = this.off.getContext('2d');
@@ -43,10 +48,6 @@ export class Canvas2DRenderer {
       });
     }
   }
-
-  init() { /* Canvas2D needs no init beyond constructor. */ }
-
-  destroy() { /* Nothing to release. */ }
 
   resize(W, H, dpr, renderScale) {
     this.W = W; this.H = H;
