@@ -242,6 +242,43 @@ body.no-bad #help { bottom: 166px; }
 }
 #fps.on { display: block; }
 
+/* Add-mode badge: sits above the build stamp at the bottom-left while a
+   palette pick is queued. The build stamp moves up so they don't overlap. */
+#addBadge {
+  position: fixed;
+  left: 12px;
+  bottom: 36px;
+  z-index: 11;
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--accent);
+  color: var(--accent-ink);
+  border: 2px solid #000;
+  border-radius: 999px;
+  box-shadow: 0 2px 10px #0008;
+  font: 600 12px/1.1 system-ui, sans-serif;
+  user-select: none;
+}
+body.adding #addBadge { display: inline-flex; }
+body.adding #stage    { cursor: crosshair; }
+body.adding #build    { bottom: 14px; }
+#addBadge .x {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0,0,0,0.25);
+  color: inherit;
+  border: 0;
+  cursor: pointer;
+  font: 700 14px/1 system-ui;
+  padding: 0;
+}
+#addBadge .x:hover { background: rgba(0,0,0,0.5); }
+
 /* Generic dialog (help + palette) — same chrome as the settings dialog */
 .dialog {
   position: fixed;

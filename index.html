@@ -95,6 +95,12 @@
         <label>Outline px <span id="outVal" class="val"></span>
           <input type="range" id="outlinePx" min="1" max="10" step="1" />
         </label>
+        <label>Membrane <span id="membraneVal" class="val"></span>
+          <input type="range" id="membraneIntensity" min="0" max="1" step="0.05" />
+        </label>
+        <label>Cell size <span id="cellSizeVal" class="val"></span>
+          <input type="range" id="cellSizeMul" min="0.4" max="2.0" step="0.05" />
+        </label>
         <label><input type="checkbox" id="cartoon" /> Cartoon mode (faces)</label>
         <label><input type="checkbox" id="showFPS" /> Show FPS</label>
         <label><input type="checkbox" id="showDebugField" /> Show metaball field</label>
@@ -145,6 +151,11 @@
   </div>
 
   <div id="fps" aria-hidden="true"></div>
+
+  <div id="addBadge" role="status" aria-live="polite">
+    <span id="addBadgeLabel">Adding</span>
+    <button type="button" id="addBadgeCancel" class="x" aria-label="Cancel add">&times;</button>
+  </div>
 
   <div id="build" aria-hidden="true"></div>
 

@@ -29,6 +29,8 @@
     cartoon: false,           // cartoon-face overlay
     lang: 'en',               // 'en' | 'de' | 'es' | 'brbn'
     allowBadGuys: true,       // expose pathogen palette + spawn paths
+    cellSizeMul: 1.0,         // global cell-size multiplier (0.4..2.0)
+    membraneIntensity: 0.55,  // strength of the inner-membrane stroke (0..1)
   };
 
   function loadSettings() {
@@ -257,7 +259,7 @@
 
   const CELL_TYPES = {
     neutrophil: {
-      label: 'Neutrophil', category: 'good',
+      label: 'Neutrophil', category: 'good', sizeMul: 1.00,
       body: { kind: 'lobed', aspect: 1.0 },
       nucleus: { kind: 'multilobed' },
       decoration: { kind: 'none' },
@@ -269,7 +271,7 @@
       description: 'First responder; engulfs bacteria via phagocytosis. The most abundant white blood cell.',
     },
     monocyte: {
-      label: 'Monocyte', category: 'good',
+      label: 'Monocyte', category: 'good', sizeMul: 1.10,
       body: { kind: 'rippled', aspect: 1.0 },
       nucleus: { kind: 'kidney' },
       decoration: { kind: 'none' },
@@ -281,7 +283,7 @@
       description: 'Circulating sentinel that matures into macrophages or dendritic cells once it enters tissue.',
     },
     mast: {
-      label: 'Mast cell', category: 'good',
+      label: 'Mast cell', category: 'good', sizeMul: 1.15,
       body: { kind: 'oblong', aspect: 1.4 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'none' },
@@ -293,7 +295,7 @@
       description: 'Tissue-resident sentinel; releases histamine to trigger inflammation and allergic responses.',
     },
     nk: {
-      label: 'NK cell', category: 'good',
+      label: 'NK cell', category: 'good', sizeMul: 0.85,
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'bigSpikes' },
@@ -305,7 +307,7 @@
       description: 'Patrols for virus-infected and tumour cells; kills on contact without prior sensitisation.',
     },
     macrophage: {
-      label: 'Macrophage', category: 'good',
+      label: 'Macrophage', category: 'good', sizeMul: 1.45,
       body: { kind: 'pseudopod', aspect: 1.0 },
       nucleus: { kind: 'kidney' },
       decoration: { kind: 'none' },
@@ -317,7 +319,7 @@
       description: '"Big eater" — long-lived phagocyte that engulfs pathogens and presents antigens to T cells.',
     },
     dendritic: {
-      label: 'Dendritic cell', category: 'good',
+      label: 'Dendritic cell', category: 'good', sizeMul: 1.25,
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round-small' },
       decoration: { kind: 'tendrils' },
@@ -329,7 +331,7 @@
       description: 'Antigen-presenting courier; samples invaders and shows them to T cells in lymph nodes.',
     },
     basophil: {
-      label: 'Basophil', category: 'good',
+      label: 'Basophil', category: 'good', sizeMul: 0.85,
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'bilobed' },
       decoration: { kind: 'none' },
@@ -341,7 +343,7 @@
       description: 'Circulating granulocyte; releases histamine and heparin to reinforce inflammation.',
     },
     platelet: {
-      label: 'Platelet', category: 'good',
+      label: 'Platelet', category: 'good', sizeMul: 0.50,
       body: { kind: 'star', aspect: 1.0 },
       nucleus: { kind: 'none' },
       decoration: { kind: 'none' },
@@ -353,7 +355,7 @@
       description: 'Tiny cell fragment that clots blood at injuries and helps recruit immune cells.',
     },
     tcell: {
-      label: 'T-cell', category: 'good',
+      label: 'T-cell', category: 'good', sizeMul: 0.75,
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'yReceptorsFew' },
@@ -365,7 +367,7 @@
       description: 'Adaptive killer / coordinator; recognises specific antigens and kills infected cells.',
     },
     bcell: {
-      label: 'B-cell', category: 'good',
+      label: 'B-cell', category: 'good', sizeMul: 0.75,
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'yReceptorsMany' },
@@ -377,7 +379,7 @@
       description: 'Adaptive antibody factory; secretes antibodies tagged to specific pathogens.',
     },
     eosinophil: {
-      label: 'Eosinophil', category: 'good',
+      label: 'Eosinophil', category: 'good', sizeMul: 0.95,
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'bilobed' },
       decoration: { kind: 'none' },
@@ -391,7 +393,7 @@
 
     // ---------- Bad guys ----------
     virus: {
-      label: 'Virus', category: 'bad', subcategory: 'virus',
+      label: 'Virus', category: 'bad', subcategory: 'virus', sizeMul: 0.30,
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round-small' },
       decoration: { kind: 'spikesPulsing' },
@@ -403,7 +405,7 @@
       description: 'Spike-protein invader; hijacks cells to replicate inside them.',
     },
     germ: {
-      label: 'Germ', category: 'bad', subcategory: 'bacteria',
+      label: 'Germ', category: 'bad', subcategory: 'bacteria', sizeMul: 0.55,
       body: { kind: 'lobed', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'none' },
@@ -415,7 +417,7 @@
       description: 'Generic bumpy microbe — opportunistic infector.',
     },
     bacterium: {
-      label: 'Bacterium', category: 'bad', subcategory: 'bacteria',
+      label: 'Bacterium', category: 'bad', subcategory: 'bacteria', sizeMul: 0.55,
       body: { kind: 'oblong', aspect: 1.8 },
       nucleus: { kind: 'round-small' },
       decoration: { kind: 'flagellum' },
@@ -427,7 +429,7 @@
       description: 'Rod-shaped bacterium swimming with a whipping flagellum.',
     },
     amoebaP: {
-      label: 'Amoeba (✗)', category: 'bad', subcategory: 'parasite',
+      label: 'Amoeba (✗)', category: 'bad', subcategory: 'parasite', sizeMul: 1.25,
       body: { kind: 'pseudopod', aspect: 1.0 },
       nucleus: { kind: 'kidney' },
       decoration: { kind: 'tentaclesWiggling' },
@@ -439,7 +441,7 @@
       description: 'Amoeboid parasite that crawls and engulfs tissue.',
     },
     slime: {
-      label: 'Slime', category: 'bad', subcategory: 'fungus',
+      label: 'Slime', category: 'bad', subcategory: 'fungus', sizeMul: 1.30,
       body: { kind: 'lobed', aspect: 1.0 },
       nucleus: { kind: 'none' },
       decoration: { kind: 'drips' },
@@ -451,7 +453,7 @@
       description: 'Slimy biofilm globule; drips toxic ooze.',
     },
     mite: {
-      label: 'Mite', category: 'bad', subcategory: 'parasite',
+      label: 'Mite', category: 'bad', subcategory: 'parasite', sizeMul: 1.60,
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round' },
       decoration: { kind: 'legs' },
@@ -463,7 +465,7 @@
       description: 'Tiny scuttling bug; lots of little legs.',
     },
     spore: {
-      label: 'Spore', category: 'bad', subcategory: 'fungus',
+      label: 'Spore', category: 'bad', subcategory: 'fungus', sizeMul: 0.55,
       body: { kind: 'round', aspect: 1.0 },
       nucleus: { kind: 'round-small' },
       decoration: { kind: 'fuzz' },
@@ -475,7 +477,7 @@
       description: 'Fungal spore — drifts on currents and seeds new growth.',
     },
     toxin: {
-      label: 'Toxin', category: 'bad', subcategory: 'toxin',
+      label: 'Toxin', category: 'bad', subcategory: 'toxin', sizeMul: 0.25,
       body: { kind: 'star', aspect: 1.0 },
       nucleus: { kind: 'none' },
       decoration: { kind: 'none' },
@@ -532,6 +534,7 @@
   // ---------- Drag / pan state ----------
   let drag = null;          // { cell, dx, dy, started, downX, downY }
   let pan = null;           // { lastX, lastY, startX, startY, moved, button }
+  let addMode = null;       // { type, label } when a palette pick is queued
   const activePointers = new Map();   // pointerId -> { x, y, world }
   let pinch = null;         // { startDist, startMid, startScale, startTx, startTy }
   const selectedCells = new Set(); // good cells the user has marked for movement
@@ -560,8 +563,12 @@
   const cells = [];
   let cellId = 0;
 
-  function makeCell(x, y, r = CELL_RADIUS, type = null) {
+  function makeCell(x, y, r, type = null) {
     const t = (type && CELL_TYPES[type]) ? type : pickRandomActiveType();
+    if (r === undefined || r === null) {
+      const sizeMul = (CELL_TYPES[t] && CELL_TYPES[t].sizeMul) || 1;
+      r = CELL_RADIUS * sizeMul * (S.cellSizeMul || 1);
+    }
     return {
       id: ++cellId,
       x, y, r,
@@ -688,6 +695,20 @@
     return true;
   }
 
+  // Add-mode helpers (shared by FAB tile clicks and ESC handler)
+  function enterAddMode(typeKey) {
+    const t = CELL_TYPES[typeKey];
+    if (!t) return;
+    addMode = { type: typeKey, label: t.label };
+    const lbl = document.getElementById('addBadgeLabel');
+    if (lbl) lbl.textContent = `Adding: ${t.label}`;
+    document.body.classList.add('adding');
+  }
+  function cancelAddMode() {
+    addMode = null;
+    document.body.classList.remove('adding');
+  }
+
   canvas.addEventListener('pointerdown', (ev) => {
     if (ev.target !== canvas) return;
     const sp = pointerScreen(ev);
@@ -696,6 +717,14 @@
 
     // Two-finger pinch / pan
     if (startPinchIfTwoPointers()) return;
+
+    // Add mode: place a new cell at the pointer (left button only) and exit
+    if (addMode && ev.button === 0) {
+      const w0 = screenToWorld(sp.x, sp.y);
+      spawnAtWorld(addMode.type, w0.x, w0.y);
+      cancelAddMode();
+      return;
+    }
 
     // Right mouse button → pan
     if (ev.button === 2) {
@@ -1648,6 +1677,37 @@
 
     // Per-type decorations (spikes, tendrils, Y-receptors) on top of the cytoplasm
     drawDecorations(shapes, theme, t);
+
+    // Inner membrane: trace the wobbly polygon directly so the cell edge reads
+    // crisply on top of the soft cytoplasm fade. Intensity slider scales alpha.
+    drawMembrane(shapes, t, theme);
+  }
+
+  function drawMembrane(shapes, t, theme) {
+    const a = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
+    if (a <= 0 || shapes.length === 0) return;
+    withCameraCtx(() => {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.strokeStyle = theme.outline.color;
+      ctx.globalAlpha = a;
+      const lw = Math.max(1.5, S.outlinePx * 0.55) / camera.scale;
+      ctx.lineWidth = lw;
+      const N = WOBBLE_VERTS;
+      for (const s of shapes) {
+        ctx.beginPath();
+        for (let i = 0; i <= N; i++) {
+          const theta = (i / N) * Math.PI * 2;
+          const v = shapeVertex(s, theta, t);
+          if (i === 0) ctx.moveTo(v.x, v.y);
+          else ctx.lineTo(v.x, v.y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+      ctx.restore();
+    });
   }
 
   function splitVirtualCenters(c) {
@@ -2571,8 +2631,13 @@
     });
   }
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') closeAll();
+    if (e.key === 'Escape') {
+      if (addMode) cancelAddMode();
+      else closeAll();
+    }
   });
+  const addBadgeCancelBtn = document.getElementById('addBadgeCancel');
+  if (addBadgeCancelBtn) addBadgeCancelBtn.addEventListener('click', cancelAddMode);
   // Tap anywhere outside any panel (and not on a fab) closes whatever is open.
   document.addEventListener('pointerdown', (e) => {
     const anyOpen = allDialogs.some(d => !d.classList.contains('hidden'));
@@ -2605,6 +2670,8 @@
   bindRange('autoSplitSeconds', 'autoSplitSeconds', 'autoVal', v => v.toFixed(0) + 's');
   bindRange('bgFlowSpeed', 'bgFlowSpeed', 'bgVal', v => v.toFixed(2) + '×');
   bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
+  bindRange('membraneIntensity', 'membraneIntensity', 'membraneVal', v => v.toFixed(2));
+  bindRange('cellSizeMul', 'cellSizeMul', 'cellSizeVal', v => v.toFixed(2) + '×');
   bindRange('friction', 'friction', 'frictionVal', v => v.toFixed(2));
   bindRange('bounce', 'bounce', 'bounceVal', v => v.toFixed(2));
   bindRange('throwStrength', 'throwStrength', 'throwVal', v => v.toFixed(2) + '×');
@@ -2700,7 +2767,7 @@
     span.textContent = t.label;
     tile.appendChild(span);
     tile.addEventListener('click', () => {
-      spawnAtCenter(key);
+      enterAddMode(key);
       closeAll();
     });
     renderCellPreview(c, key);
@@ -2798,14 +2865,19 @@
     if (cells.length >= S.maxCells) return;
     // Spawn at the centre of the visible viewport in world coords.
     const w = screenToWorld(W / 2, H / 2);
-    const jitter = CELL_RADIUS * 0.3;
+    spawnAtWorld(typeKey, w.x, w.y);
+  }
+  function spawnAtWorld(typeKey, wx, wy) {
+    if (cells.length >= S.maxCells) return null;
+    const jitter = CELL_RADIUS * 0.2;
     const c = makeCell(
-      w.x + (Math.random() - 0.5) * jitter,
-      w.y + (Math.random() - 0.5) * jitter,
-      CELL_RADIUS,
+      wx + (Math.random() - 0.5) * jitter,
+      wy + (Math.random() - 0.5) * jitter,
+      undefined,            // let makeCell pick the per-type radius
       typeKey,
     );
     cells.push(c);
+    return c;
   }
 
   // Static preview render used for palette tiles. Reuses the polygon body and
