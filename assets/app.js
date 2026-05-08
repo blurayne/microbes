@@ -427,7 +427,9 @@ const themeSelect = document.getElementById('themeSelect');
 for (const [key, t] of Object.entries(THEMES)) {
   const opt = document.createElement('option');
   opt.value = key;
-  opt.textContent = t.label;
+  // Append the theme's accent colour in parens so users can scan by hue.
+  const accent = (t.ui && t.ui.panelAccent) || '';
+  opt.textContent = accent ? `${t.label} (${accent})` : t.label;
   themeSelect.appendChild(opt);
 }
 themeSelect.value = S.theme in THEMES ? S.theme : 'petriDish';

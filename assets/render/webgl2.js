@@ -11,8 +11,9 @@
 // files, no build step.
 
 import {
-  S, FACE, CELL_TYPES, currentBackground, currentTheme,
+  S, FACE, CELL_TYPES, currentBackground, currentTheme, cellColors, frac,
 } from '../core/state.js';
+import { shapeVertex } from '../core/shape.js';
 import { RendererBase } from './renderer.js';
 
 // Each cell is one instanced quad. The fragment shader computes the
@@ -28,7 +29,7 @@ layout(location=2) in vec4 a_phase;         // (phase, seed, freq, wobbleMul)
 layout(location=3) in vec3 a_cytoTop;
 layout(location=4) in vec3 a_cytoBot;
 layout(location=5) in vec3 a_nucleus;
-layout(location=6) in vec3 a_outline;
+layout(location=6) in vec4 a_outline;        // .a = c.flash (0..1)
 
 uniform vec3 u_camera;
 uniform vec2 u_viewport;
@@ -39,7 +40,7 @@ out vec4 v_phase;
 out vec3 v_cytoTop;
 out vec3 v_cytoBot;
 out vec3 v_nucleus;
-out vec3 v_outline;
+out vec4 v_outline;
 
 void main() {
   // 1.70× r — covers wobbly body extents (up to ~1.30) plus the
@@ -69,7 +70,7 @@ in vec4 v_phase;        // (phase, seed, freq, wobbleMul)
 in vec3 v_cytoTop;
 in vec3 v_cytoBot;
 in vec3 v_nucleus;
-in vec3 v_outline;
+in vec4 v_outline;
 uniform float u_time;       // seconds
 uniform float u_wobbleAmp;  // S.wobbleAmp
 uniform vec3 u_highlight;   // S.highlightColor as rgb
@@ -183,7 +184,11 @@ void main() {
 
   vec3 col = cyto;
   col = mix(col, nucColor, nucleusMask);
-  col = mix(col, v_outline, clamp(outlineMask, 0.0, 1.0));
+  col = mix(col, v_outline.rgb, clamp(outlineMask, 0.0, 1.0));
+
+  // Tap flash overlay — c.flash decays in Sim.update(); fade out across 200 ms.
+  float flashA = clamp(v_outline.a / 0.2, 0.0, 1.0) * 0.6;
+  col = mix(col, vec3(1.0), flashA);
 
   // Selection brighten — translucent highlight wash inside the cell.
   if (sel == 1) {
@@ -239,6 +244,7 @@ uniform float u_time;        // seconds
 uniform int u_spotCount;
 uniform vec4 u_spots[${MAX_SPOTS}];      // (cx, cy, r, _) screen 0..1
 uniform vec3 u_spotCols[${MAX_SPOTS}];
+uniform int u_rbc;                        // 0=off, 1=draw drifting RBC silhouettes
 
 out vec4 outColor;
 
@@ -285,6 +291,24 @@ void main() {
     col += u_spotCols[i] * a;
   }
 
+  // Drifting red-blood-cell silhouettes — bloodstream theme flair.
+  // 22 ellipses with darker centre dot, drift on screen UV with u_time.
+  if (u_rbc == 1) {
+    for (int i = 0; i < 22; i++) {
+      float seed = float(i) * 1.31;
+      float fx = mod(float(i) / 22.0 + 0.06 * sin(u_time * 0.25 + seed), 1.0);
+      float fy = mod(fract(seed * 0.7) + u_time * 0.15 + float(i) * 0.13, 1.0);
+      vec2 c = vec2(fx, fy);
+      float r = 0.018 + 0.016 * fract(seed * 0.21);
+      vec2 dEll = (v_uv - c) / vec2(r, r * 0.78);
+      float ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
+      col = mix(col, vec3(1.0, 0.35, 0.35), ellA);
+      float dDot = length(v_uv - c) / (r * 0.32);
+      float dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
+      col = mix(col, vec3(0.47, 0.08, 0.08), dotA);
+    }
+  }
+
   // Vignette: darken the corners.
   if (u_vignette > 0.0) {
     float v = length(v_uv - 0.5) * 1.4;
@@ -295,7 +319,7 @@ void main() {
   outColor = vec4(col, 1.0);
 }`;
 
-const INSTANCE_FLOATS = 20; // see _diskVao layout in init()
+const INSTANCE_FLOATS = 21; // see _diskVao layout in init()
 
 // Body and nucleus kinds packed into a single float per instance:
 //   packedKind = bodyKind + nucKind * 16
@@ -305,6 +329,95 @@ const BODY_KIND_FLOAT = {
 const NUC_KIND_FLOAT = {
   none: 0, round: 1, kidney: 2, bilobed: 3, multilobed: 4, 'round-small': 5,
 };
+
+// ---------- Decoration pass (per-cell appendages: spikes, tendrils,
+// flagella, etc.) Shared vertex+fragment program for both line and
+// triangle primitives. Each vertex carries (x,y) world coords and an
+// rgba colour. Drawn in two batches (LINES + TRIANGLES) per frame.
+const DECOR_VERT_FLOATS = 6;     // x, y, r, g, b, a
+const VERT_DECOR = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_pos;
+layout(location=1) in vec4 a_col;
+uniform vec3 u_camera;
+uniform vec2 u_viewport;
+out vec4 v_col;
+void main() {
+  vec2 screenPos = a_pos * u_camera.x + u_camera.yz;
+  vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
+  clipPos.y = -clipPos.y;
+  gl_Position = vec4(clipPos, 0.0, 1.0);
+  v_col = a_col;
+}`;
+const FRAG_DECOR = `#version 300 es
+precision highp float;
+in vec4 v_col;
+out vec4 outColor;
+void main() { outColor = v_col; }`;
+
+// ---------- Target-marker dashed lines (selected → marker). Vertices
+// carry (x, y, distAlongLine). Fragment shader does the dash test.
+const VERT_DASH = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_pos;
+layout(location=1) in float a_dist;
+uniform vec3 u_camera;
+uniform vec2 u_viewport;
+out float v_dist;
+void main() {
+  vec2 screenPos = a_pos * u_camera.x + u_camera.yz;
+  vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
+  clipPos.y = -clipPos.y;
+  gl_Position = vec4(clipPos, 0.0, 1.0);
+  v_dist = a_dist;
+}`;
+const FRAG_DASH = `#version 300 es
+precision highp float;
+in float v_dist;
+uniform float u_dashOffset;
+uniform float u_alpha;
+out vec4 outColor;
+void main() {
+  float m = mod(v_dist + u_dashOffset, 14.0);
+  if (m > 8.0) discard;
+  outColor = vec4(1.0, 1.0, 1.0, u_alpha);
+}`;
+
+// ---------- Target-marker pulsing circle + inner dot (single quad).
+const VERT_MARKER = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_corner;
+uniform vec3 u_camera;
+uniform vec2 u_viewport;
+uniform vec3 u_marker;       // (x, y, scaledRadius_world)
+out vec2 v_uv;
+void main() {
+  vec2 worldPos = u_marker.xy + a_corner * u_marker.z;
+  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
+  clipPos.y = -clipPos.y;
+  gl_Position = vec4(clipPos, 0.0, 1.0);
+  v_uv = a_corner;
+}`;
+const FRAG_MARKER = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform float u_age;          // 0..1 lifetime
+uniform float u_innerNorm;    // inner-dot radius in v_uv units
+uniform float u_ringNorm;     // ring radius in v_uv units (1.0 baseline)
+uniform float u_ringHalfPx;   // ring half-width in v_uv units
+out vec4 outColor;
+void main() {
+  float d = length(v_uv);
+  float fade = 1.0 - u_age;
+  // Inner dot.
+  float dotA = 1.0 - smoothstep(u_innerNorm * 0.92, u_innerNorm * 1.05, d);
+  // Ring band centred at u_ringNorm.
+  float ringA = 1.0 - smoothstep(u_ringHalfPx, u_ringHalfPx * 1.4, abs(d - u_ringNorm));
+  float a = max(dotA, ringA) * fade;
+  if (a <= 0.0) discard;
+  outColor = vec4(1.0, 1.0, 1.0, a);
+}`;
 
 // ---------- Cartoon face pass (only drawn when S.cartoon = true) ----------
 //
@@ -655,7 +768,7 @@ export class WebGL2Renderer extends RendererBase {
     //   8..10  cytoTop  (rgb)
     //  11..13  cytoBot  (rgb)
     //  14..16  nucleus  (rgb)
-    //  17..19  outline  (rgb)
+    //  17..20  outline  (rgba; .a = c.flash)
     const stride = INSTANCE_FLOATS * 4;
     let off = 0;
     function attr(loc, size) {
@@ -669,7 +782,7 @@ export class WebGL2Renderer extends RendererBase {
     attr(3, 3); // a_cytoTop
     attr(4, 3); // a_cytoBot
     attr(5, 3); // a_nucleus
-    attr(6, 3); // a_outline
+    attr(6, 4); // a_outline (rgba; .a = c.flash)
     gl.bindVertexArray(null);
 
     // ---- background program ----
@@ -689,6 +802,7 @@ export class WebGL2Renderer extends RendererBase {
     this._bgU.spotCount = bu('u_spotCount');
     this._bgU.spots = bu('u_spots');
     this._bgU.spotCols = bu('u_spotCols');
+    this._bgU.rbc = bu('u_rbc');
 
     this._bgVao = gl.createVertexArray();
 
@@ -730,6 +844,69 @@ export class WebGL2Renderer extends RendererBase {
       fa(4, 4); // a_face3  (mouthY, phase, _, _)
       fa(5, 3); // a_mouthCol (rgb)
     }
+    gl.bindVertexArray(null);
+
+    // ---- decoration program (lines + triangles share the same shader) ----
+    this._decorProg = link(gl, VERT_DECOR, FRAG_DECOR);
+    this._decorU = {
+      camera: gl.getUniformLocation(this._decorProg, 'u_camera'),
+      viewport: gl.getUniformLocation(this._decorProg, 'u_viewport'),
+    };
+    // Two dynamic buffers (lines + tris) share the same vertex layout.
+    this._decorLineVbo = gl.createBuffer();
+    this._decorTriVbo = gl.createBuffer();
+    this._decorLines = [];   // packed (x, y, r, g, b, a) ×N
+    this._decorTris  = [];
+    this._decorLineCap = 0;
+    this._decorTriCap = 0;
+    const makeDecorVao = (vbo) => {
+      const vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+      gl.enableVertexAttribArray(0);
+      gl.vertexAttribPointer(0, 2, gl.FLOAT, false, DECOR_VERT_FLOATS * 4, 0);
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 4, gl.FLOAT, false, DECOR_VERT_FLOATS * 4, 8);
+      gl.bindVertexArray(null);
+      return vao;
+    };
+    this._decorLineVao = makeDecorVao(this._decorLineVbo);
+    this._decorTriVao = makeDecorVao(this._decorTriVbo);
+
+    // ---- target-marker dashed-line program ----
+    this._dashProg = link(gl, VERT_DASH, FRAG_DASH);
+    this._dashU = {
+      camera: gl.getUniformLocation(this._dashProg, 'u_camera'),
+      viewport: gl.getUniformLocation(this._dashProg, 'u_viewport'),
+      dashOffset: gl.getUniformLocation(this._dashProg, 'u_dashOffset'),
+      alpha: gl.getUniformLocation(this._dashProg, 'u_alpha'),
+    };
+    this._dashVbo = gl.createBuffer();
+    this._dashVao = gl.createVertexArray();
+    gl.bindVertexArray(this._dashVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._dashVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 12, 0);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 1, gl.FLOAT, false, 12, 8);
+    gl.bindVertexArray(null);
+
+    // ---- target-marker pulsing-circle program ----
+    this._markerProg = link(gl, VERT_MARKER, FRAG_MARKER);
+    this._markerU = {
+      camera: gl.getUniformLocation(this._markerProg, 'u_camera'),
+      viewport: gl.getUniformLocation(this._markerProg, 'u_viewport'),
+      marker: gl.getUniformLocation(this._markerProg, 'u_marker'),
+      age: gl.getUniformLocation(this._markerProg, 'u_age'),
+      innerNorm: gl.getUniformLocation(this._markerProg, 'u_innerNorm'),
+      ringNorm: gl.getUniformLocation(this._markerProg, 'u_ringNorm'),
+      ringHalfPx: gl.getUniformLocation(this._markerProg, 'u_ringHalfPx'),
+    };
+    this._markerVao = gl.createVertexArray();
+    gl.bindVertexArray(this._markerVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._cornerVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
     gl.bindVertexArray(null);
   }
 
@@ -804,6 +981,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform1i(this._bgU.spotCount, count);
     gl.uniform4fv(this._bgU.spots, this._spotsBuf);
     gl.uniform3fv(this._bgU.spotCols, this._spotColsBuf);
+    gl.uniform1i(this._bgU.rbc, bg.rbcSilhouettes ? 1 : 0);
 
     gl.bindVertexArray(this._bgVao);
     gl.disable(gl.BLEND);
@@ -856,6 +1034,7 @@ export class WebGL2Renderer extends RendererBase {
       data[j + 11] = bot[0]; data[j + 12] = bot[1]; data[j + 13] = bot[2];
       data[j + 14] = nuc[0]; data[j + 15] = nuc[1]; data[j + 16] = nuc[2];
       data[j + 17] = outlineRgb[0]; data[j + 18] = outlineRgb[1]; data[j + 19] = outlineRgb[2];
+      data[j + 20] = c.flash || 0;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceVbo);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, shapes.length * INSTANCE_FLOATS);
@@ -871,6 +1050,8 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindVertexArray(null);
 
     // Cartoon faces — only when the toggle is on.
+    // Per-cell decorations (spikes, tendrils, flagella, etc.).
+    this._drawDecorations(shapes, time);
     if (S.cartoon) this._drawFaces(shapes, time);
   }
 
@@ -946,8 +1127,366 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindVertexArray(null);
   }
 
-  drawSelection(/* shapes, time */) {
-    // TODO Phase 4f: selection ring / target marker / flash overlay.
+  // ---------- Decorations ----------
+  _drawDecorations(shapes, time) {
+    this._decorLines.length = 0;
+    this._decorTris.length = 0;
+    const theme = currentTheme();
+    for (const s of shapes) {
+      const c = s.cell;
+      const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+      const kind = type.decoration && type.decoration.kind;
+      if (!kind || kind === 'none') continue;
+      switch (kind) {
+        case 'bigSpikes':         this._decorBigSpikes(s, theme, time); break;
+        case 'spikesPulsing':     this._decorSpikesPulsing(s, theme, time); break;
+        case 'tendrils':          this._decorTendrils(s, theme, time); break;
+        case 'tentaclesWiggling': this._decorTentacles(s, theme, time); break;
+        case 'flagellum':         this._decorFlagellum(s, theme, time); break;
+        case 'drips':             this._decorDrips(s, theme, time); break;
+        case 'legs':              this._decorLegs(s, theme, time); break;
+        case 'fuzz':              this._decorFuzz(s, theme, time); break;
+        case 'yReceptorsFew':     this._decorY(s, theme, time, 6); break;
+        case 'yReceptorsMany':    this._decorY(s, theme, time, 14); break;
+      }
+    }
+    if (this._decorLines.length === 0 && this._decorTris.length === 0) return;
+    this._uploadAndDrawDecorations();
+  }
+
+  _pushLine(x1, y1, x2, y2, r, g, b, a) {
+    const arr = this._decorLines;
+    arr.push(x1, y1, r, g, b, a, x2, y2, r, g, b, a);
+  }
+  _pushTri(p0, p1, p2, r, g, b, a) {
+    const arr = this._decorTris;
+    arr.push(p0[0], p0[1], r, g, b, a, p1[0], p1[1], r, g, b, a, p2[0], p2[1], r, g, b, a);
+  }
+
+  _uploadAndDrawDecorations() {
+    const gl = this.gl;
+    gl.useProgram(this._decorProg);
+    gl.uniform3f(this._decorU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform2f(this._decorU.viewport, this.W, this.H);
+
+    if (this._decorLines.length > 0) {
+      const arr = new Float32Array(this._decorLines);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._decorLineVbo);
+      if (arr.byteLength > this._decorLineCap) {
+        gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+        this._decorLineCap = arr.byteLength;
+      } else {
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, arr);
+      }
+      gl.bindVertexArray(this._decorLineVao);
+      gl.drawArrays(gl.LINES, 0, this._decorLines.length / DECOR_VERT_FLOATS);
+    }
+    if (this._decorTris.length > 0) {
+      const arr = new Float32Array(this._decorTris);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._decorTriVbo);
+      if (arr.byteLength > this._decorTriCap) {
+        gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+        this._decorTriCap = arr.byteLength;
+      } else {
+        gl.bufferSubData(gl.ARRAY_BUFFER, 0, arr);
+      }
+      gl.bindVertexArray(this._decorTriVao);
+      gl.drawArrays(gl.TRIANGLES, 0, this._decorTris.length / DECOR_VERT_FLOATS);
+    }
+    gl.bindVertexArray(null);
+  }
+
+  // Per-decoration helpers — port the canvas2d helpers, but emit
+  // line / triangle vertices into the shared buffers instead of
+  // talking to a 2D context.
+
+  _decorBigSpikes(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const accent = hexToVec3(cc.accent);
+    const outline = hexToVec3(theme.outline.color);
+    const N = 8;
+    const tipLen = s.r * 0.55;
+    const baseHalf = s.r * 0.09;
+    for (let i = 0; i < N; i++) {
+      const jitter = (frac(c.id * 0.31 + i * 0.71) - 0.5) * 0.25;
+      const theta = (i / N) * Math.PI * 2 + jitter;
+      const base = shapeVertex(s, theta, t);
+      const a = [base.x + Math.cos(theta + Math.PI / 2) * baseHalf,
+                 base.y + Math.sin(theta + Math.PI / 2) * baseHalf];
+      const b = [base.x + Math.cos(theta - Math.PI / 2) * baseHalf,
+                 base.y + Math.sin(theta - Math.PI / 2) * baseHalf];
+      const tip = [base.x + Math.cos(theta) * tipLen, base.y + Math.sin(theta) * tipLen];
+      this._pushTri(a, tip, b, accent[0], accent[1], accent[2], 1.0);
+      this._pushLine(a[0], a[1], tip[0], tip[1], outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(tip[0], tip[1], b[0], b[1], outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(b[0], b[1], a[0], a[1], outline[0], outline[1], outline[2], 1.0);
+    }
+  }
+
+  _decorSpikesPulsing(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const accent = hexToVec3(cc.accent);
+    const outline = hexToVec3(theme.outline.color);
+    const N = 10;
+    const baseHalf = s.r * 0.09;
+    for (let i = 0; i < N; i++) {
+      const jitter = (frac(c.id * 0.31 + i * 0.71) - 0.5) * 0.18;
+      const theta = (i / N) * Math.PI * 2 + jitter;
+      const tipLen = s.r * (0.45 + 0.18 * Math.sin(t * 2.5 + i * 0.7 + (c.wobbleSeed || 0)));
+      const base = shapeVertex(s, theta, t);
+      const a = [base.x + Math.cos(theta + Math.PI / 2) * baseHalf,
+                 base.y + Math.sin(theta + Math.PI / 2) * baseHalf];
+      const b = [base.x + Math.cos(theta - Math.PI / 2) * baseHalf,
+                 base.y + Math.sin(theta - Math.PI / 2) * baseHalf];
+      const tip = [base.x + Math.cos(theta) * tipLen, base.y + Math.sin(theta) * tipLen];
+      this._pushTri(a, tip, b, accent[0], accent[1], accent[2], 1.0);
+      this._pushLine(a[0], a[1], tip[0], tip[1], outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(tip[0], tip[1], b[0], b[1], outline[0], outline[1], outline[2], 1.0);
+    }
+  }
+
+  _decorTendrils(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToVec3(cc.cytoBot);
+    const N = 13;
+    const SEG = 12;
+    for (let i = 0; i < N; i++) {
+      const baseAng = (i / N) * Math.PI * 2 + c.phase;
+      const base = shapeVertex(s, baseAng, t);
+      const len = s.r * (1.1 + 0.4 * frac(c.id * 0.13 + i * 0.7));
+      const sway = 0.4 * Math.sin(t * 0.9 + i * 1.3 + c.wobbleSeed);
+      const tipAng = baseAng + sway * 0.4;
+      const tipX = base.x + Math.cos(tipAng) * len;
+      const tipY = base.y + Math.sin(tipAng) * len;
+      const ctrlAng = baseAng + sway;
+      const ctrlR = len * 0.6;
+      const cpX = base.x + Math.cos(ctrlAng) * ctrlR;
+      const cpY = base.y + Math.sin(ctrlAng) * ctrlR;
+      // Sample quadratic Bezier at 12 segments.
+      let prevX = base.x, prevY = base.y;
+      for (let k = 1; k <= SEG; k++) {
+        const u = k / SEG;
+        const iu = 1 - u;
+        const x = iu * iu * base.x + 2 * iu * u * cpX + u * u * tipX;
+        const y = iu * iu * base.y + 2 * iu * u * cpY + u * u * tipY;
+        this._pushLine(prevX, prevY, x, y, col[0], col[1], col[2], 1.0);
+        prevX = x; prevY = y;
+      }
+    }
+  }
+
+  _decorTentacles(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToVec3(cc.cytoBot);
+    const N = 6;
+    const SEG = 12;
+    for (let i = 0; i < N; i++) {
+      const baseAng = (i / N) * Math.PI * 2 + c.phase;
+      const base = shapeVertex(s, baseAng, t);
+      const len = s.r * (1.0 + 0.5 * frac(c.id * 0.13 + i * 0.7));
+      const sway = 0.7 * Math.sin(t * 1.6 + i * 1.3 + c.wobbleSeed);
+      const curl = 0.6 * Math.sin(t * 1.1 + i * 0.5);
+      const midAng = baseAng + sway;
+      const midX = base.x + Math.cos(midAng) * len * 0.6;
+      const midY = base.y + Math.sin(midAng) * len * 0.6;
+      const tipAng = baseAng + sway + curl;
+      const tipX = base.x + Math.cos(tipAng) * len;
+      const tipY = base.y + Math.sin(tipAng) * len;
+      let prevX = base.x, prevY = base.y;
+      for (let k = 1; k <= SEG; k++) {
+        const u = k / SEG;
+        const iu = 1 - u;
+        const x = iu * iu * base.x + 2 * iu * u * midX + u * u * tipX;
+        const y = iu * iu * base.y + 2 * iu * u * midY + u * u * tipY;
+        this._pushLine(prevX, prevY, x, y, col[0], col[1], col[2], 1.0);
+        prevX = x; prevY = y;
+      }
+    }
+  }
+
+  _decorFlagellum(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToVec3(cc.accent);
+    const ang = (c.orientation || 0) + Math.PI;
+    const startV = shapeVertex(s, ang, t);
+    const dirX = Math.cos(ang), dirY = Math.sin(ang);
+    const perpX = -dirY, perpY = dirX;
+    const length = s.r * 1.6;
+    const N = 24;
+    let prevX = startV.x, prevY = startV.y;
+    for (let i = 1; i <= N; i++) {
+      const u = i / N;
+      const along = length * u;
+      const wave = Math.sin(u * Math.PI * 3 - t * 6) * (s.r * 0.18) * u;
+      const x = startV.x + dirX * along + perpX * wave;
+      const y = startV.y + dirY * along + perpY * wave;
+      this._pushLine(prevX, prevY, x, y, col[0], col[1], col[2], 1.0);
+      prevX = x; prevY = y;
+    }
+  }
+
+  _decorDrips(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const fill = hexToVec3(cc.cytoBot);
+    const outline = hexToVec3(theme.outline.color);
+    const N = 5;
+    for (let i = 0; i < N; i++) {
+      const dirAng = Math.PI * 0.5 - 0.40 + (i / (N - 1)) * 0.80;
+      const base = shapeVertex(s, dirAng, t);
+      const drop = s.r * 0.22 + s.r * 0.06 * Math.sin(t * 1.8 + i);
+      const wL = [base.x - s.r * 0.06, base.y];
+      const wR = [base.x + s.r * 0.06, base.y];
+      const tip = [base.x, base.y + drop * 1.2];
+      // Triangle fan approximating teardrop (3 tris).
+      const ctrl = [base.x, base.y + drop];
+      this._pushTri(wL, ctrl, wR, fill[0], fill[1], fill[2], 1.0);
+      this._pushTri(wL, tip, ctrl, fill[0], fill[1], fill[2], 1.0);
+      this._pushTri(ctrl, tip, wR, fill[0], fill[1], fill[2], 1.0);
+      // Outline edges.
+      this._pushLine(wL[0], wL[1], tip[0], tip[1], outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(tip[0], tip[1], wR[0], wR[1], outline[0], outline[1], outline[2], 1.0);
+      // Bobbing droplet below — small disc made from a 12-segment fan.
+      const bobY = tip[1] + s.r * 0.10 + s.r * 0.05 * Math.sin(t * 2.2 + i * 0.7);
+      const cx = base.x, cy = bobY, dr = s.r * 0.07;
+      const SEG = 12;
+      for (let k = 0; k < SEG; k++) {
+        const a0 = (k / SEG) * Math.PI * 2;
+        const a1 = ((k + 1) / SEG) * Math.PI * 2;
+        const p0 = [cx + Math.cos(a0) * dr, cy + Math.sin(a0) * dr];
+        const p1 = [cx + Math.cos(a1) * dr, cy + Math.sin(a1) * dr];
+        this._pushTri([cx, cy], p0, p1, fill[0], fill[1], fill[2], 1.0);
+      }
+    }
+  }
+
+  _decorLegs(s, theme, t) {
+    const c = s.cell;
+    const outline = hexToVec3(theme.outline.color);
+    const N = 10;
+    for (let i = 0; i < N; i++) {
+      const theta = (i / N) * Math.PI * 2;
+      const wiggle = 0.25 * Math.sin(t * 6 + i * 0.8);
+      const base = shapeVertex(s, theta, t);
+      const dir = theta + wiggle;
+      const len = s.r * 0.4;
+      const kneeX = base.x + Math.cos(dir) * len * 0.55;
+      const kneeY = base.y + Math.sin(dir) * len * 0.55;
+      const tipX = base.x + Math.cos(dir + 0.3 * Math.sin(t * 5 + i)) * len;
+      const tipY = base.y + Math.sin(dir + 0.3 * Math.sin(t * 5 + i)) * len;
+      this._pushLine(base.x, base.y, kneeX, kneeY, outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(kneeX, kneeY, tipX, tipY, outline[0], outline[1], outline[2], 1.0);
+    }
+  }
+
+  _decorFuzz(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToVec3(cc.accent);
+    const N = 22;
+    for (let i = 0; i < N; i++) {
+      const theta = (i / N) * Math.PI * 2;
+      const base = shapeVertex(s, theta, t);
+      const len = s.r * (0.18 + 0.10 * Math.sin(t * 1.2 + i * 0.7));
+      const tipX = base.x + Math.cos(theta) * len;
+      const tipY = base.y + Math.sin(theta) * len;
+      this._pushLine(base.x, base.y, tipX, tipY, col[0], col[1], col[2], 0.85);
+    }
+  }
+
+  _decorY(s, theme, t, count) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToVec3(cc.accent);
+    const stem = s.r * 0.22;
+    const arms = s.r * 0.13;
+    const armSpread = Math.PI * 0.25;
+    for (let i = 0; i < count; i++) {
+      const theta = (i / count) * Math.PI * 2 + c.phase;
+      const base = shapeVertex(s, theta, t);
+      const tipX = base.x + Math.cos(theta) * stem;
+      const tipY = base.y + Math.sin(theta) * stem;
+      this._pushLine(base.x, base.y, tipX, tipY, col[0], col[1], col[2], 1.0);
+      const lAng = theta + armSpread;
+      const rAng = theta - armSpread;
+      this._pushLine(tipX, tipY,
+        tipX + Math.cos(lAng) * arms, tipY + Math.sin(lAng) * arms,
+        col[0], col[1], col[2], 1.0);
+      this._pushLine(tipX, tipY,
+        tipX + Math.cos(rAng) * arms, tipY + Math.sin(rAng) * arms,
+        col[0], col[1], col[2], 1.0);
+    }
+  }
+
+  drawSelection(shapes, time) {
+    // The per-cell selection ring + tap-flash live in the cell pass
+    // (handled by the kind / a_outline.a packing). What's left is the
+    // target marker — pulsing circle + dashed lines from each selected
+    // cell to the marker point — when sim.targetMarker is present.
+    if (this.sim.targetMarker) this._drawTargetMarker();
+  }
+
+  _drawTargetMarker() {
+    const gl = this.gl;
+    const m = this.sim.targetMarker;
+    if (!m) return;
+    const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+    const age = (now - m.t0) / 1500;
+    if (age >= 1) {
+      this.sim.targetMarker = null;
+      return;
+    }
+    const fade = 1 - age;
+    const camScale = this.camera.scale;
+
+    // ----- Dashed lines from each selected cell to the marker -----
+    if (this.sim.selectedCells.size > 0) {
+      const verts = [];
+      for (const c of this.sim.selectedCells) {
+        if (c.state !== 'NORMAL') continue;
+        const dx = m.x - c.x, dy = m.y - c.y;
+        const len = Math.hypot(dx, dy);
+        // distAlongLine encoded in screen-px units (so dashing uses px).
+        const screenLen = len * camScale;
+        verts.push(c.x, c.y, 0);
+        verts.push(m.x, m.y, screenLen);
+      }
+      if (verts.length > 0) {
+        const arr = new Float32Array(verts);
+        gl.bindBuffer(gl.ARRAY_BUFFER, this._dashVbo);
+        gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
+        gl.useProgram(this._dashProg);
+        gl.uniform3f(this._dashU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+        gl.uniform2f(this._dashU.viewport, this.W, this.H);
+        gl.uniform1f(this._dashU.dashOffset, -now * 0.04);
+        gl.uniform1f(this._dashU.alpha, fade);
+        gl.bindVertexArray(this._dashVao);
+        gl.drawArrays(gl.LINES, 0, verts.length / 3);
+        gl.bindVertexArray(null);
+      }
+    }
+
+    // ----- Pulsing circle + inner dot at the marker -----
+    // Quad covers the full ring (ring at 18 / camScale * (1 + 0.4 * age) world units).
+    const ringWorld = (18 / camScale) * (1 + 0.4 * age);
+    const innerWorld = 4 / camScale;
+    const quadR = ringWorld + 6 / camScale;
+    gl.useProgram(this._markerProg);
+    gl.uniform3f(this._markerU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform2f(this._markerU.viewport, this.W, this.H);
+    gl.uniform3f(this._markerU.marker, m.x, m.y, quadR);
+    gl.uniform1f(this._markerU.age, age);
+    gl.uniform1f(this._markerU.innerNorm, innerWorld / quadR);
+    gl.uniform1f(this._markerU.ringNorm, ringWorld / quadR);
+    gl.uniform1f(this._markerU.ringHalfPx, (3 / camScale) / quadR);
+    gl.bindVertexArray(this._markerVao);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    gl.bindVertexArray(null);
   }
 
   drawDebug(/* shapes */) {
@@ -968,6 +1507,16 @@ export class WebGL2Renderer extends RendererBase {
     if (this._instanceVbo) gl.deleteBuffer(this._instanceVbo);
     if (this._diskVao) gl.deleteVertexArray(this._diskVao);
     if (this._bgVao) gl.deleteVertexArray(this._bgVao);
+    if (this._decorProg) gl.deleteProgram(this._decorProg);
+    if (this._decorLineVbo) gl.deleteBuffer(this._decorLineVbo);
+    if (this._decorTriVbo) gl.deleteBuffer(this._decorTriVbo);
+    if (this._decorLineVao) gl.deleteVertexArray(this._decorLineVao);
+    if (this._decorTriVao) gl.deleteVertexArray(this._decorTriVao);
+    if (this._dashProg) gl.deleteProgram(this._dashProg);
+    if (this._dashVbo) gl.deleteBuffer(this._dashVbo);
+    if (this._dashVao) gl.deleteVertexArray(this._dashVao);
+    if (this._markerProg) gl.deleteProgram(this._markerProg);
+    if (this._markerVao) gl.deleteVertexArray(this._markerVao);
     this.gl = null;
   }
 }

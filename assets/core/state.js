@@ -9,7 +9,7 @@ export const SETTINGS_KEY_V1 = 'microbes.settings.v1';
 
 export const ALL_CELL_KEYS = [
   'neutrophil', 'monocyte', 'mast', 'nk', 'macrophage', 'dendritic',
-  'basophil', 'platelet', 'tcell', 'bcell', 'eosinophil',
+  'basophil', 'platelet', 'tcell', 'bcell', 'eosinophil', 'rbc',
   'virus', 'germ', 'bacterium', 'amoebaP', 'slime', 'mite', 'spore', 'toxin',
 ];
 
@@ -160,6 +160,8 @@ export const LOCALES = {
     cell_bcell_desc: 'Adaptive antibody factory; secretes antibodies tagged to specific pathogens.',
     cell_eosinophil_label: 'Eosinophil',
     cell_eosinophil_desc: 'Anti-parasite specialist; key in allergic responses, releases toxic granule contents.',
+    cell_rbc_label: 'Red Blood Cell',
+    cell_rbc_desc: 'Erythrocyte; biconcave disc full of haemoglobin that carries oxygen around the body.',
     cell_virus_label: 'Virus',
     cell_virus_desc: 'Spike-protein invader; hijacks cells to replicate inside them.',
     cell_germ_label: 'Germ',
@@ -237,6 +239,8 @@ export const LOCALES = {
     cell_bcell_desc: 'Adaptive Antikörperfabrik; produziert Antikörper passend zu jedem Erreger.',
     cell_eosinophil_label: 'Eosinophiler Granulozyt',
     cell_eosinophil_desc: 'Spezialist gegen Parasiten; wichtig bei Allergien, setzt giftige Granulen frei.',
+    cell_rbc_label: 'Rote Blutzelle',
+    cell_rbc_desc: 'Erythrozyt; bikonkave Scheibe voller Hämoglobin — transportiert Sauerstoff durch den Körper.',
     cell_virus_label: 'Virus',
     cell_virus_desc: 'Spike-Eindringling; kapert Zellen, um sich darin zu vermehren.',
     cell_germ_label: 'Keim',
@@ -314,6 +318,8 @@ export const LOCALES = {
     cell_bcell_desc: 'Fábrica adaptativa de anticuerpos; secreta anticuerpos para patógenos específicos.',
     cell_eosinophil_label: 'Eosinófilo',
     cell_eosinophil_desc: 'Especialista anti-parásitos; clave en alergias, libera gránulos tóxicos.',
+    cell_rbc_label: 'Glóbulo rojo',
+    cell_rbc_desc: 'Eritrocito; disco bicóncavo lleno de hemoglobina que transporta oxígeno por el cuerpo.',
     cell_virus_label: 'Virus',
     cell_virus_desc: 'Invasor de espícula; secuestra células para replicarse en su interior.',
     cell_germ_label: 'Germen',
@@ -391,6 +397,8 @@ export const LOCALES = {
     cell_bcell_desc: 'ARROW MAKER. SPIT STICKY ARROW THAT TAG BAD GUY.',
     cell_eosinophil_label: 'EOSINOPHIL',
     cell_eosinophil_desc: 'WORM SLAYER. THROW BURN BAG. ALSO MAKE ALLERGY HURT.',
+    cell_rbc_label: 'RED BLOB',
+    cell_rbc_desc: 'CARRIES AIR. NO BRAIN. JUST FLOAT AROUND DELIVER OXYGEN.',
     cell_virus_label: 'VIRUS',
     cell_virus_desc: 'SPIKE BALL. SNEAK IN CELL. MAKE MORE SELF.',
     cell_germ_label: 'GERM',
@@ -770,6 +778,21 @@ export const CELL_TYPES = {
     field: { blur: 5,  contrast: 22, wobbleMul: 0.6 },
     colors: { cytoTop: '#fcc8a3', cytoBot: '#e0855a', nucleus: '#4d1d09', nucleusHi: '#ffe2cd', accent: '#8c3d18' },
     description: 'Anti-parasite specialist; key in allergic responses, releases toxic granule contents.',
+  },
+  rbc: {
+    // Mature RBCs have no nucleus — we render the biconcave dimple as a
+    // small darker spot at the centre by reusing the round-small nucleus
+    // path with a colour close to cytoBot.
+    label: 'Red Blood Cell', category: 'good', sizeMul: 0.55,
+    body: { kind: 'round', aspect: 1.0 },
+    nucleus: { kind: 'round-small' },
+    decoration: { kind: 'none' },
+    granules: 0,
+    splitFactor: 1.6, brownianMul: 1.4,
+    move: { patrolSpeed: 35, attackSpeed: 65, patrolAccel: 55, alarmAccel: 80, weight: 0.7, friction: 1.0, hostility: 'idle' },
+    field: { blur: 5, contrast: 22, wobbleMul: 1.5 },        // wobble = tumbling RBC feel
+    colors: { cytoTop: '#ff6b6b', cytoBot: '#a01818', nucleus: '#5a0a0a', nucleusHi: '#ffd2d2', accent: '#c43030' },
+    description: 'Erythrocyte; biconcave disc full of haemoglobin that carries oxygen around the body.',
   },
   virus: {
     label: 'Virus', category: 'bad', subcategory: 'virus', sizeMul: 0.30,

@@ -47,10 +47,10 @@ test('cellLabel / cellDesc cover all 19 cell types', () => {
   }
 });
 
-test('CELL_TYPES has the 11 immune + 8 pathogen entries', () => {
+test('CELL_TYPES has the 12 good (immune + RBC) + 8 pathogen entries', () => {
   const good = Object.values(CELL_TYPES).filter(t => t.category === 'good');
   const bad  = Object.values(CELL_TYPES).filter(t => t.category === 'bad');
-  assert.equal(good.length, 11);
+  assert.equal(good.length, 12);
   assert.equal(bad.length, 8);
 });
 
