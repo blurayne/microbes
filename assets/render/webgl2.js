@@ -152,8 +152,8 @@ void main() {
 
   // Donut-hole darkening for cells flagged bodyHollow (RBCs).
   if (isHollow() == 1) {
-    float holeT = 1.0 - smoothstep(0.0, 0.40, length(v_uv));
-    cyto = mix(cyto, v_cytoBot * 0.55, holeT * 0.65);
+    float holeT = 1.0 - smoothstep(0.0, 0.45, length(v_uv));
+    cyto = mix(cyto, v_cytoBot * 0.42, holeT * 0.85);
   }
 
   // Bold membrane band straddling the body edge, in the cell's own deep

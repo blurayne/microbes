@@ -482,9 +482,9 @@ export class Canvas2DRenderer extends RendererBase {
         // Paint a smaller darker radial gradient on top, sinking the
         // centre toward cytoBot.
         if (hollow) {
-          const innerR = b.r * 0.45 * cs * sx;
+          const innerR = b.r * 0.55 * cs * sx;
           const g2 = offCtx.createRadialGradient(cx, cy, 0, cx, cy, innerR);
-          g2.addColorStop(0, hexToRgba(cc.cytoBot, 0.55));
+          g2.addColorStop(0, hexToRgba(cc.cytoBot, 0.78));
           g2.addColorStop(1, hexToRgba(cc.cytoBot, 0));
           offCtx.fillStyle = g2;
           offCtx.beginPath();

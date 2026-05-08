@@ -357,7 +357,7 @@ export const LOCALES = {
     split_on_tap: 'Beim Drauflanga teiln', random_split: 'Zoifällige Teilung',
     split_push: 'Mit Schwung auseinanda', split_bond: 'Vabinda, dann driftn',
     max_cells: 'Max. Zoin', auto_split: 'Auto-Teilung (s)',
-    friction: 'Reim', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
+    friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
     wobble: 'Wackln', bg_flow: 'Hintagrundgflies', outline_px: 'Umrandung px',
     membrane: 'Membran', cell_size: 'Zoingrässn', use_highlight: 'Akzentfarb vawendn',
     mode_target: 'Zuimodus', mode_target_tip: 'Drauflanga: aussuacha / Zui setzn',
@@ -428,7 +428,7 @@ export const LOCALES = {
   },
   latin: {
     settings_title: 'Configuratio',
-    theme: 'Tema', background: 'Background', gameplay: 'Ludus',
+    theme: 'Tema', background: 'Tergum', gameplay: 'Ludus',
     splitting: 'Divisio', split_mode: 'Modus divisionis', population: 'Populatio',
     physics: 'Physica', cell_blending: 'Confusio cellularum', look: 'Aspectus',
     performance: 'Celeritas', language: 'Lingua',
@@ -459,9 +459,9 @@ export const LOCALES = {
     fps_line: '{fps} fps · cellulae {n}',
     help_group_good: 'Bonae (systema immunitarium)',
     blend_none: 'Nullum', blend_overlay: 'Superpositio', blend_multiply: 'Multiplica',
-    blend_darken: 'Obscura', blend_lighter: 'Adde lucem', blend_screen: 'Schermum',
+    blend_darken: 'Obscura', blend_lighter: 'Adde lucem', blend_screen: 'Velum',
     blend_softlight: 'Lux mollis', blend_hardlight: 'Lux dura',
-    blend_burn: 'Incende', blend_dodge: 'Vita',
+    blend_burn: 'Incende', blend_dodge: 'Tolle',
     upscale_blur: 'Mollis', upscale_pixel: 'Pixel (acutus)',
     pgroup_virus: 'Virus', pgroup_bacteria: 'Bacteria',
     pgroup_parasite: 'Parasiti', pgroup_fungus: 'Fungi', pgroup_toxin: 'Venena',
@@ -719,28 +719,11 @@ export function currentHighlightColor() {
   return (t && t.ui && t.ui.panelAccent) || '#ffffff';
 }
 
-// Map a hex colour to one of 16 coarse human-readable buckets via nearest
-// RGB Euclidean distance. Used by the theme dropdown so users can scan by
-// hue ("Petri Dish (orange)") instead of by hex code.
-const NAMED_COLORS = [
-  ['red',     [229, 57, 53]],
-  ['orange',  [251, 140, 0]],
-  ['amber',   [255, 179, 0]],
-  ['yellow',  [253, 216, 53]],
-  ['lime',    [192, 202, 51]],
-  ['green',   [67, 160, 71]],
-  ['teal',    [0, 137, 123]],
-  ['cyan',    [0, 172, 193]],
-  ['blue',    [30, 136, 229]],
-  ['indigo',  [57, 73, 171]],
-  ['violet',  [142, 36, 170]],
-  ['magenta', [216, 27, 96]],
-  ['pink',    [236, 64, 122]],
-  ['brown',   [109, 76, 65]],
-  ['gray',    [158, 158, 158]],
-  ['white',   [250, 250, 250]],
-  ['black',   [33, 33, 33]],
-];
+// Map a hex colour to a coarse human-readable bucket via HSL hue. Handles
+// pastels and dark tones correctly: very low saturation falls to gray /
+// white / black; otherwise the hue maps onto a 12-name colour wheel.
+// Used by the theme dropdown so users can scan by hue ("Petri Dish
+// (amber)") instead of by hex code.
 export function colorNameFor(hex) {
   let h = (hex || '').replace('#', '');
   if (h.length === 3) h = h.split('').map(c => c + c).join('');
@@ -748,12 +731,40 @@ export function colorNameFor(hex) {
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);
-  let bestName = NAMED_COLORS[0][0], bestD = Infinity;
-  for (const [name, [pr, pg, pb]] of NAMED_COLORS) {
-    const d = (r - pr) * (r - pr) + (g - pg) * (g - pg) + (b - pb) * (b - pb);
-    if (d < bestD) { bestD = d; bestName = name; }
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 510;             // 0..1
+  let sat = 0;
+  if (max !== min) {
+    sat = (lightness < 0.5)
+      ? (max - min) / (max + min)
+      : (max - min) / (510 - max - min);
   }
-  return bestName;
+  if (sat < 0.10) {
+    if (lightness < 0.18) return 'black';
+    if (lightness > 0.82) return 'white';
+    return 'gray';
+  }
+  let hue = 0;
+  const c = max - min;
+  if (max === r) hue = ((g - b) / c) % 6;
+  else if (max === g) hue = (b - r) / c + 2;
+  else hue = (r - g) / c + 4;
+  hue = (hue * 60 + 360) % 360;
+  // Hue → name; tightly tuned to the existing theme accents.
+  if (hue <  15) return 'red';
+  if (hue <  30) return lightness > 0.65 ? 'peach' : 'orange';
+  if (hue <  45) return lightness < 0.45 ? 'brown' : 'amber';
+  if (hue <  65) return 'yellow';
+  if (hue <  85) return 'lime';
+  if (hue < 165) return 'green';
+  if (hue < 185) return 'teal';
+  if (hue < 205) return 'cyan';
+  if (hue < 235) return 'blue';
+  if (hue < 265) return 'indigo';
+  if (hue < 295) return 'violet';
+  if (hue < 325) return 'magenta';
+  return 'pink';
 }
 
 // ---------- Backgrounds ----------

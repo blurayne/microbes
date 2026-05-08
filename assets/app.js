@@ -442,12 +442,20 @@ themeSelect.addEventListener('change', () => {
   }
 });
 
+function bgAccent(b) {
+  if (Array.isArray(b.spotColors) && b.spotColors[0]) return b.spotColors[0];
+  return b.spotColor || b.botColor || b.topColor || b.base || '';
+}
+
 const bgSelect = document.getElementById('bgSelect');
 if (bgSelect) {
   for (const [key, b] of Object.entries(BACKGROUNDS)) {
     const opt = document.createElement('option');
     opt.value = key;
-    opt.textContent = b.label || key;
+    const lbl = b.label || key;
+    const accent = bgAccent(b);
+    const name = accent ? colorNameFor(accent) : '';
+    opt.textContent = name ? `${lbl} (${name})` : lbl;
     bgSelect.appendChild(opt);
   }
   bgSelect.value = (S.background in BACKGROUNDS) ? S.background : (S.theme in BACKGROUNDS ? S.theme : 'solid');
