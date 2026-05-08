@@ -11,7 +11,7 @@
 // files, no build step.
 
 import {
-  S, CELL_TYPES, currentBackground, currentTheme,
+  S, FACE, CELL_TYPES, currentBackground, currentTheme,
 } from '../core/state.js';
 import { RendererBase } from './renderer.js';
 
@@ -306,6 +306,213 @@ const NUC_KIND_FLOAT = {
   none: 0, round: 1, kidney: 2, bilobed: 3, multilobed: 4, 'round-small': 5,
 };
 
+// ---------- Cartoon face pass (only drawn when S.cartoon = true) ----------
+//
+// One instanced quad per cell. Per-instance: world position + cell.r,
+// eye config (count / size / Y-offset / pupil size), look direction,
+// mouth kind + width, blink flag, mouth color. Fragment shader composes
+// eyes (white circle + dark pupil + white glint) and a per-type mouth
+// (smile / frown / snarl / fangs / tongue / drool / none).
+const FACE_INSTANCE_FLOATS = 19;
+const MOUTH_KIND_FLOAT = {
+  none: 0, smile: 1, frown: 2, snarl: 3, fangs: 4, tongue: 5, drool: 6,
+};
+
+const VERT_FACE = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_corner;
+layout(location=1) in vec4 a_inst;     // (x, y, r, mouthKind)
+layout(location=2) in vec4 a_face1;    // (eyesCount, eyeR, eyeY, pupilR)
+layout(location=3) in vec4 a_face2;    // (lookX, lookY, mouthW, blink)
+layout(location=4) in vec4 a_face3;    // (mouthY, phase, _, _)
+layout(location=5) in vec3 a_mouthCol; // RGB for mouth fill / stroke
+
+uniform vec3 u_camera;
+uniform vec2 u_viewport;
+
+out vec2 v_uv;
+out vec4 v_inst;
+out vec4 v_face1;
+out vec4 v_face2;
+out vec4 v_face3;
+out vec3 v_mouthCol;
+
+void main() {
+  // Quad covers the body extent (no need for spike margins — faces sit
+  // inside the cell). 1.0 × r is enough for any face-bearing cell.
+  vec2 worldPos = a_inst.xy + a_corner * a_inst.z * 1.0;
+  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
+  clipPos.y = -clipPos.y;
+  gl_Position = vec4(clipPos, 0.0, 1.0);
+  v_uv = a_corner;     // body-radius units, (0,0) at cell centre
+  v_inst = a_inst;
+  v_face1 = a_face1;
+  v_face2 = a_face2;
+  v_face3 = a_face3;
+  v_mouthCol = a_mouthCol;
+}`;
+
+const FRAG_FACE = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+in vec4 v_inst;       // (.., .., .., mouthKind)
+in vec4 v_face1;      // (eyesCount, eyeR, eyeY, pupilR)
+in vec4 v_face2;      // (lookX, lookY, mouthW, blink)
+in vec4 v_face3;      // (mouthY, phase, _, _)
+in vec3 v_mouthCol;
+uniform float u_time;
+out vec4 outColor;
+
+const float FACE_SCALE = 1.2;
+
+// Soft disc fill: returns alpha 0..1 inside, fades to 0 outside r.
+float discA(vec2 p, vec2 c, float r) {
+  return 1.0 - smoothstep(r * 0.92, r, length(p - c));
+}
+
+// Stroked arc segment: thin band along an arc from a0 to a1, centre c, radius r,
+// half-width hw.
+float arcA(vec2 p, vec2 c, float r, float hw, float a0, float a1) {
+  vec2 d = p - c;
+  float dist = abs(length(d) - r);
+  float band = 1.0 - smoothstep(hw * 0.5, hw, dist);
+  float ang = atan(d.y, d.x);
+  // Wrap into [-PI, PI].
+  float lo = a0;
+  float hi = a1;
+  float in_arc = step(lo, ang) * step(ang, hi);
+  return band * in_arc;
+}
+
+void main() {
+  int mouthKind = int(v_inst.w + 0.5);
+  int eyesCount = int(v_face1.x + 0.5);
+  if (eyesCount == 0 && mouthKind == 0) discard;
+
+  float eyeRBase = v_face1.y;
+  float eyeY = v_face1.z;
+  float pupilRBase = v_face1.w;
+  float blink = v_face2.w;
+  vec2 look = vec2(v_face2.x, v_face2.y);
+  float mouthW = v_face2.z;
+  float mouthY = v_face3.x;
+  float phase = v_face3.y;
+
+  vec3 col = vec3(0.0);
+  float a = 0.0;
+
+  // ---------- Eyes ----------
+  if (eyesCount > 0) {
+    float eyeR = eyeRBase * FACE_SCALE;
+    float pupilR = pupilRBase * FACE_SCALE;
+
+    // Eye centres in body-radius units.
+    vec2 eL = (eyesCount == 1) ? vec2(0.0, eyeY) : vec2(-0.22 * FACE_SCALE, eyeY);
+    vec2 eR = vec2(0.22 * FACE_SCALE, eyeY);
+
+    // Helper closure isn't possible in GLSL; inline twice for left + right (or only left).
+    for (int i = 0; i < 2; i++) {
+      if (i >= eyesCount) break;
+      vec2 ec = (i == 0) ? eL : eR;
+      vec2 d = v_uv - ec;
+      if (blink > 0.5) {
+        // Squint slit.
+        float ed = length(vec2(d.x / eyeR, d.y / (eyeR * 0.12)));
+        float wA = 1.0 - smoothstep(0.92, 1.0, ed);
+        col = mix(col, vec3(1.0), wA);
+        a = max(a, wA);
+      } else {
+        float ed = length(d) / eyeR;
+        if (ed < 1.05) {
+          float white = 1.0 - smoothstep(0.92, 1.0, ed);
+          col = mix(col, vec3(1.0), white);
+          a = max(a, white);
+          // Pupil
+          vec2 pupilCentre = ec + look * (eyeR * 0.45);
+          float pd = length(v_uv - pupilCentre) / pupilR;
+          float pupilA = 1.0 - smoothstep(0.92, 1.05, pd);
+          col = mix(col, vec3(0.06, 0.07, 0.09), pupilA);
+          a = max(a, pupilA);
+          // Glint
+          vec2 glintCentre = pupilCentre - vec2(pupilR * 0.35, pupilR * 0.35);
+          float gd = length(v_uv - glintCentre) / (pupilR * 0.30);
+          float glintA = (1.0 - smoothstep(0.92, 1.05, gd)) * 0.85;
+          col = mix(col, vec3(1.0), glintA);
+        }
+      }
+    }
+  }
+
+  // ---------- Mouth ----------
+  // All mouth styles centred at (0, mouthY) in body-radius units; mouthW
+  // is the half-extent.
+  vec2 mc = vec2(0.0, mouthY);
+  vec2 d = v_uv - mc;
+
+  if (mouthKind == 1 || mouthKind == 6) {
+    // SMILE (or DROOL — base smile)
+    float arc = arcA(v_uv, vec2(0.0, mouthY - mouthW * 0.3), mouthW, 0.04, 0.12 * 3.14159, 0.88 * 3.14159);
+    col = mix(col, v_mouthCol, arc);
+    a = max(a, arc);
+    if (mouthKind == 6) {
+      // Drool drip — small ellipse below the smile, animates over time.
+      float dripPhase = fract(u_time * 0.6 + phase);
+      vec2 dripC = vec2(mouthW * 0.25, mouthY + mouthW * 0.25 + dripPhase * mouthW * 0.8);
+      vec2 dr = (v_uv - dripC) / vec2(mouthW * 0.10, mouthW * 0.16);
+      float dripA = (1.0 - smoothstep(0.85, 1.0, length(dr))) * (1.0 - dripPhase);
+      col = mix(col, vec3(0.47, 0.86, 0.51), dripA);
+      a = max(a, dripA);
+    }
+  } else if (mouthKind == 2) {
+    // FROWN
+    float arc = arcA(v_uv, vec2(0.0, mouthY + mouthW * 0.6), mouthW, 0.04, 1.12 * 3.14159, 1.88 * 3.14159);
+    col = mix(col, v_mouthCol, arc);
+    a = max(a, arc);
+  } else if (mouthKind == 3) {
+    // SNARL — zig-zag teeth (5 segments)
+    // Distance from each segment, kept loose since GLSL line-segment SDF is verbose.
+    // Approximate with a thin band that follows y = mouthY + (i%2)*0.18*mouthW
+    float xrel = (v_uv.x - 0.0) / mouthW;
+    if (abs(xrel) < 1.0) {
+      float seg = floor((xrel + 1.0) * 2.5);
+      float yTarget = mouthY + (mod(seg, 2.0) < 0.5 ? 0.0 : mouthW * 0.18);
+      float dy = abs(v_uv.y - yTarget);
+      float zigA = 1.0 - smoothstep(0.02, 0.04, dy);
+      col = mix(col, v_mouthCol, zigA);
+      a = max(a, zigA);
+    }
+  } else if (mouthKind == 4) {
+    // FANGS — open mouth ellipse + two white triangles
+    vec2 dn = d / vec2(mouthW, mouthW * 0.45);
+    float open = 1.0 - smoothstep(0.92, 1.0, length(dn));
+    col = mix(col, v_mouthCol, open);
+    a = max(a, open);
+    // Approximate fangs with two small bright wedges below the mouth ellipse.
+    vec2 fL = vec2(-mouthW * 0.40, mouthY + mouthW * 0.10);
+    vec2 fR = vec2( mouthW * 0.40, mouthY + mouthW * 0.10);
+    float fLA = (1.0 - smoothstep(0.85, 1.0, length((v_uv - fL) / vec2(mouthW * 0.10, mouthW * 0.32)))) * 1.0;
+    float fRA = (1.0 - smoothstep(0.85, 1.0, length((v_uv - fR) / vec2(mouthW * 0.10, mouthW * 0.32)))) * 1.0;
+    col = mix(col, vec3(1.0), max(fLA, fRA));
+    a = max(a, max(fLA, fRA));
+  } else if (mouthKind == 5) {
+    // TONGUE — open mouth + pink tongue ellipse below
+    vec2 dn = d / vec2(mouthW, mouthW * 0.40);
+    float open = 1.0 - smoothstep(0.92, 1.0, length(dn));
+    col = mix(col, v_mouthCol, open);
+    a = max(a, open);
+    float wag = sin(u_time * 5.0 + phase) * mouthW * 0.18;
+    vec2 tc = vec2(wag, mouthY + mouthW * 0.30);
+    vec2 td = (v_uv - tc) / vec2(mouthW * 0.32, mouthW * 0.22);
+    float tA = 1.0 - smoothstep(0.85, 1.0, length(td));
+    col = mix(col, vec3(1.0, 0.54, 0.63), tA);
+    a = max(a, tA);
+  }
+
+  if (a <= 0.0) discard;
+  outColor = vec4(col, a);
+}`;
+
 function hexToVec3(hex) {
   let h = (hex || '#000').replace('#', '');
   if (h.length === 3) h = h.split('').map(c => c + c).join('');
@@ -488,6 +695,52 @@ export class WebGL2Renderer extends RendererBase {
     // Reusable arrays for the per-frame spot-uniform upload.
     this._spotsBuf = new Float32Array(MAX_SPOTS * 4);
     this._spotColsBuf = new Float32Array(MAX_SPOTS * 3);
+
+    // ---- face program (cartoon mode) ----
+    this._faceProg = link(gl, VERT_FACE, FRAG_FACE);
+    this._faceU = {
+      camera: gl.getUniformLocation(this._faceProg, 'u_camera'),
+      viewport: gl.getUniformLocation(this._faceProg, 'u_viewport'),
+      time: gl.getUniformLocation(this._faceProg, 'u_time'),
+    };
+    this._faceVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._faceVbo);
+    this._faceCapacity = 0;
+    this._faceData = new Float32Array(0);
+    this._growFaceBuffer(64);
+
+    this._faceVao = gl.createVertexArray();
+    gl.bindVertexArray(this._faceVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._cornerVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._faceVbo);
+    {
+      const stride = FACE_INSTANCE_FLOATS * 4;
+      let off = 0;
+      const fa = (loc, size) => {
+        gl.enableVertexAttribArray(loc);
+        gl.vertexAttribPointer(loc, size, gl.FLOAT, false, stride, off);
+        gl.vertexAttribDivisor(loc, 1);
+        off += size * 4;
+      };
+      fa(1, 4); // a_inst   (x, y, r, mouthKind)
+      fa(2, 4); // a_face1  (eyesCount, eyeR, eyeY, pupilR)
+      fa(3, 4); // a_face2  (lookX, lookY, mouthW, blink)
+      fa(4, 4); // a_face3  (mouthY, phase, _, _)
+      fa(5, 3); // a_mouthCol (rgb)
+    }
+    gl.bindVertexArray(null);
+  }
+
+  _growFaceBuffer(target) {
+    if (target <= this._faceCapacity) return;
+    const newCap = Math.max(64, Math.ceil(target * 1.5));
+    this._faceData = new Float32Array(newCap * FACE_INSTANCE_FLOATS);
+    this._faceCapacity = newCap;
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._faceVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, this._faceData.byteLength, gl.DYNAMIC_DRAW);
   }
 
   resize(W, H, dpr, renderScale) {
@@ -616,8 +869,81 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindVertexArray(this._diskVao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, shapes.length);
     gl.bindVertexArray(null);
-    // TODO Phase 4c-d: per-type nucleus shapes (kidney / bilobed /
-    // multilobed), granules, decorations.
+
+    // Cartoon faces — only when the toggle is on.
+    if (S.cartoon) this._drawFaces(shapes, time);
+  }
+
+  _drawFaces(shapes, time) {
+    const gl = this.gl;
+    const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+    // First pass: count how many cells actually paint a face (skip the ones
+    // with eyes==0 && mouth==none) and pack instance data.
+    this._growFaceBuffer(shapes.length);
+    const data = this._faceData;
+    let n = 0;
+    for (let i = 0; i < shapes.length; i++) {
+      const s = shapes[i];
+      const c = s.cell;
+      const cfg = FACE[c.type] || FACE.default;
+      const eyesCount = cfg.eyes || 0;
+      const mouthName = (cfg.mouth || 'none');
+      const mouthKind = MOUTH_KIND_FLOAT[mouthName] || 0;
+      if (eyesCount === 0 && mouthKind === 0) continue;
+
+      // Look direction → unit vector. Velocity-based, falls back to alarmTarget.
+      let lookX = c.vx, lookY = c.vy;
+      if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
+        lookX = c.alarmTarget.x - c.x;
+        lookY = c.alarmTarget.y - c.y;
+      }
+      const lm = Math.hypot(lookX, lookY) || 1;
+      lookX /= lm; lookY /= lm;
+
+      // Blink: when nextBlink fires the eyes squint for ~120ms, then
+      // re-arm. Sim updates aren't aware of this, so we rearm here.
+      if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
+      const blink = ((c.nextBlink - now) < 120 && (c.nextBlink - now) > 0) ? 1 : 0;
+
+      // Mouth fill colour follows the cell's nucleus colour (matches the
+      // Canvas2D pass) so it reads as part of the body.
+      const mc = (CELL_TYPES[c.type] || CELL_TYPES.neutrophil).colors;
+      const mcRgb = hexToVec3(mc.nucleus);
+
+      const j = n * FACE_INSTANCE_FLOATS;
+      data[j]     = c.x;
+      data[j + 1] = c.y;
+      data[j + 2] = c.r;
+      data[j + 3] = mouthKind;
+      data[j + 4] = eyesCount;
+      data[j + 5] = cfg.eyeR != null ? cfg.eyeR : 0.18;
+      data[j + 6] = cfg.eyeY != null ? cfg.eyeY : -0.10;
+      data[j + 7] = cfg.pupilR != null ? cfg.pupilR : 0.07;
+      data[j + 8] = lookX;
+      data[j + 9] = lookY;
+      data[j + 10] = 0.34 * 1.2;     // mouthW (half-extent in body-r units)
+      data[j + 11] = blink;
+      data[j + 12] = 0.18;           // mouthY
+      data[j + 13] = c.phase || 0;
+      data[j + 14] = 0;
+      data[j + 15] = 0;
+      data[j + 16] = mcRgb[0];
+      data[j + 17] = mcRgb[1];
+      data[j + 18] = mcRgb[2];
+      n++;
+    }
+    if (n === 0) return;
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._faceVbo);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * FACE_INSTANCE_FLOATS);
+
+    gl.useProgram(this._faceProg);
+    gl.uniform3f(this._faceU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform2f(this._faceU.viewport, this.W, this.H);
+    gl.uniform1f(this._faceU.time, time);
+    gl.bindVertexArray(this._faceVao);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
+    gl.bindVertexArray(null);
   }
 
   drawSelection(/* shapes, time */) {
@@ -635,6 +961,9 @@ export class WebGL2Renderer extends RendererBase {
     if (!gl) return;
     if (this._diskProg) gl.deleteProgram(this._diskProg);
     if (this._bgProg) gl.deleteProgram(this._bgProg);
+    if (this._faceProg) gl.deleteProgram(this._faceProg);
+    if (this._faceVbo) gl.deleteBuffer(this._faceVbo);
+    if (this._faceVao) gl.deleteVertexArray(this._faceVao);
     if (this._cornerVbo) gl.deleteBuffer(this._cornerVbo);
     if (this._instanceVbo) gl.deleteBuffer(this._instanceVbo);
     if (this._diskVao) gl.deleteVertexArray(this._diskVao);
