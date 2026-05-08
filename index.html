@@ -8,6 +8,7 @@
 </head>
 <body>
   <canvas id="stage"></canvas>
+  <div id="scanlines" aria-hidden="true"></div>
 
   <button id="gear" type="button" aria-label="Settings" title="Settings">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -26,6 +27,11 @@
       <section>
         <h3>Theme</h3>
         <select id="themeSelect"></select>
+      </section>
+
+      <section>
+        <h3>Background</h3>
+        <select id="bgSelect"></select>
       </section>
 
       <section>
@@ -104,6 +110,25 @@
         <label><input type="checkbox" id="cartoon" /> Cartoon mode (faces)</label>
         <label><input type="checkbox" id="showFPS" /> Show FPS</label>
         <label><input type="checkbox" id="showDebugField" /> Show metaball field</label>
+      </section>
+
+      <section>
+        <h3>Performance</h3>
+        <label>Render scale
+          <select id="renderScale">
+            <option value="1">100%</option>
+            <option value="0.75">75%</option>
+            <option value="0.5">50%</option>
+          </select>
+        </label>
+        <label>Upscale
+          <select id="upscaleMode">
+            <option value="blur">Blur (smooth)</option>
+            <option value="pixel">Pixel (crisp)</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="scanlines" /> Scanlines (CRT)</label>
+      </section>
       </section>
 
       <section class="actions">

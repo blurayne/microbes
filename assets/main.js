@@ -31,6 +31,10 @@
     allowBadGuys: true,       // expose pathogen palette + spawn paths
     cellSizeMul: 1.0,         // global cell-size multiplier (0.4..2.0)
     membraneIntensity: 0.55,  // strength of the inner-membrane stroke (0..1)
+    background: 'petriDish',  // separate from theme; key into BACKGROUNDS
+    renderScale: 1.0,         // 1.0 | 0.75 | 0.5 — backing canvas scale
+    upscaleMode: 'blur',      // 'blur' | 'pixel' — image-rendering on the canvas
+    scanlines: false,         // CRT-style scanline overlay
   };
 
   function loadSettings() {
@@ -59,6 +63,9 @@
         'deepSpace','volcano','forestFloor','cyberGrid',
         'lymphNode','thymus','boneMarrow','heart','gut','lung','brain','kidney','skin','liver'];
       if (parsed.theme && !knownThemes.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
+      // Background was bundled into theme before the split — fall back to the
+      // matching bg key when an old save has no `background` set.
+      if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
       return { ...DEFAULTS, ...parsed };
     } catch { return { ...DEFAULTS }; }
   }
@@ -242,6 +249,25 @@
 
   function currentTheme() {
     return THEMES[S.theme] || THEMES.petriDish;
+  }
+
+  // ---------- Backgrounds ----------
+  // Backgrounds are decoupled from themes — any theme palette/outline can be
+  // paired with any background scene. The registry is built by lifting each
+  // theme's `bg` block (so the keys map 1:1 to existing theme keys) plus a
+  // bonus "solid" entry that paints a flat fill with no spots / decor.
+  const BACKGROUNDS = (() => {
+    const out = {
+      solid: { label: 'Solid color', kind: 'flat', base: '#0a0612', spotCount: 0, vignette: 0 },
+    };
+    for (const [k, t] of Object.entries(THEMES)) {
+      if (t.bg) out[k] = Object.assign({ label: t.label }, t.bg);
+    }
+    return out;
+  })();
+
+  function currentBackground() {
+    return BACKGROUNDS[S.background] || BACKGROUNDS[S.theme] || BACKGROUNDS.solid;
   }
 
   // ---------- Cell types ----------
@@ -491,7 +517,9 @@
   };
 
   function cellColors(cell) {
-    return (CELL_TYPES[cell.type] || CELL_TYPES.neutrophil).colors;
+    // Cells store a cached colour ref at creation time; this fallback covers
+    // odd cases (preview cells, type swaps, etc.) without changing perf.
+    return (cell && cell._colors) || (CELL_TYPES[cell && cell.type] || CELL_TYPES.neutrophil).colors;
   }
 
   function pickRandomActiveType() {
@@ -545,14 +573,17 @@
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     W = window.innerWidth;
     H = window.innerHeight;
-    canvas.width = Math.floor(W * dpr);
-    canvas.height = Math.floor(H * dpr);
+    // Render-scale multiplier on the backing-store; CSS keeps the canvas the
+    // same display size, so the browser upscales the lower-res render.
+    const rs = Math.max(0.25, Math.min(1, S.renderScale || 1));
+    canvas.width  = Math.max(2, Math.floor(W * dpr * rs));
+    canvas.height = Math.max(2, Math.floor(H * dpr * rs));
     canvas.style.width = W + 'px';
     canvas.style.height = H + 'px';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(dpr * rs, 0, 0, dpr * rs, 0, 0);
 
-    const ow = Math.max(2, Math.floor(W * DOWNSAMPLE));
-    const oh = Math.max(2, Math.floor(H * DOWNSAMPLE));
+    const ow = Math.max(2, Math.floor(W * DOWNSAMPLE * rs));
+    const oh = Math.max(2, Math.floor(H * DOWNSAMPLE * rs));
     off.width = ow; off.height = oh;
     off2.width = ow; off2.height = oh;
 
@@ -591,6 +622,7 @@
       alarmTimer: 0,
       category: (CELL_TYPES[t] && CELL_TYPES[t].category) || 'good',
       nextBlink: performance.now() + 1500 + Math.random() * 4500,
+      _colors: (CELL_TYPES[t] || CELL_TYPES.neutrophil).colors,
     };
   }
 
@@ -1269,8 +1301,7 @@
   }
 
   function drawBackground(ts) {
-    const theme = currentTheme();
-    const bg = theme.bg;
+    const bg = currentBackground();
 
     // Base fill
     if (bg.kind === 'gradient') {
@@ -1531,8 +1562,7 @@
       for (const s of group) {
         offCtx.beginPath();
         for (let i = 0; i <= N; i++) {
-          const theta = (i / N) * Math.PI * 2;
-          const v = shapeVertex(s, theta, t);
+          const v = shapeVertex(s, THETA_TABLE[i], t);
           const px = (v.x * cs + ctx_) * sx;
           const py = (v.y * cs + cty) * sx;
           if (i === 0) offCtx.moveTo(px, py);
@@ -1631,7 +1661,7 @@
         const g = offCtx.createRadialGradient(cx, cy - r * 0.18, 0, cx, cy, r);
         g.addColorStop(0,    cc.cytoTop);
         g.addColorStop(0.55, cc.cytoBot);
-        g.addColorStop(1,    hexToRgba(cc.cytoBot, 0));
+        g.addColorStop(1,    cc.cytoBotTransp || hexToRgba(cc.cytoBot, 0));
         offCtx.fillStyle = g;
         offCtx.beginPath();
         offCtx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -1698,8 +1728,7 @@
       for (const s of shapes) {
         ctx.beginPath();
         for (let i = 0; i <= N; i++) {
-          const theta = (i / N) * Math.PI * 2;
-          const v = shapeVertex(s, theta, t);
+          const v = shapeVertex(s, THETA_TABLE[i], t);
           if (i === 0) ctx.moveTo(v.x, v.y);
           else ctx.lineTo(v.x, v.y);
         }
@@ -2080,18 +2109,38 @@
 
   function frac(v) { return v - Math.floor(v); }
 
-  // Convert "#rrggbb" / "#rgb" to rgba(r,g,b,alpha). Used so cytoplasm gradients
-  // can fade to transparent at the disk edge without picking up a hard cytoBot.
+  // Memoised hex→rgba so themes/cells stop re-parsing the same hex per frame.
+  const _RGBA_CACHE = new Map();
   function hexToRgba(hex, alpha) {
     if (typeof hex !== 'string') return `rgba(0,0,0,${alpha})`;
+    const key = hex + '|' + alpha;
+    const hit = _RGBA_CACHE.get(key);
+    if (hit) return hit;
     let s = hex.trim().replace(/^#/, '');
     if (s.length === 3) s = s.split('').map(c => c + c).join('');
     if (s.length !== 6) return hex;
     const r = parseInt(s.slice(0, 2), 16);
     const g = parseInt(s.slice(2, 4), 16);
     const b = parseInt(s.slice(4, 6), 16);
-    return `rgba(${r},${g},${b},${alpha})`;
+    const out = `rgba(${r},${g},${b},${alpha})`;
+    _RGBA_CACHE.set(key, out);
+    return out;
   }
+
+  // Pre-bake the transparent-cytoBot variant per cell type once. The cytoplasm
+  // pass reads `c._colors.cytoBotTransp` instead of running hexToRgba per cell
+  // per frame.
+  for (const k of Object.keys(CELL_TYPES)) {
+    const cc = CELL_TYPES[k] && CELL_TYPES[k].colors;
+    if (cc && typeof cc.cytoBot === 'string' && !cc.cytoBotTransp) {
+      cc.cytoBotTransp = hexToRgba(cc.cytoBot, 0);
+    }
+  }
+
+  // Pre-computed polygon-vertex theta table used by every per-cell polygon
+  // pass (mask, membrane, selection, flash, preview).
+  const THETA_TABLE = new Float32Array(WOBBLE_VERTS + 1);
+  for (let i = 0; i <= WOBBLE_VERTS; i++) THETA_TABLE[i] = (i / WOBBLE_VERTS) * Math.PI * 2;
 
   // ---------- Nuclei ----------
   // ---------- Cartoon faces ----------
@@ -2148,14 +2197,15 @@
         ctx.strokeStyle = theme.outline.color;
 
         if (cfg.eyes >= 1) {
-          const eyeR = c.r * cfg.eyeR;
+          const FACE_SCALE = 1.2;
+          const eyeR = c.r * cfg.eyeR * FACE_SCALE;
           const eyeY = cy + c.r * cfg.eyeY;
-          const pupilR = c.r * cfg.pupilR;
+          const pupilR = c.r * cfg.pupilR * FACE_SCALE;
           const pupilOff = eyeR * 0.45;
           const pdx = (lookX / lm) * pupilOff;
           const pdy = (lookY / lm) * pupilOff;
           const eyeXs = cfg.eyes === 2
-            ? [cx - c.r * 0.22, cx + c.r * 0.22]
+            ? [cx - c.r * 0.22 * FACE_SCALE, cx + c.r * 0.22 * FACE_SCALE]
             : [cx];
           for (const ex of eyeXs) {
             // Eye white
@@ -2187,7 +2237,7 @@
         // Mouth
         if (cfg.mouth && cfg.mouth !== 'none') {
           const mY = cy + c.r * 0.18;
-          const mW = c.r * 0.34;
+          const mW = c.r * 0.34 * 1.2;     // cartoon faces are +20% bigger
           const cc = cellColors(c);
           ctx.lineWidth = lw * 1.3;
           ctx.strokeStyle = cc.nucleus;
@@ -2280,8 +2330,7 @@
         ctx.lineJoin = 'round';
         ctx.beginPath();
         for (let i = 0; i <= N; i++) {
-          const theta = (i / N) * Math.PI * 2;
-          const v = shapeVertex(inflated, theta, t);
+          const v = shapeVertex(inflated, THETA_TABLE[i], t);
           if (i === 0) ctx.moveTo(v.x, v.y);
           else ctx.lineTo(v.x, v.y);
         }
@@ -2299,8 +2348,7 @@
         ctx.fillStyle = `rgba(255,255,255,${alpha})`;
         ctx.beginPath();
         for (let i = 0; i <= N; i++) {
-          const theta = (i / N) * Math.PI * 2;
-          const v = shapeVertex(s, theta, t);
+          const v = shapeVertex(s, THETA_TABLE[i], t);
           if (i === 0) ctx.moveTo(v.x, v.y);
           else ctx.lineTo(v.x, v.y);
         }
@@ -2743,6 +2791,57 @@
       applyThemeToCss(currentTheme());
     }
   });
+
+  // Background selector — independent from theme.
+  const bgSelect = document.getElementById('bgSelect');
+  if (bgSelect) {
+    for (const [key, b] of Object.entries(BACKGROUNDS)) {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = b.label || key;
+      bgSelect.appendChild(opt);
+    }
+    bgSelect.value = (S.background in BACKGROUNDS) ? S.background : (S.theme in BACKGROUNDS ? S.theme : 'solid');
+    bgSelect.addEventListener('change', () => {
+      if (BACKGROUNDS[bgSelect.value]) {
+        S.background = bgSelect.value;
+        saveSettings();
+      }
+    });
+  }
+
+  // Render scale / upscale / scanlines wiring.
+  function applyUpscaleMode() {
+    canvas.classList.toggle('pixel', S.upscaleMode === 'pixel');
+  }
+  function applyScanlines() {
+    document.body.classList.toggle('scanlines', !!S.scanlines);
+  }
+  applyUpscaleMode();
+  applyScanlines();
+
+  const renderScaleEl = document.getElementById('renderScale');
+  if (renderScaleEl) {
+    renderScaleEl.value = String(S.renderScale ?? 1);
+    renderScaleEl.addEventListener('change', () => {
+      const v = parseFloat(renderScaleEl.value);
+      if (!isNaN(v)) {
+        S.renderScale = Math.max(0.25, Math.min(1, v));
+        saveSettings();
+        resize();
+      }
+    });
+  }
+  const upscaleEl = document.getElementById('upscaleMode');
+  if (upscaleEl) {
+    upscaleEl.value = S.upscaleMode || 'blur';
+    upscaleEl.addEventListener('change', () => {
+      S.upscaleMode = upscaleEl.value === 'pixel' ? 'pixel' : 'blur';
+      saveSettings();
+      applyUpscaleMode();
+    });
+  }
+  bindCheckbox('scanlines', 'scanlines', applyScanlines);
 
   // (Cell-type checklist UI removed — all types are always active; spawn from the palette FAB.)
 

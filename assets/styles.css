@@ -242,6 +242,28 @@ body.no-bad #help { bottom: 166px; }
 }
 #fps.on { display: block; }
 
+/* Render-scale upscaling: pixel mode shows crisp blocks instead of bilinear smoothing */
+#stage          { image-rendering: auto; }
+#stage.pixel    { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+/* CRT-style scanline overlay above the canvas, below dialogs */
+#scanlines {
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  display: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0,0,0,0)    0,
+    rgba(0,0,0,0)    2px,
+    rgba(0,0,0,0.32) 3px,
+    rgba(0,0,0,0.32) 4px
+  );
+  mix-blend-mode: multiply;
+}
+body.scanlines #scanlines { display: block; }
+
 /* Add-mode badge: sits above the build stamp at the bottom-left while a
    palette pick is queued. The build stamp moves up so they don't overlap. */
 #addBadge {
