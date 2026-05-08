@@ -12,13 +12,28 @@ import {
 import { Sim } from './core/sim.js';
 import { getShapes } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
+import { WebGL2Renderer } from './render/webgl2.js';
 
 // ---------- DOM ----------
 const canvas = document.getElementById('stage');
 
 // ---------- Sim + renderer ----------
 const sim = new Sim();
-let renderer = new Canvas2DRenderer(canvas, sim);
+
+function makeRenderer() {
+  if (S.renderer === 'webgl2') {
+    try {
+      return new WebGL2Renderer(canvas, sim);
+    } catch (e) {
+      console.warn('[microbes] WebGL2 unavailable, falling back to Canvas2D:', e && e.message);
+      S.renderer = 'canvas2d';
+      saveSettings();
+    }
+  }
+  return new Canvas2DRenderer(canvas, sim);
+}
+
+let renderer = makeRenderer();
 renderer.init();
 
 // ---------- Resize ----------
@@ -473,6 +488,29 @@ if (upscaleEl) {
   });
 }
 bindCheckbox('scanlines', 'scanlines', applyScanlines);
+
+// Renderer engine — fundamental change, easiest to handle by reloading.
+const rendererSel = document.getElementById('rendererEngine');
+if (rendererSel) {
+  // If WebGL2 is unavailable, mark the option (and refuse to pick it).
+  const probe = document.createElement('canvas');
+  const webglSupported = !!probe.getContext('webgl2');
+  if (!webglSupported) {
+    const opt = rendererSel.querySelector('option[value="webgl2"]');
+    if (opt) {
+      opt.disabled = true;
+      opt.textContent += ' (unsupported)';
+    }
+  }
+  rendererSel.value = S.renderer;
+  rendererSel.addEventListener('change', () => {
+    const kind = (rendererSel.value === 'webgl2' && webglSupported) ? 'webgl2' : 'canvas2d';
+    if (kind === S.renderer) return;
+    S.renderer = kind;
+    saveSettings();
+    location.reload();
+  });
+}
 
 // ---------- Palette + help dialog list rendering ----------
 function makeTile(key) {
