@@ -1595,12 +1595,14 @@
         const cy = (b.y * cs + cTy) * sx;
         // 1.95 covers the worst-case extent (capsule mast / star platelet /
         // lobed neutrophil / pseudopod macrophage). Round cells look the same
-        // as before because the gradient holds cytoBot from 0.55 outward.
+        // as before because the gradient holds cytoBot from 0.55 outward and
+        // only fades to fully-transparent at the disk edge — so the cell's
+        // edge keeps its colour instead of going black.
         const r = b.r * 1.95 * cs * sx;
         const g = offCtx.createRadialGradient(cx, cy - r * 0.18, 0, cx, cy, r);
         g.addColorStop(0,    cc.cytoTop);
         g.addColorStop(0.55, cc.cytoBot);
-        g.addColorStop(1,    cc.cytoBot);
+        g.addColorStop(1,    hexToRgba(cc.cytoBot, 0));
         offCtx.fillStyle = g;
         offCtx.beginPath();
         offCtx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -2017,6 +2019,19 @@
   }
 
   function frac(v) { return v - Math.floor(v); }
+
+  // Convert "#rrggbb" / "#rgb" to rgba(r,g,b,alpha). Used so cytoplasm gradients
+  // can fade to transparent at the disk edge without picking up a hard cytoBot.
+  function hexToRgba(hex, alpha) {
+    if (typeof hex !== 'string') return `rgba(0,0,0,${alpha})`;
+    let s = hex.trim().replace(/^#/, '');
+    if (s.length === 3) s = s.split('').map(c => c + c).join('');
+    if (s.length !== 6) return hex;
+    const r = parseInt(s.slice(0, 2), 16);
+    const g = parseInt(s.slice(2, 4), 16);
+    const b = parseInt(s.slice(4, 6), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
 
   // ---------- Nuclei ----------
   // ---------- Cartoon faces ----------
