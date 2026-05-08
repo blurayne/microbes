@@ -8,6 +8,7 @@
 </head>
 <body>
   <canvas id="stage"></canvas>
+  <div id="scanlines" aria-hidden="true"></div>
 
   <button id="gear" type="button" aria-label="Settings" title="Settings">
     <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -24,10 +25,30 @@
       </header>
 
       <section>
+        <h3>Theme</h3>
+        <select id="themeSelect"></select>
+      </section>
+
+      <section>
+        <h3>Background</h3>
+        <select id="bgSelect"></select>
+      </section>
+
+      <section>
+        <h3>Gameplay</h3>
+        <label><input type="checkbox" id="allowBadGuys" /> Allow pathogens</label>
+      </section>
+
+      <section>
+        <h3>Splitting</h3>
+        <label><input type="checkbox" id="splitOnTap" /> Split on tap</label>
+        <label><input type="checkbox" id="randomSplit" /> Random splitting</label>
+      </section>
+
+      <section>
         <h3>Split mode</h3>
         <label><input type="radio" name="splitMode" value="pushApart" /> Push apart with momentum</label>
         <label><input type="radio" name="splitMode" value="bondDrift" /> Bond, then drift</label>
-        <label><input type="radio" name="splitMode" value="fixedGrid" /> Fixed grid</label>
       </section>
 
       <section>
@@ -41,14 +62,73 @@
       </section>
 
       <section>
+        <h3>Physics</h3>
+        <label>Friction <span id="frictionVal" class="val"></span>
+          <input type="range" id="friction" min="0" max="1" step="0.01" />
+        </label>
+        <label>Bounce <span id="bounceVal" class="val"></span>
+          <input type="range" id="bounce" min="0" max="1" step="0.01" />
+        </label>
+        <label>Throw strength <span id="throwVal" class="val"></span>
+          <input type="range" id="throwStrength" min="0" max="3" step="0.05" />
+        </label>
+      </section>
+
+      <section>
+        <h3>Cell blending</h3>
+        <select id="blendMode">
+          <option value="source-over">None</option>
+          <option value="overlay">Overlay (default)</option>
+          <option value="multiply">Multiply</option>
+          <option value="darken">Darken</option>
+          <option value="lighter">Add (Lighter)</option>
+          <option value="screen">Screen</option>
+          <option value="soft-light">Soft light</option>
+          <option value="hard-light">Hard light</option>
+          <option value="color-burn">Color burn</option>
+          <option value="color-dodge">Color dodge</option>
+        </select>
+      </section>
+
+      <section>
         <h3>Look</h3>
+        <label>Wobble <span id="wobbleVal" class="val"></span>
+          <input type="range" id="wobbleAmp" min="0" max="0.4" step="0.01" />
+        </label>
         <label>Background flow <span id="bgVal" class="val"></span>
           <input type="range" id="bgFlowSpeed" min="0" max="2" step="0.05" />
         </label>
         <label>Outline px <span id="outVal" class="val"></span>
-          <input type="range" id="outlinePx" min="1" max="6" step="1" />
+          <input type="range" id="outlinePx" min="1" max="10" step="1" />
         </label>
+        <label>Membrane <span id="membraneVal" class="val"></span>
+          <input type="range" id="membraneIntensity" min="0" max="1" step="0.05" />
+        </label>
+        <label>Cell size <span id="cellSizeVal" class="val"></span>
+          <input type="range" id="cellSizeMul" min="0.4" max="2.0" step="0.05" />
+        </label>
+        <label><input type="checkbox" id="cartoon" /> Cartoon mode (faces)</label>
+        <label><input type="checkbox" id="showFPS" /> Show FPS</label>
         <label><input type="checkbox" id="showDebugField" /> Show metaball field</label>
+      </section>
+
+      <section>
+        <h3>Performance</h3>
+        <label>Render scale
+          <select id="renderScale">
+            <option value="1">100%</option>
+            <option value="0.75">75%</option>
+            <option value="0.5">50%</option>
+          </select>
+        </label>
+        <label>Upscale
+          <select id="upscaleMode">
+            <option value="blur">Blur (smooth)</option>
+            <option value="pixel">Pixel (crisp)</option>
+          </select>
+        </label>
+        <label><input type="checkbox" id="scanlines" /> Scanlines (CRT)</label>
+      </section>
       </section>
 
       <section class="actions">
@@ -57,6 +137,54 @@
     </aside>
   </div>
 
+  <button id="help" class="fab" type="button" aria-label="Help" title="Help">?</button>
+  <button id="paletteBad" class="fab fab-bad" type="button" aria-label="Add pathogen" title="Add a pathogen">✚</button>
+  <button id="palette" class="fab" type="button" aria-label="Add cell" title="Add a cell">+</button>
+  <button id="reload" class="fab" type="button" aria-label="Reload" title="Hard reload">⟳</button>
+
+  <div id="helpDialog" class="dialog hidden" role="dialog" aria-label="Cell help">
+    <div class="dialog-backdrop" data-close></div>
+    <aside class="dialog-panel">
+      <header>
+        <h2>Cells of the immune system</h2>
+        <button type="button" class="close" data-close aria-label="Close">&times;</button>
+      </header>
+      <ul id="cellList" class="cell-list"></ul>
+    </aside>
+  </div>
+
+  <div id="paletteDialog" class="dialog hidden" role="dialog" aria-label="Add cell">
+    <div class="dialog-backdrop" data-close></div>
+    <aside class="dialog-panel">
+      <header>
+        <h2>Add a cell</h2>
+        <button type="button" class="close" data-close aria-label="Close">&times;</button>
+      </header>
+      <div id="cellGrid"></div>
+    </aside>
+  </div>
+
+  <div id="paletteBadDialog" class="dialog hidden" role="dialog" aria-label="Add pathogen">
+    <div class="dialog-backdrop" data-close></div>
+    <aside class="dialog-panel">
+      <header>
+        <h2>Add a pathogen</h2>
+        <button type="button" class="close" data-close aria-label="Close">&times;</button>
+      </header>
+      <div id="cellGridBad"></div>
+    </aside>
+  </div>
+
+  <div id="fps" aria-hidden="true"></div>
+
+  <div id="addBadge" role="status" aria-live="polite">
+    <span id="addBadgeLabel">Adding</span>
+    <button type="button" id="addBadgeCancel" class="x" aria-label="Cancel add">&times;</button>
+  </div>
+
+  <div id="build" aria-hidden="true"></div>
+
+  <script src="assets/build.js"></script>
   <script src="assets/main.js"></script>
 </body>
 </html>
