@@ -1593,10 +1593,14 @@
       for (const b of subs) {
         const cx = (b.x * cs + cTx) * sx;
         const cy = (b.y * cs + cTy) * sx;
-        const r = b.r * 1.4 * cs * sx;
-        const g = offCtx.createRadialGradient(cx, cy - r * 0.25, 0, cx, cy, r);
-        g.addColorStop(0, cc.cytoTop);
-        g.addColorStop(1, cc.cytoBot);
+        // 1.95 covers the worst-case extent (capsule mast / star platelet /
+        // lobed neutrophil / pseudopod macrophage). Round cells look the same
+        // as before because the gradient holds cytoBot from 0.55 outward.
+        const r = b.r * 1.95 * cs * sx;
+        const g = offCtx.createRadialGradient(cx, cy - r * 0.18, 0, cx, cy, r);
+        g.addColorStop(0,    cc.cytoTop);
+        g.addColorStop(0.55, cc.cytoBot);
+        g.addColorStop(1,    cc.cytoBot);
         offCtx.fillStyle = g;
         offCtx.beginPath();
         offCtx.arc(cx, cy, r, 0, Math.PI * 2);
