@@ -782,15 +782,16 @@ export const CELL_TYPES = {
   rbc: {
     // Mature RBCs have no nucleus — we render the biconcave dimple as a
     // small darker spot at the centre by reusing the round-small nucleus
-    // path with a colour close to cytoBot.
+    // path with a colour close to cytoBot. wobbleMul kept low so the
+    // shape stays close to a smooth disc, like a real erythrocyte.
     label: 'Red Blood Cell', category: 'good', sizeMul: 0.55,
     body: { kind: 'round', aspect: 1.0 },
     nucleus: { kind: 'round-small' },
     decoration: { kind: 'none' },
     granules: 0,
-    splitFactor: 1.6, brownianMul: 1.4,
+    splitFactor: 1.6, brownianMul: 0.9,
     move: { patrolSpeed: 35, attackSpeed: 65, patrolAccel: 55, alarmAccel: 80, weight: 0.7, friction: 1.0, hostility: 'idle' },
-    field: { blur: 5, contrast: 22, wobbleMul: 1.5 },        // wobble = tumbling RBC feel
+    field: { blur: 5, contrast: 22, wobbleMul: 0.35 },         // smooth, almost-perfect disc
     colors: { cytoTop: '#ff6b6b', cytoBot: '#a01818', nucleus: '#5a0a0a', nucleusHi: '#ffd2d2', accent: '#c43030' },
     description: 'Erythrocyte; biconcave disc full of haemoglobin that carries oxygen around the body.',
   },
@@ -949,7 +950,7 @@ export const FACE = {
   macrophage: { eyes: 2, eyeR: 0.18, eyeY: -0.06, pupilR: 0.07, mouth: 'smile' },
   nk:         { eyes: 2, eyeR: 0.16, eyeY: -0.10, pupilR: 0.06, mouth: 'snarl' },
   mast:       { eyes: 2, eyeR: 0.14, eyeY: -0.08, pupilR: 0.05, mouth: 'smile' },
-  platelet:   { eyes: 0,                                          mouth: 'none' },
+  platelet:   { eyes: 1, eyeR: 0.20, eyeY: -0.06, pupilR: 0.09, mouth: 'smile' },
   virus:      { eyes: 2, eyeR: 0.16, eyeY: -0.12, pupilR: 0.06, mouth: 'fangs' },
   germ:       { eyes: 2, eyeR: 0.16, eyeY: -0.10, pupilR: 0.06, mouth: 'snarl' },
   bacterium:  { eyes: 1, eyeR: 0.18, eyeY: -0.06, pupilR: 0.07, mouth: 'tongue' },

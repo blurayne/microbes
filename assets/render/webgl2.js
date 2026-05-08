@@ -74,6 +74,7 @@ in vec4 v_outline;
 uniform float u_time;       // seconds
 uniform float u_wobbleAmp;  // S.wobbleAmp
 uniform vec3 u_highlight;   // S.highlightColor as rgb
+uniform float u_membraneIntensity; // S.membraneIntensity 0..1
 out vec4 outColor;
 
 // v_kind packs: body (0..5) + nucleus (0..5) * 16 + selected (0..1) * 256.
@@ -147,8 +148,12 @@ void main() {
   float topLift = max(0.0, 0.55 - distance(v_uv, vec2(-0.30, -0.40))) * 0.65;
   cyto = mix(cyto, v_cytoTop, topLift);
 
-  // Outline ring (thin band straddling the body edge).
-  float outlineMask = smoothstep(-0.04, -0.005, sdf) * (1.0 - smoothstep(0.0, 0.015, sdf));
+  // Bold membrane band straddling the body edge, in the cell's own deep
+  // colour (a darkened cytoBot). Slider gates the alpha for parity with
+  // the Canvas2D pass.
+  float outlineMask = smoothstep(-0.06, -0.01, sdf)
+                    * (1.0 - smoothstep(0.0, 0.015, sdf))
+                    * u_membraneIntensity;
 
   // Nucleus shape — driven by per-cell nucKind.
   // We work in body-radius units (uvN) so the nucleus scales with the cell.
@@ -184,7 +189,7 @@ void main() {
 
   vec3 col = cyto;
   col = mix(col, nucColor, nucleusMask);
-  col = mix(col, v_outline.rgb, clamp(outlineMask, 0.0, 1.0));
+  col = mix(col, v_cytoBot * 0.80, clamp(outlineMask, 0.0, 1.0));
 
   // Tap flash overlay — c.flash decays in Sim.update(); fade out across 200 ms.
   float flashA = clamp(v_outline.a / 0.2, 0.0, 1.0) * 0.6;
@@ -741,6 +746,7 @@ export class WebGL2Renderer extends RendererBase {
     this._diskU.time = gl.getUniformLocation(this._diskProg, 'u_time');
     this._diskU.wobbleAmp = gl.getUniformLocation(this._diskProg, 'u_wobbleAmp');
     this._diskU.highlight = gl.getUniformLocation(this._diskProg, 'u_highlight');
+    this._diskU.membraneIntensity = gl.getUniformLocation(this._diskProg, 'u_membraneIntensity');
 
     // Static unit-square corners (two triangles).
     const corners = new Float32Array([
@@ -1045,6 +1051,8 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform1f(this._diskU.time, time);
     gl.uniform1f(this._diskU.wobbleAmp, S.wobbleAmp || 0);
     gl.uniform3fv(this._diskU.highlight, hexToVec3(S.highlightColor || '#ffffff'));
+    gl.uniform1f(this._diskU.membraneIntensity,
+      (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
     gl.bindVertexArray(this._diskVao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, shapes.length);
     gl.bindVertexArray(null);

@@ -525,11 +525,13 @@ export class Canvas2DRenderer extends RendererBase {
       ctx.save();
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      ctx.strokeStyle = theme.outline.color;
       ctx.globalAlpha = a;
-      ctx.lineWidth = Math.max(1.5, S.outlinePx * 0.55) / cam.scale;
+      // Bold membrane in each cell's own deep cytoBot colour — accentuates
+      // the cell's identity instead of the single shared theme outline.
+      ctx.lineWidth = Math.max(2, S.outlinePx * 0.85) / cam.scale;
       const N = WOBBLE_VERTS;
       for (const s of shapes) {
+        ctx.strokeStyle = cellColors(s.cell).cytoBot;
         ctx.beginPath();
         for (let i = 0; i <= N; i++) {
           const v = shapeVertex(s, THETA_TABLE[i], t);
