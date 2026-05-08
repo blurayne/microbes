@@ -42,16 +42,15 @@ out vec3 v_nucleus;
 out vec3 v_outline;
 
 void main() {
-  // The corner quad is sized to a generous 1.30× r so wobble + lobed
-  // / star extents (which can reach 1.30) aren't clipped.
-  float quadR = a_inst.z * 1.30;
+  // 1.70× r — covers wobbly body extents (up to ~1.30) plus the
+  // selection ring (which extends to 1.30 × bodyR).
+  float quadR = a_inst.z * 1.70;
   vec2 worldPos = a_inst.xy + a_corner * quadR;
   vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
-  // v_uv ranges -1.30..+1.30 in body-radius units.
-  v_uv = a_corner * 1.30;
+  v_uv = a_corner * 1.70;     // body-radius units
   v_kind = a_inst.w;
   v_phase = a_phase;
   v_cytoTop = a_cytoTop;
@@ -73,10 +72,16 @@ in vec3 v_nucleus;
 in vec3 v_outline;
 uniform float u_time;       // seconds
 uniform float u_wobbleAmp;  // S.wobbleAmp
+uniform vec3 u_highlight;   // S.highlightColor as rgb
 out vec4 outColor;
 
+// v_kind packs: body (0..5) + nucleus (0..5) * 16 + selected (0..1) * 256.
+int bodyKind()    { return int(mod(v_kind + 0.5, 16.0)); }
+int nucKind()     { return int(mod((v_kind + 0.5) / 16.0, 16.0)); }
+int isSelected()  { return int((v_kind + 0.5) / 256.0); }
+
 float bodyScale(vec2 uv) {
-  int kind = int(v_kind + 0.5);
+  int kind = bodyKind();
   float ang = atan(uv.y, uv.x);
   float phi = v_phase.x;
   float seed = v_phase.y;
@@ -117,10 +122,21 @@ float bodyScale(vec2 uv) {
 void main() {
   float d = length(v_uv);
   float bodyR = bodyScale(v_uv);
-  // Distance-from-rim in body-radius units (signed, <0 inside).
   float sdf = d - bodyR;
+  int sel = isSelected();
 
-  // Soft body edge (anti-aliased over ~2 pixels in body-r units).
+  // Outside the body: contribute a glow ring only when selected.
+  if (sdf > 0.015) {
+    if (sel == 0) discard;
+    float ringT = sdf / (bodyR * 0.30);
+    if (ringT >= 1.0) discard;
+    // Peak around ringT=0.5; smooth fade at both ends.
+    float ringA = smoothstep(0.0, 0.20, ringT) * (1.0 - smoothstep(0.65, 1.0, ringT));
+    outColor = vec4(u_highlight, ringA);
+    return;
+  }
+
+  // Soft body edge AA.
   float bodyA = 1.0 - smoothstep(-0.005, 0.015, sdf);
   if (bodyA <= 0.0) discard;
 
@@ -133,15 +149,53 @@ void main() {
   // Outline ring (thin band straddling the body edge).
   float outlineMask = smoothstep(-0.04, -0.005, sdf) * (1.0 - smoothstep(0.0, 0.015, sdf));
 
-  // Nucleus disc (round, radius ~30% of cell).
-  float dNuc = d / max(0.001, bodyR);
-  float nucleusMask = 1.0 - smoothstep(0.26, 0.34, dNuc);
+  // Nucleus shape — driven by per-cell nucKind.
+  // We work in body-radius units (uvN) so the nucleus scales with the cell.
+  vec2 uvN = v_uv / max(0.001, bodyR);
+  int nucK = nucKind();
+  float nucleusMask = 0.0;
+  if (nucK == 1 || nucK == 5) {                   // round / round-small
+    float r = (nucK == 5) ? 0.21 : 0.30;
+    nucleusMask = 1.0 - smoothstep(r - 0.04, r + 0.02, length(uvN));
+  } else if (nucK == 2) {                         // kidney
+    float main = 1.0 - smoothstep(0.30 - 0.04, 0.30 + 0.02, length(uvN));
+    float bite = 1.0 - smoothstep(0.25 - 0.04, 0.25 + 0.02, length(uvN - vec2(0.18, 0.0)));
+    nucleusMask = clamp(main - bite, 0.0, 1.0);
+  } else if (nucK == 3) {                         // bilobed
+    float ang = v_phase.x;
+    vec2 off = vec2(cos(ang), sin(ang)) * 0.10;
+    float ma = 1.0 - smoothstep(0.20 - 0.04, 0.20 + 0.02, length(uvN - off));
+    float mb = 1.0 - smoothstep(0.20 - 0.04, 0.20 + 0.02, length(uvN + off));
+    nucleusMask = max(ma, mb);
+  } else if (nucK == 4) {                         // multilobed (4 lobes)
+    float baseAng = v_phase.x;
+    float total = 0.0;
+    for (int i = 0; i < 4; i++) {
+      float fi = float(i) - 1.5;
+      float a = baseAng + fi * 0.7;
+      vec2 p = vec2(cos(a), sin(a) * 0.4) * 0.20;
+      total = max(total, 1.0 - smoothstep(0.155 - 0.03, 0.155 + 0.02, length(uvN - p)));
+    }
+    nucleusMask = total;
+  }
   float nucGlint = max(0.0, 0.18 - distance(v_uv, vec2(-0.10, -0.13))) * 4.0;
   vec3 nucColor = mix(v_nucleus, vec3(1.0), clamp(nucGlint, 0.0, 0.35));
 
   vec3 col = cyto;
   col = mix(col, nucColor, nucleusMask);
   col = mix(col, v_outline, clamp(outlineMask, 0.0, 1.0));
+
+  // Selection brighten — translucent highlight wash inside the cell.
+  if (sel == 1) {
+    col = mix(col, u_highlight, 0.30);
+  }
+
+  // Flash overlay from cell.flash (per-cell, decays in Sim.update).
+  if (v_phase.w < 0.0) {
+    // Reuse: we don't have a separate flash slot. Skip — flash is only
+    // drawn via the cell.flash field in the Canvas2D pass; close-enough
+    // parity ignores the brief 200ms tap flash for the WebGL backend.
+  }
 
   outColor = vec4(col, bodyA);
 }`;
@@ -242,8 +296,14 @@ void main() {
 }`;
 
 const INSTANCE_FLOATS = 20; // see _diskVao layout in init()
+
+// Body and nucleus kinds packed into a single float per instance:
+//   packedKind = bodyKind + nucKind * 16
 const BODY_KIND_FLOAT = {
   round: 0, lobed: 1, rippled: 2, oblong: 3, pseudopod: 4, star: 5,
+};
+const NUC_KIND_FLOAT = {
+  none: 0, round: 1, kidney: 2, bilobed: 3, multilobed: 4, 'round-small': 5,
 };
 
 function hexToVec3(hex) {
@@ -360,6 +420,7 @@ export class WebGL2Renderer extends RendererBase {
     this._diskU.viewport = gl.getUniformLocation(this._diskProg, 'u_viewport');
     this._diskU.time = gl.getUniformLocation(this._diskProg, 'u_time');
     this._diskU.wobbleAmp = gl.getUniformLocation(this._diskProg, 'u_wobbleAmp');
+    this._diskU.highlight = gl.getUniformLocation(this._diskProg, 'u_highlight');
 
     // Static unit-square corners (two triangles).
     const corners = new Float32Array([
@@ -524,7 +585,10 @@ export class WebGL2Renderer extends RendererBase {
       const top = hexToVec3(cc.cytoTop);
       const bot = hexToVec3(cc.cytoBot);
       const nuc = hexToVec3(cc.nucleus);
-      const kind = BODY_KIND_FLOAT[(type.body && type.body.kind) || 'round'] || 0;
+      const bodyK = BODY_KIND_FLOAT[(type.body && type.body.kind) || 'round'] || 0;
+      const nucK = NUC_KIND_FLOAT[(type.nucleus && type.nucleus.kind) || 'none'] || 0;
+      const sel = this.sim.selectedCells.has(c) ? 1 : 0;
+      const kind = bodyK + nucK * 16 + sel * 256;
       const wobMul = (type.field && type.field.wobbleMul) || 1.0;
       const j = i * INSTANCE_FLOATS;
       data[j]     = s.x;
@@ -548,6 +612,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform2f(this._diskU.viewport, this.W, this.H);
     gl.uniform1f(this._diskU.time, time);
     gl.uniform1f(this._diskU.wobbleAmp, S.wobbleAmp || 0);
+    gl.uniform3fv(this._diskU.highlight, hexToVec3(S.highlightColor || '#ffffff'));
     gl.bindVertexArray(this._diskVao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, shapes.length);
     gl.bindVertexArray(null);
