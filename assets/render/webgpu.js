@@ -589,18 +589,22 @@ struct VsOut {
   }
 
   // Drifting RBC silhouettes — bloodstream theme flair. 22 ellipses
-  // with darker centre dot, drift on screen UV with time.
+  // with darker centre dot. Anchored in world space so they pan + zoom
+  // with the camera (matches Canvas2D's drawBackground behaviour where
+  // RBCs are drawn inside the camera transform).
   if (rbcOn == 1) {
     for (var i: i32 = 0; i < 22; i = i + 1) {
       let seed = f32(i) * 1.31;
       let fx = fract(f32(i) / 22.0 + 0.06 * sin(time * 0.25 + seed));
       let fy = fract(fract(seed * 0.7) + time * 0.15 + f32(i) * 0.13);
-      let c = vec2<f32>(fx, fy);
-      let r = 0.018 + 0.016 * fract(seed * 0.21);
-      let dEll = (uv - c) / vec2<f32>(r, r * 0.78);
+      // Centre in world coords — matches Canvas2D's px = fx * W.
+      let cWorld = vec2<f32>(fx, fy) * viewport;
+      // Radius in world px — matches Canvas2D's 18..34 px.
+      let rWorld = 18.0 + 16.0 * fract(seed * 0.21);
+      let dEll = (worldPx - cWorld) / vec2<f32>(rWorld, rWorld * 0.78);
       let ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
       col = mix(col, vec3<f32>(1.0, 0.35, 0.35), ellA);
-      let dDot = length(uv - c) / (r * 0.32);
+      let dDot = length(worldPx - cWorld) / (rWorld * 0.32);
       let dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
       col = mix(col, vec3<f32>(0.47, 0.08, 0.08), dotA);
     }
