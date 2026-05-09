@@ -58,7 +58,7 @@ export class PixiRenderer extends RendererBase {
     this.bgLayer = null;
     this.bgGfx = null;
     this.worldLayer = null;
-    this.cellsGfx = null;
+    this.cellsGfx = null;       // polygon fill + membrane stroke + donut + highlight + granules
     this.particlesGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
@@ -267,6 +267,9 @@ export class PixiRenderer extends RendererBase {
       const cc = cellColors(s.cell);
       const cytoTop = cc.cytoTop || '#ffffff';
       const cytoBot = cc.cytoBot || '#d36699';
+      const nucleusHi = cc.nucleusHi || '#ffffff';
+      const cType = CELL_TYPES[s.cell.type] || CELL_TYPES.neutrophil;
+      const hollow = !!cType.bodyHollow;
 
       // Build wobble polygon vertices in world space.
       const pts = new Array(WOBBLE_VERTS * 2);
@@ -293,13 +296,34 @@ export class PixiRenderer extends RendererBase {
         });
       }
 
+      // Donut hole — RBC-style centre darkening. Pixi v8 FillGradient
+      // is linear-only, so we fake the radial falloff with stacked
+      // translucent concentric circles (smaller + denser inward).
+      if (hollow) {
+        const dr = s.r * 0.55;
+        g.circle(s.x, s.y, dr * 1.00).fill({ color: cytoBot, alpha: 0.10 });
+        g.circle(s.x, s.y, dr * 0.75).fill({ color: cytoBot, alpha: 0.20 });
+        g.circle(s.x, s.y, dr * 0.50).fill({ color: cytoBot, alpha: 0.36 });
+        g.circle(s.x, s.y, dr * 0.25).fill({ color: cytoBot, alpha: 0.55 });
+      }
+
+      // Top-left highlight — same stacked-circles trick as the donut.
+      // Centre offset matches canvas2D / WebGL2 (-0.35r, -0.45r) so
+      // the visual lift sits in the same spot across renderers.
+      const hx = s.x - s.r * 0.35;
+      const hy = s.y - s.r * 0.45;
+      const hr = s.r * 0.75;
+      g.circle(hx, hy, hr * 1.00).fill({ color: nucleusHi, alpha: 0.05 });
+      g.circle(hx, hy, hr * 0.70).fill({ color: nucleusHi, alpha: 0.10 });
+      g.circle(hx, hy, hr * 0.45).fill({ color: nucleusHi, alpha: 0.20 });
+      g.circle(hx, hy, hr * 0.22).fill({ color: nucleusHi, alpha: 0.32 });
+
       // Granules — small darker dots scattered inside the cell. Same
       // placement formula as the canvas2D renderer's _drawGranules so
       // the dotted "inner texture" matches across renderers. Position
       // is constrained to rRel ∈ [0.05, 0.90] of the cell radius, so
       // granules stay inside the wobble polygon without explicit
       // clipping (the slight wobble at the rim pulls them inward).
-      const cType = CELL_TYPES[s.cell.type] || CELL_TYPES.neutrophil;
       const Ng = cType.granules || 0;
       if (Ng > 0) {
         const cell = s.cell;
