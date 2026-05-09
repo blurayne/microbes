@@ -20,7 +20,7 @@
 //     anatomy decor, RBC silhouettes).
 
 import {
-  S, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
+  S, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE, NUCLEUS_RATIO,
   cellColors, currentBackground, currentTheme, frac,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
@@ -59,6 +59,8 @@ export class PixiRenderer extends RendererBase {
     this.bgGfx = null;
     this.worldLayer = null;
     this.cellsGfx = null;       // polygon fill + membrane stroke + donut + highlight + granules
+    this.nucleiContainer = null;
+    this.nucleiGfx = null;
     this.particlesGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
@@ -109,10 +111,20 @@ export class PixiRenderer extends RendererBase {
 
     this.worldLayer = new PIXI.Container();
     this.cellsGfx = new PIXI.Graphics();
+    // Nuclei: parity with canvas2D's `filter:blur(2px)` + globalAlpha
+    // 0.78 wash. The Container's filter applies in screen space, so
+    // the blur strength reads as ~2 on-screen pixels regardless of
+    // camera zoom — same as canvas2D.
+    this.nucleiContainer = new PIXI.Container();
+    this.nucleiGfx = new PIXI.Graphics();
+    this.nucleiContainer.addChild(this.nucleiGfx);
+    this.nucleiContainer.alpha = 0.78;
+    this.nucleiContainer.filters = [new PIXI.BlurFilter({ strength: 2, quality: 3 })];
     this.particlesGfx = new PIXI.Graphics();
     this.selectionGfx = new PIXI.Graphics();
     this.debugGfx = new PIXI.Graphics();
     this.worldLayer.addChild(this.cellsGfx);
+    this.worldLayer.addChild(this.nucleiContainer);
     this.worldLayer.addChild(this.particlesGfx);
     this.worldLayer.addChild(this.selectionGfx);
     this.worldLayer.addChild(this.debugGfx);
@@ -344,6 +356,103 @@ export class PixiRenderer extends RendererBase {
         }
       }
     }
+
+    // Nuclei pass: iterates ALL cells (independent of singletons /
+    // splitting partition above), since the splitting nucleus
+    // animation is its own thing.
+    this._drawNucleiPass(time);
+  }
+
+  // Per-kind nucleus rendering, ported from canvas2D's _drawNucleus.
+  // The whole pass renders into nucleiContainer which carries the
+  // 2-px BlurFilter + alpha 0.78 wash for parity with canvas2D.
+  _drawNucleiPass(time) {
+    const ng = this.nucleiGfx;
+    ng.clear();
+    if (!this.sim || !this.sim.cells.length) return;
+    const theme = currentTheme();
+    const outlineColor = (theme && theme.outline && theme.outline.color) || '#000000';
+    const lw = Math.max(2, (S.outlinePx || 5) * 0.6) / Math.max(0.0001, this.camera.scale);
+    const t = time;
+    for (const c of this.sim.cells) {
+      const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+      if (!type.nucleus || type.nucleus.kind === 'none') continue;
+      if (c.state === 'SPLITTING') {
+        const p = c.splitProgress;
+        const half = c.r * (0.1 + p * 1.0);
+        const a = c.splitAngle;
+        const cx = Math.cos(a) * half, cy = Math.sin(a) * half;
+        const rr = c.r * NUCLEUS_RATIO * (1 - p * 0.2);
+        const wob = 1.5 * (1 - p);
+        this._drawNucleusShape(c,
+          c.x - cx + Math.sin(t + c.phase) * wob,
+          c.y - cy + Math.cos(t + c.phase * 0.7) * wob,
+          rr, outlineColor, lw);
+        if (p > 0.04) {
+          this._drawNucleusShape(c,
+            c.x + cx + Math.sin(t + c.phase + 1.7) * wob,
+            c.y + cy + Math.cos(t + c.phase * 0.7 + 1.7) * wob,
+            rr, outlineColor, lw);
+        }
+      } else {
+        const wx = c.x + Math.sin(t + c.phase) * 1.8;
+        const wy = c.y + Math.cos(t + c.phase * 0.7) * 1.8;
+        this._drawNucleusShape(c, wx, wy, c.r * NUCLEUS_RATIO, outlineColor, lw);
+      }
+    }
+  }
+
+  _drawNucleusShape(cell, x, y, r, outlineColor, lw) {
+    const g = this.nucleiGfx;
+    const cc = cellColors(cell);
+    const type = CELL_TYPES[cell.type] || CELL_TYPES.neutrophil;
+    let kind = type.nucleus.kind;
+    if (kind === 'round-small') { kind = 'round'; r *= 0.7; }
+    const nucColor = cc.nucleus || '#1d1c5a';
+    const nucHi = cc.nucleusHi || '#dee8ff';
+    const cytoBot = cc.cytoBot || '#6d8df0';
+
+    if (kind === 'kidney') {
+      // Pixi v8 Graphics has no destination-out; the bite is faked
+      // with a cytoBot-coloured circle on top of the main fill, which
+      // approximates the cytoplasm peeking through the dent.
+      const biteAngle = cell.phase || 0;
+      const biteOff = r * 0.6;
+      const biteR = r * 0.85;
+      const bx = x + Math.cos(biteAngle) * biteOff;
+      const by = y + Math.sin(biteAngle) * biteOff;
+      g.circle(x, y, r).fill({ color: nucColor });
+      g.circle(bx, by, biteR).fill({ color: cytoBot });
+      g.circle(x, y, r).stroke({ color: outlineColor, width: lw });
+      g.circle(x - r * 0.35, y - r * 0.4, r * 0.18).fill({ color: nucHi });
+    } else if (kind === 'bilobed') {
+      const sep = r * 0.7;
+      const lr = r * 0.7;
+      const ang = cell.phase || 0;
+      const ox = Math.cos(ang) * sep * 0.5;
+      const oy = Math.sin(ang) * sep * 0.5;
+      g.circle(x - ox, y - oy, lr).fill({ color: nucColor });
+      g.circle(x + ox, y + oy, lr).fill({ color: nucColor });
+      g.circle(x - ox, y - oy, lr).stroke({ color: outlineColor, width: lw });
+      g.circle(x + ox, y + oy, lr).stroke({ color: outlineColor, width: lw });
+      g.circle(x - ox - lr * 0.35, y - oy - lr * 0.35, lr * 0.16).fill({ color: nucHi });
+    } else if (kind === 'multilobed') {
+      const lr = r * 0.55;
+      const baseAng = cell.phase || 0;
+      const radius = r * 0.65;
+      const lobes = [];
+      for (let i = 0; i < 4; i++) {
+        const a = baseAng + (i - 1.5) * 0.7;
+        lobes.push({ x: x + Math.cos(a) * radius, y: y + Math.sin(a) * radius * 0.4 });
+      }
+      for (const l of lobes) g.circle(l.x, l.y, lr).fill({ color: nucColor });
+      for (const l of lobes) g.circle(l.x, l.y, lr).stroke({ color: outlineColor, width: lw });
+      g.circle(lobes[0].x - lr * 0.35, lobes[0].y - lr * 0.35, lr * 0.18).fill({ color: nucHi });
+    } else {
+      // round (default)
+      g.circle(x, y, r).fill({ color: nucColor }).stroke({ color: outlineColor, width: lw });
+      g.circle(x - r * 0.35, y - r * 0.4, r * 0.24).fill({ color: nucHi });
+    }
   }
 
   // metaSplit: render each splitting pair through the off-stage
@@ -461,6 +570,8 @@ export class PixiRenderer extends RendererBase {
     this.bgGfx = null;
     this.worldLayer = null;
     this.cellsGfx = null;
+    this.nucleiContainer = null;
+    this.nucleiGfx = null;
     this.particlesGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
