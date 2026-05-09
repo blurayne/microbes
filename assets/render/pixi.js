@@ -74,6 +74,14 @@ export class PixiRenderer extends RendererBase {
     this.pairPolyGfx = null;        // Graphics inside pairContainer (cleared per pair)
     this._pairPool = [];            // [{ rt, sprite }] reused across frames
 
+    // Wobble-polygon vertex buffers, reused across frames. Pixi v8's
+    // Polygon stores `this.points = inputArray` by reference (no copy),
+    // so within a frame each cell needs its own backing array — we
+    // grow these pools to the high-water-mark cell count and never
+    // shrink, so steady-state frames allocate nothing.
+    this._singletonPtsPool = [];
+    this._pairHalfPtsPool = [];
+
     this._destroyed = false;
   }
 
@@ -286,6 +294,7 @@ export class PixiRenderer extends RendererBase {
     const membraneAlpha = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
     const strokeWidth = Math.max(1.5, (S.outlinePx || 5) * 0.55) / Math.max(0.0001, cam.scale);
 
+    let singletonIdx = 0;
     for (const s of singletons) {
       const cc = cellColors(s.cell);
       const cytoTop = cc.cytoTop || '#ffffff';
@@ -294,8 +303,16 @@ export class PixiRenderer extends RendererBase {
       const cType = CELL_TYPES[s.cell.type] || CELL_TYPES.neutrophil;
       const hollow = !!cType.bodyHollow;
 
-      // Build wobble polygon vertices in world space.
-      const pts = new Array(WOBBLE_VERTS * 2);
+      // Build wobble polygon vertices in world space. The buffer is
+      // owned by _singletonPtsPool[singletonIdx]; Pixi retains a
+      // reference until the next clear(), so each cell needs its own
+      // slot for the duration of the frame.
+      let pts = this._singletonPtsPool[singletonIdx];
+      if (!pts) {
+        pts = new Array(WOBBLE_VERTS * 2);
+        this._singletonPtsPool[singletonIdx] = pts;
+      }
+      singletonIdx++;
       for (let i = 0; i < WOBBLE_VERTS; i++) {
         const v = shapeVertex(s, THETA_TABLE[i], time);
         pts[i * 2] = v.x;
@@ -632,10 +649,18 @@ export class PixiRenderer extends RendererBase {
       const fld = cType.field || { blur: 6, contrast: 20 };
       const cc = cellColors(c);
 
-      // Polygons for both halves, in world space.
+      // Polygons for both halves, in world space. Each half writes
+      // into its own pool slot — the two halves coexist in
+      // pairPolyGfx until renderer.render() flushes them, so they
+      // need distinct backing arrays (Pixi stores them by reference).
       this.pairPolyGfx.clear();
-      for (const s of pair) {
-        const pts = new Array(WOBBLE_VERTS * 2);
+      for (let halfIdx = 0; halfIdx < pair.length; halfIdx++) {
+        const s = pair[halfIdx];
+        let pts = this._pairHalfPtsPool[halfIdx];
+        if (!pts) {
+          pts = new Array(WOBBLE_VERTS * 2);
+          this._pairHalfPtsPool[halfIdx] = pts;
+        }
         for (let i = 0; i < WOBBLE_VERTS; i++) {
           const v = shapeVertex(s, THETA_TABLE[i], time);
           pts[i * 2] = v.x;
@@ -735,5 +760,7 @@ export class PixiRenderer extends RendererBase {
     this.pairThreshold = null;
     this.pairContainer = null;
     this.pairPolyGfx = null;
+    this._singletonPtsPool = [];
+    this._pairHalfPtsPool = [];
   }
 }
