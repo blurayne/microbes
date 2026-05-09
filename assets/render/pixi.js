@@ -683,7 +683,18 @@ export class PixiRenderer extends RendererBase {
 
   // Stroke a partial circle arc — Pixi v8 Graphics exposes this as
   // `g.arc(x, y, r, startRad, endRad)` followed by stroke().
+  //
+  // The leading `moveTo` is load-bearing: arc() in Pixi v8 calls
+  // `_ensurePoly(false)`, which does NOT seal the previous poly. So
+  // back-to-back arcs (e.g. one mouth per cell on the shared facesGfx)
+  // share the same `_currentPoly`, and each `.stroke()` snapshot
+  // contains every prior arc plus implicit connecting lines. Calling
+  // `moveTo()` first invokes `startPoly()`, which ends the previous
+  // poly and starts a fresh one anchored at the arc's start point.
   _strokeArc(g, x, y, r, startRad, endRad, color, width) {
+    const sx = x + Math.cos(startRad) * r;
+    const sy = y + Math.sin(startRad) * r;
+    g.moveTo(sx, sy);
     g.arc(x, y, r, startRad, endRad).stroke({ color, width });
   }
 
