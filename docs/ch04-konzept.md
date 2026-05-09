@@ -8,15 +8,15 @@
       <div class="chapter-num">04</div>
       <div class="chapter-title-block">
         <h2>Spielkonzept &<br><em>Tiers</em></h2>
-        <div class="chapter-subtitle">Tower Defense + Roguelike-Memory. Mit erweitertem Roster wird die Komposition zur Schlüsselentscheidung.</div>
+        <div class="chapter-subtitle">Lebende Zellen + Roguelike-Memory. Keine statischen Türme — Zellen bewegen sich, jagen, sterben. Komposition und Timing zählen mehr als Position.</div>
       </div>
     </div>
 
     <div class="principle">
       <div class="principle-symbol">A+B</div>
       <div>
-        <h3>Tower Defense mit Roguelike-Memory</h3>
-        <p>Der Tower-Defense-Teil macht die Aktivierungskaskade <strong>sichtbar</strong>. Memory-Zellen aus dem Roguelike-Teil belohnen den Spieler über mehrere Wellen hinweg. Mit 12 Helden und 12 Pathogenen wird die <strong>Roster-Wahl vor jedem Kampf</strong> zur strategischen Kernentscheidung.</p>
+        <h3>Lebendes Schlachtfeld mit Roguelike-Memory</h3>
+        <p>Platzierte Zellen sind keine Türme — sie <strong>leben, jagen und sterben autonom</strong> (siehe §11 Physik). Der Spieler entscheidet, <em>welche</em> Zellen im Roster sind und <em>wann</em> sie auf das Feld kommen, nicht wo sie stehen sollen. Der Tower-Defense-Anker bleibt nur in der Aktivierungskaskade: angeborene Zellen → DC → adaptive Zellen → Memory. Mit 12 Helden und 12 Pathogenen wird die <strong>Roster-Wahl vor jedem Kampf</strong> zur strategischen Kernentscheidung; die Briefing-Karte vor jedem Level zeigt, wogegen das Roster greift (siehe §12).</p>
       </div>
     </div>
 
@@ -59,7 +59,7 @@
 
       <div class="grid-auto col-auto-280">
         <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› 01</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Roster wählen</div><div style="color: var(--ink-dim); font-size: 13px;">6 von 12 Helden vor jeder Welle.</div></div>
-        <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› 02</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Zellen platzieren</div><div style="color: var(--ink-dim); font-size: 13px;">Energie ausgeben, Zellen positionieren.</div></div>
+        <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› 02</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Zellen entsenden</div><div style="color: var(--ink-dim); font-size: 13px;">Energie ausgeben — danach jagen sie autonom.</div></div>
         <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› 03</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Phasen beachten</div><div style="color: var(--ink-dim); font-size: 13px;">Adaptive Zellen erst nach DC verfügbar.</div></div>
         <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› 04</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Pathogen-Subtyp lesen</div><div style="color: var(--ink-dim); font-size: 13px;">Corona, Influenza, Retrovirus — verschiedene Konter!</div></div>
         <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› 05</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Toxine neutralisieren</div><div style="color: var(--ink-dim); font-size: 13px;">Mast Cell oder Basophil bereithalten.</div></div>

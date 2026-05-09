@@ -8,7 +8,7 @@
       <div class="chapter-num">06</div>
       <div class="chapter-title-block">
         <h2>Level-<em>Struktur</em></h2>
-        <div class="chapter-subtitle">3 Akte · 18 Levels · 5 Bosse. Klare Progression von Tutorial zu Komplikation zu Krise.</div>
+        <div class="chapter-subtitle">3 Akte · 18 Levels · 5 Bosse. Klare Progression von Tutorial zu Komplikation zu Krise. Jedes Level startet mit einer Briefing-Karte (siehe §12).</div>
       </div>
     </div>
 
@@ -18,6 +18,10 @@
         <h3>Drei-Akt-Struktur</h3>
         <p><strong>Akt 1 (Lvl 1–6):</strong> Lernphase. Ein Pathogen-Typ pro Level. Der Spieler lernt Mechaniken nacheinander. <strong>Akt 2 (Lvl 7–12):</strong> Komplikation. Mischungen, Spezial-Pathogene, taktische Tiefe. <strong>Akt 3 (Lvl 13–18):</strong> Krise. Alle Mechaniken kombiniert, höchste Schwierigkeit, Final Boss.</p>
       </div>
+    </div>
+
+    <div class="callout" style="margin-top: 8px;">
+      <strong>Briefing-Konvention:</strong> Vor jeder Welle zeigt das Spiel die Pre-Level-Briefing-Karte aus <a href="ch12-briefing/"><strong>§12</strong></a> mit erwarteten Gegnern, empfohlenen Konter-Synergien und dem aktuellen 6er-Roster. Während des Levels jederzeit per HUD-Button (i) erneut aufrufbar.
     </div>
 
     <section>

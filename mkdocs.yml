@@ -39,6 +39,7 @@ nav:
   - 09 · Game Feel: ch09-game-feel.md
   - 10 · Schadens-Matrix: ch10-schaden.md
   - 11 · Physik & Magnetismus: ch11-physik.md
+  - 12 · Briefing & Konter-Quickref: ch12-briefing.md
 
 # Allow inline HTML (chapter files are mostly raw HTML blocks).
 markdown_extensions:
