@@ -56,6 +56,14 @@ export class PixiRenderer extends RendererBase {
     this.selectionGfx = null;
     this.debugGfx = null;
 
+    // metaSplit: per-pair metaball machinery. Lazy-allocated.
+    this.splittingLayer = null;     // screen-space layer holding one Sprite per active pair
+    this.pairBlur = null;
+    this.pairThreshold = null;
+    this.pairContainer = null;      // off-stage Container with [blur, threshold] filters
+    this.pairPolyGfx = null;        // Graphics inside pairContainer (cleared per pair)
+    this._pairPool = [];            // [{ rt, sprite }] reused across frames
+
     this._destroyed = false;
   }
 
@@ -100,8 +108,33 @@ export class PixiRenderer extends RendererBase {
     this.worldLayer.addChild(this.selectionGfx);
     this.worldLayer.addChild(this.debugGfx);
 
+    this.splittingLayer = new PIXI.Container();
+
+    // metaSplit machinery — off-stage filter chain that paints two
+    // halves through blur+threshold to a per-pair RenderTexture.
+    this.pairBlur = new PIXI.BlurFilter({ strength: 6, quality: 4 });
+    this.pairThreshold = new PIXI.ColorMatrixFilter();
+    this._setPairThreshold(20);
+    this.pairContainer = new PIXI.Container();
+    this.pairPolyGfx = new PIXI.Graphics();
+    this.pairContainer.addChild(this.pairPolyGfx);
+    this.pairContainer.filters = [this.pairBlur, this.pairThreshold];
+
     app.stage.addChild(this.bgLayer);
     app.stage.addChild(this.worldLayer);
+    app.stage.addChild(this.splittingLayer);
+  }
+
+  // Map alpha through K*a - K/2 (clamps in the framebuffer to a hard
+  // threshold near 0.5). RGB passes through identity. Same trick the
+  // canvas2D filter spec uses, expressed as a Pixi color matrix.
+  _setPairThreshold(K) {
+    this.pairThreshold.matrix = [
+      1, 0, 0, 0, 0,
+      0, 1, 0, 0, 0,
+      0, 0, 1, 0, 0,
+      0, 0, 0, K, -K * 0.5,
+    ];
   }
 
   resize(W, H, dpr, renderScale) {
@@ -113,6 +146,42 @@ export class PixiRenderer extends RendererBase {
     this.canvas.style.width = W + 'px';
     this.canvas.style.height = H + 'px';
     this.app.renderer.resize(W, H);
+
+    // Recreate every pair RT at the new canvas size and repoint its
+    // sprite. Pool entries are reused across frames; only on resize
+    // do we throw away the old textures.
+    const PIXI = this.PIXI;
+    if (PIXI && this._pairPool.length) {
+      const wPx = Math.max(2, Math.floor(W));
+      const hPx = Math.max(2, Math.floor(H));
+      for (const entry of this._pairPool) {
+        if (entry.rt) { try { entry.rt.destroy(true); } catch {} }
+        entry.rt = PIXI.RenderTexture.create({ width: wPx, height: hPx, resolution: 1 });
+        entry.sprite.texture = entry.rt;
+        entry.sprite.width = W;
+        entry.sprite.height = H;
+      }
+    }
+  }
+
+  // Lazy-grow the (RT, Sprite) pool used by metaSplit. Each entry
+  // owns a full-canvas RenderTexture and a screen-space Sprite added
+  // to splittingLayer. Sprites stay on the stage and are made
+  // visible/invisible per frame.
+  _getOrCreatePairEntry(idx) {
+    if (idx < this._pairPool.length) return this._pairPool[idx];
+    const PIXI = this.PIXI;
+    const W = Math.max(2, Math.floor(this.W));
+    const H = Math.max(2, Math.floor(this.H));
+    const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1 });
+    const sprite = new PIXI.Sprite(rt);
+    sprite.width = this.W;
+    sprite.height = this.H;
+    sprite.visible = false;
+    this.splittingLayer.addChild(sprite);
+    const entry = { rt, sprite };
+    this._pairPool.push(entry);
+    return entry;
   }
 
   beginFrame(/* timeMs, dt */) { /* render happens in endFrame */ }
@@ -144,12 +213,48 @@ export class PixiRenderer extends RendererBase {
 
     const g = this.cellsGfx;
     g.clear();
+
+    // Hide all pool sprites first; we'll un-hide and re-render the
+    // ones we use below.
+    for (const entry of this._pairPool) entry.sprite.visible = false;
+
     if (!shapes.length) return;
+
+    // metaSplit partition: pairs (both halves of a SPLITTING cell when
+    // S.metaSplit is on) vs singletons (everything else).
+    const useMetaSplit = !!S.metaSplit;
+    const splittingByCellId = new Map();
+    const singletons = [];
+    if (useMetaSplit) {
+      for (const s of shapes) {
+        if (s.cell.state === 'SPLITTING') {
+          let arr = splittingByCellId.get(s.cell.id);
+          if (!arr) { arr = []; splittingByCellId.set(s.cell.id, arr); }
+          arr.push(s);
+        } else {
+          singletons.push(s);
+        }
+      }
+      // Cells where only one half is in view fall back to the singleton
+      // path so they still render rather than disappearing.
+      for (const [id, pair] of splittingByCellId) {
+        if (pair.length < 2) {
+          for (const s of pair) singletons.push(s);
+          splittingByCellId.delete(id);
+        }
+      }
+    } else {
+      for (const s of shapes) singletons.push(s);
+    }
+
+    // Per-pair metaball render — paints each splitting cell as a
+    // single fused blob via the off-stage filter chain.
+    if (splittingByCellId.size > 0) this._renderSplittingPairs(splittingByCellId, time);
 
     const membraneAlpha = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
     const strokeWidth = Math.max(1.5, (S.outlinePx || 5) * 0.55) / Math.max(0.0001, cam.scale);
 
-    for (const s of shapes) {
+    for (const s of singletons) {
       const cc = cellColors(s.cell);
       const cytoTop = cc.cytoTop || '#ffffff';
       const cytoBot = cc.cytoBot || '#d36699';
@@ -208,6 +313,54 @@ export class PixiRenderer extends RendererBase {
     }
   }
 
+  // metaSplit: render each splitting pair through the off-stage
+  // [BlurFilter, ColorMatrixFilter] chain into its own RenderTexture,
+  // then display via a Sprite tinted with the cell's cytoBot. The
+  // splittingLayer sits above worldLayer so the merged blob covers
+  // any bleed from the singleton pass under it.
+  _renderSplittingPairs(splittingByCellId, time) {
+    const PIXI = this.PIXI;
+    const cam = this.camera;
+    const renderer = this.app.renderer;
+
+    // pairContainer carries the camera transform so polygons in
+    // world space map to screen pixels in the RT (which is screen-
+    // sized at resolution 1).
+    this.pairContainer.position.set(cam.tx, cam.ty);
+    this.pairContainer.scale.set(cam.scale);
+
+    let idx = 0;
+    for (const [, pair] of splittingByCellId) {
+      const c = pair[0].cell;
+      const cType = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+      const fld = cType.field || { blur: 6, contrast: 20 };
+      const cc = cellColors(c);
+
+      // Polygons for both halves, in world space.
+      this.pairPolyGfx.clear();
+      for (const s of pair) {
+        const pts = new Array(WOBBLE_VERTS * 2);
+        for (let i = 0; i < WOBBLE_VERTS; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], time);
+          pts[i * 2] = v.x;
+          pts[i * 2 + 1] = v.y;
+        }
+        this.pairPolyGfx.poly(pts).fill(0xffffff);
+      }
+
+      // Configure per-type field params on the shared filter chain.
+      this.pairBlur.strength = fld.blur;
+      this._setPairThreshold(fld.contrast);
+
+      const entry = this._getOrCreatePairEntry(idx++);
+      renderer.render({ container: this.pairContainer, target: entry.rt, clear: true });
+
+      entry.sprite.tint = cc.cytoBot || '#d36699';
+      entry.sprite.alpha = 1;
+      entry.sprite.visible = true;
+    }
+  }
+
   drawSelection(shapes /* , time */) {
     if (!this.app || !this.selectionGfx) return;
     this.selectionGfx.clear();
@@ -251,6 +404,10 @@ export class PixiRenderer extends RendererBase {
 
   destroy() {
     this._destroyed = true;
+    for (const entry of this._pairPool) {
+      if (entry.rt) { try { entry.rt.destroy(true); } catch {} }
+    }
+    this._pairPool = [];
     if (this.app) {
       try { this.app.destroy({ removeView: false }, { children: true, texture: true }); }
       catch (e) { console.warn('[microbes] PixiRenderer destroy:', e && e.message); }
@@ -262,5 +419,10 @@ export class PixiRenderer extends RendererBase {
     this.cellsGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
+    this.splittingLayer = null;
+    this.pairBlur = null;
+    this.pairThreshold = null;
+    this.pairContainer = null;
+    this.pairPolyGfx = null;
   }
 }
