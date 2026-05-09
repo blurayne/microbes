@@ -13,6 +13,7 @@ import { Sim } from './core/sim.js';
 import { getShapes } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
+import { WebGPURenderer } from './render/webgpu.js';
 import { PixiRenderer } from './render/pixi.js';
 
 // ---------- DOM ----------
@@ -23,6 +24,12 @@ const sim = new Sim();
 
 async function tryPixi(preference) {
   const r = new PixiRenderer(canvas, sim, { preference });
+  await r.initAsync();
+  return r;
+}
+
+async function tryWebGPU() {
+  const r = new WebGPURenderer(canvas, sim);
   await r.initAsync();
   return r;
 }
@@ -55,6 +62,15 @@ async function makeRenderer() {
       return r;
     } catch (e) {
       console.warn('[microbes] PixiJS unavailable, falling back to Canvas2D for this load (S.renderer kept as "' + k + '"):', e && (e.stack || e.message));
+    }
+  }
+  if (k === 'webgpu') {
+    try {
+      const r = await tryWebGPU();
+      console.info('[microbes] WebGPURenderer ready');
+      return r;
+    } catch (e) {
+      console.warn('[microbes] WebGPU unavailable, falling back to Canvas2D for this load:', e && e.message);
     }
   }
   if (k === 'webgl2') {
@@ -576,22 +592,27 @@ bindCheckbox('scanlinesToggle', 'scanlines', applyScanlines);
 // Renderer engine — fundamental change, easiest to handle by reloading.
 const rendererSel = document.getElementById('rendererEngine');
 if (rendererSel) {
-  // Probe WebGL2 support; mark the legacy option unsupported if missing.
+  // Probe WebGL2 + WebGPU support; mark unavailable options as
+  // (unsupported) so the dropdown can't strand the user on a broken
+  // backend.
   const probe = document.createElement('canvas');
   const webglSupported = !!probe.getContext('webgl2');
+  const webgpuSupported = typeof navigator !== 'undefined' && !!navigator.gpu;
   if (!webglSupported) {
     const opt = rendererSel.querySelector('option[value="webgl2"]');
-    if (opt) {
-      opt.disabled = true;
-      opt.textContent += ' (unsupported)';
-    }
+    if (opt) { opt.disabled = true; opt.textContent += ' (unsupported)'; }
+  }
+  if (!webgpuSupported) {
+    const opt = rendererSel.querySelector('option[value="webgpu"]');
+    if (opt) { opt.disabled = true; opt.textContent += ' (unsupported)'; }
   }
   rendererSel.value = S.renderer;
   rendererSel.addEventListener('change', () => {
     let kind = rendererSel.value;
-    const valid = ['canvas2d', 'webgl2', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    const valid = ['canvas2d', 'webgl2', 'webgpu', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
     if (!valid.includes(kind)) kind = 'canvas2d';
     if (kind === 'webgl2' && !webglSupported) kind = 'canvas2d';
+    if (kind === 'webgpu' && !webgpuSupported) kind = 'canvas2d';
     if (kind === S.renderer) return;
     S.renderer = kind;
     saveSettings();

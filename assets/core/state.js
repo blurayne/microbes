@@ -44,7 +44,7 @@ export const DEFAULTS = {
   upscaleMode: 'blur',
   scanlines: false,
   useHighlight: true,                       // selection ring uses theme accent when on
-  renderer: 'pixi',         // 'canvas2d' | 'webgl2' | 'pixi' | 'pixi-webgpu' | 'pixi-webgl2'
+  renderer: 'pixi',         // 'canvas2d' | 'webgl2' | 'webgpu' | 'pixi' | 'pixi-webgpu' | 'pixi-webgl2'
 };
 
 const KNOWN_THEME_KEYS = [
@@ -79,7 +79,7 @@ export function loadSettings() {
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
     if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
-    const validRenderers = ['canvas2d', 'webgl2', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    const validRenderers = ['canvas2d', 'webgl2', 'webgpu', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
     if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
@@ -135,6 +135,7 @@ export const LOCALES = {
     renderer_engine: 'Renderer',
     renderer_canvas: 'Canvas2D',
     renderer_webgl: 'WebGL2 (legacy)',
+    renderer_webgpu: 'WebGPU (legacy)',
     renderer_pixi_auto: 'Pixi (auto)',
     renderer_pixi_webgpu: 'Pixi (WebGPU)',
     renderer_pixi_webgl: 'Pixi (WebGL2)',
@@ -218,6 +219,7 @@ export const LOCALES = {
     renderer_engine: 'Renderer',
     renderer_canvas: 'Canvas2D',
     renderer_webgl: 'WebGL2 (alt)',
+    renderer_webgpu: 'WebGPU (alt)',
     renderer_pixi_auto: 'Pixi (auto)',
     renderer_pixi_webgpu: 'Pixi (WebGPU)',
     renderer_pixi_webgl: 'Pixi (WebGL2)',
@@ -301,6 +303,7 @@ export const LOCALES = {
     renderer_engine: 'Motor de render',
     renderer_canvas: 'Canvas2D',
     renderer_webgl: 'WebGL2 (heredado)',
+    renderer_webgpu: 'WebGPU (heredado)',
     renderer_pixi_auto: 'Pixi (auto)',
     renderer_pixi_webgpu: 'Pixi (WebGPU)',
     renderer_pixi_webgl: 'Pixi (WebGL2)',
@@ -385,6 +388,7 @@ export const LOCALES = {
     renderer_engine: 'Render',
     renderer_canvas: 'Canvas2D',
     renderer_webgl: 'WebGL2 (oid)',
+    renderer_webgpu: 'WebGPU (oid)',
     renderer_pixi_auto: 'Pixi (automatisch)',
     renderer_pixi_webgpu: 'Pixi (WebGPU)',
     renderer_pixi_webgl: 'Pixi (WebGL2)',
@@ -469,6 +473,7 @@ export const LOCALES = {
     renderer_engine: 'Machina depingendi',
     renderer_canvas: 'Canvas2D',
     renderer_webgl: 'WebGL2 (vetus)',
+    renderer_webgpu: 'WebGPU (vetus)',
     renderer_pixi_auto: 'Pixius (automatice)',
     renderer_pixi_webgpu: 'Pixius (WebGPU)',
     renderer_pixi_webgl: 'Pixius (WebGL2)',
