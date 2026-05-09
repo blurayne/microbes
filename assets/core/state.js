@@ -41,7 +41,7 @@ export const DEFAULTS = {
   upscaleMode: 'blur',
   scanlines: false,
   useHighlight: true,                       // selection ring uses theme accent when on
-  renderer: 'pixi',         // 'canvas2d' | 'pixi' | 'pixi-webgpu' | 'pixi-webgl2'
+  renderer: 'pixi',         // 'canvas2d' | 'webgl2' | 'pixi' | 'pixi-webgpu' | 'pixi-webgl2'
 };
 
 const KNOWN_THEME_KEYS = [
@@ -76,11 +76,7 @@ export function loadSettings() {
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
     if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
-    // Migrate legacy 'webgl2' saved value to 'pixi-webgl2' so users who
-    // previously chose the hand-rolled WebGL2 renderer (now retired)
-    // land on Pixi forced to WebGL2 instead.
-    if (parsed.renderer === 'webgl2') parsed.renderer = 'pixi-webgl2';
-    const validRenderers = ['canvas2d', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    const validRenderers = ['canvas2d', 'webgl2', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
     if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
@@ -134,6 +130,7 @@ export const LOCALES = {
     upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
     renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (legacy)',
     renderer_pixi_auto: 'Pixi (auto)',
     renderer_pixi_webgpu: 'Pixi (WebGPU)',
     renderer_pixi_webgl: 'Pixi (WebGL2)',
@@ -215,6 +212,7 @@ export const LOCALES = {
     upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
     renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (alt)',
     renderer_pixi_auto: 'Pixi (auto)',
     renderer_pixi_webgpu: 'Pixi (WebGPU)',
     renderer_pixi_webgl: 'Pixi (WebGL2)',
@@ -296,6 +294,7 @@ export const LOCALES = {
     upscale: 'Reescalar', scanlines: 'Líneas de barrido (CRT)',
     renderer_engine: 'Motor de render',
     renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (heredado)',
     renderer_pixi_auto: 'Pixi (auto)',
     renderer_pixi_webgpu: 'Pixi (WebGPU)',
     renderer_pixi_webgl: 'Pixi (WebGL2)',
@@ -378,6 +377,7 @@ export const LOCALES = {
     upscale: 'Aufskaliern', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Render',
     renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (oid)',
     renderer_pixi_auto: 'Pixi (automatisch)',
     renderer_pixi_webgpu: 'Pixi (WebGPU)',
     renderer_pixi_webgl: 'Pixi (WebGL2)',
@@ -460,6 +460,7 @@ export const LOCALES = {
     upscale: 'Augmentum', scanlines: 'Lineae televisorii',
     renderer_engine: 'Machina depingendi',
     renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (vetus)',
     renderer_pixi_auto: 'Pixius (automatice)',
     renderer_pixi_webgpu: 'Pixius (WebGPU)',
     renderer_pixi_webgl: 'Pixius (WebGL2)',
@@ -579,13 +580,13 @@ export const THEMES = {
   neonBloom: {
     label: 'Neon Bloom',
     bg: { kind: 'navy-ghost', base: '#0e1840', spotColor: 'rgba(80,40,160,0.25)', spotCount: 7, vignette: 0.4 },
-    outline: { color: '#0d0420', defaultPx: 3, glow: '#ff4fbf', glowBlur: 22 },
+    outline: { color: '#0d0420', defaultPx: 3 },
     ui: { panelAccent: '#ff4fbf' },
   },
   aquaticGlow: {
     label: 'Aquatic Glow',
     bg: { kind: 'gradient', topColor: '#001a4a', botColor: '#00050f', spotColor: 'rgba(80,200,255,0.10)', spotCount: 4, vignette: 0.3 },
-    outline: { color: '#06122a', defaultPx: 3, glow: '#5ce7ff', glowBlur: 18 },
+    outline: { color: '#06122a', defaultPx: 3 },
     ui: { panelAccent: '#5ce7ff' },
   },
   crayonBox: {
@@ -603,7 +604,7 @@ export const THEMES = {
   glowStick: {
     label: 'Glow Stick',
     bg: { kind: 'flat', base: '#000000', spotColors: ['#ffea00','#ff00aa','#00ff88','#00d8ff'], spotCount: 7, vignette: 0.50 },
-    outline: { color: '#000000', defaultPx: 3, glow: '#ffffff', glowBlur: 12 },
+    outline: { color: '#000000', defaultPx: 3 },
     ui: { panelAccent: '#ffea00' },
   },
   bedtime: {
@@ -621,7 +622,7 @@ export const THEMES = {
   aurora: {
     label: 'Aurora',
     bg: { kind: 'gradient', topColor: '#03081a', botColor: '#000000', spotColors: ['#3ecf6c','#5cd6ff','#a855f7','#ff5cb8','#ffe070'], spotCount: 7, vignette: 0.40 },
-    outline: { color: '#000000', defaultPx: 3, glow: '#5cd6ff', glowBlur: 16 },
+    outline: { color: '#000000', defaultPx: 3 },
     ui: { panelAccent: '#3ecf6c' },
   },
   prism: {
@@ -639,13 +640,13 @@ export const THEMES = {
   deepSpace: {
     label: 'Deep Space',
     bg: { kind: 'flat', base: '#000005', spotColors: ['#ffffff','#a0c0ff','#ffe0a0'], spotCount: 9, vignette: 0.60 },
-    outline: { color: '#000000', defaultPx: 3, glow: '#ffffff', glowBlur: 8 },
+    outline: { color: '#000000', defaultPx: 3 },
     ui: { panelAccent: '#a0c0ff' },
   },
   volcano: {
     label: 'Volcano',
     bg: { kind: 'gradient', topColor: '#3b0a05', botColor: '#0a0202', spotColors: ['#ff5a00','#ff9933','#ffe066','#ffaa44'], spotCount: 7, vignette: 0.50 },
-    outline: { color: '#1a0606', defaultPx: 4, glow: '#ff7530', glowBlur: 14 },
+    outline: { color: '#1a0606', defaultPx: 4 },
     ui: { panelAccent: '#ff5a00' },
   },
   forestFloor: {
@@ -657,7 +658,7 @@ export const THEMES = {
   cyberGrid: {
     label: 'Cyber Grid',
     bg: { kind: 'cybergrid', base: '#000010', spotColors: ['#00ff88','#ff00aa','#00d8ff'], spotCount: 4, vignette: 0.30, gridColor: 'rgba(0,255,170,0.18)', gridStep: 48 },
-    outline: { color: '#000000', defaultPx: 3, glow: '#00ff88', glowBlur: 16 },
+    outline: { color: '#000000', defaultPx: 3 },
     ui: { panelAccent: '#00ff88' },
   },
   lymphNode: {
@@ -699,7 +700,7 @@ export const THEMES = {
   brain: {
     label: 'Brain',
     bg: { kind: 'gradient', topColor: '#2a142e', botColor: '#100612', spotColor: 'rgba(255,200,255,0.15)', spotCount: 6, vignette: 0.50, decor: 'neurons' },
-    outline: { color: '#08020a', defaultPx: 3, glow: '#e0a0ff', glowBlur: 14 },
+    outline: { color: '#08020a', defaultPx: 3 },
     ui: { panelAccent: '#e0a0ff' },
   },
   kidney: {

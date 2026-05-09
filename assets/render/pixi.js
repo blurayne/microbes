@@ -67,7 +67,6 @@ export class PixiRenderer extends RendererBase {
     this.bgGfx = null;
     this.outlineLayer = null;
     this.outlineSprites = [];   // 8 sprites, tinted outline colour, at offsets
-    this.glowSprite = null;     // optional 9th sprite for glow themes
     this.fillSprite = null;     // displays fillRT
     this.fillMaskSprite = null; // unionMaskRT used as alpha mask for fillSprite
     this.worldLayer = null;
@@ -127,9 +126,6 @@ export class PixiRenderer extends RendererBase {
     this.bgLayer.addChild(this.bgGfx);
 
     this.outlineLayer = new PIXI.Container();
-    this.glowSprite = new PIXI.Sprite();
-    this.glowSprite.visible = false;
-    this.outlineLayer.addChild(this.glowSprite);
     for (let i = 0; i < 8; i++) {
       const s = new PIXI.Sprite();
       this.outlineSprites.push(s);
@@ -209,7 +205,6 @@ export class PixiRenderer extends RendererBase {
     this.scratchSprite.texture = this.scratchRT;
     this.fillSprite.texture = this.fillRT;
     this.fillMaskSprite.texture = this.unionMaskRT;
-    this.glowSprite.texture = this.unionMaskRT;
     for (const s of this.outlineSprites) s.texture = this.unionMaskRT;
 
     // Display sprites span the full canvas; sprite.width/height
@@ -219,8 +214,6 @@ export class PixiRenderer extends RendererBase {
     this.fillSprite.height = H;
     this.fillMaskSprite.width = W;
     this.fillMaskSprite.height = H;
-    this.glowSprite.width = W;
-    this.glowSprite.height = H;
     for (const s of this.outlineSprites) {
       s.width = W;
       s.height = H;
@@ -281,22 +274,6 @@ export class PixiRenderer extends RendererBase {
       s.x = dx; s.y = dy;
       s.alpha = 1;
       s.visible = shapes.length > 0;
-    }
-    // Glow halo for themes that want one.
-    if (theme && theme.outline && theme.outline.glow && shapes.length > 0) {
-      this.glowSprite.tint = theme.outline.glow;
-      this.glowSprite.x = 0; this.glowSprite.y = 0;
-      this.glowSprite.alpha = 0.85;
-      this.glowSprite.visible = true;
-      const glowBlur = (theme.outline.glowBlur || 14);
-      this.glowSprite.filters = this.glowSprite.filters && this.glowSprite.filters.length
-        ? this.glowSprite.filters
-        : [new PIXI.BlurFilter({ strength: glowBlur, quality: 3 })];
-      // Update strength on the existing filter if it's already there.
-      const f = this.glowSprite.filters[0];
-      if (f && 'strength' in f) f.strength = glowBlur;
-    } else {
-      this.glowSprite.visible = false;
     }
 
     // Membrane / selection / debug all redraw fresh each frame.
@@ -411,7 +388,6 @@ export class PixiRenderer extends RendererBase {
     this.bgGfx = null;
     this.outlineLayer = null;
     this.outlineSprites = [];
-    this.glowSprite = null;
     this.fillSprite = null;
     this.fillMaskSprite = null;
     this.worldLayer = null;

@@ -12,6 +12,7 @@ import {
 import { Sim } from './core/sim.js';
 import { getShapes } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
+import { WebGL2Renderer } from './render/webgl2.js';
 import { PixiRenderer } from './render/pixi.js';
 
 // ---------- DOM ----------
@@ -40,6 +41,17 @@ async function makeRenderer() {
     console.warn('[microbes] PixiJS unavailable, falling back to Canvas2D:', e && e.message);
     S.renderer = 'canvas2d';
     saveSettings();
+  }
+  if (S.renderer === 'webgl2') {
+    try {
+      const r = new WebGL2Renderer(canvas, sim);
+      r.init();
+      return r;
+    } catch (e) {
+      console.warn('[microbes] WebGL2 unavailable, falling back to Canvas2D:', e && e.message);
+      S.renderer = 'canvas2d';
+      saveSettings();
+    }
   }
   const r = new Canvas2DRenderer(canvas, sim);
   r.init();
@@ -516,11 +528,22 @@ bindCheckbox('scanlinesToggle', 'scanlines', applyScanlines);
 // Renderer engine — fundamental change, easiest to handle by reloading.
 const rendererSel = document.getElementById('rendererEngine');
 if (rendererSel) {
+  // Probe WebGL2 support; mark the legacy option unsupported if missing.
+  const probe = document.createElement('canvas');
+  const webglSupported = !!probe.getContext('webgl2');
+  if (!webglSupported) {
+    const opt = rendererSel.querySelector('option[value="webgl2"]');
+    if (opt) {
+      opt.disabled = true;
+      opt.textContent += ' (unsupported)';
+    }
+  }
   rendererSel.value = S.renderer;
   rendererSel.addEventListener('change', () => {
     let kind = rendererSel.value;
-    const valid = ['canvas2d', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    const valid = ['canvas2d', 'webgl2', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
     if (!valid.includes(kind)) kind = 'canvas2d';
+    if (kind === 'webgl2' && !webglSupported) kind = 'canvas2d';
     if (kind === S.renderer) return;
     S.renderer = kind;
     saveSettings();

@@ -434,22 +434,9 @@ export class Canvas2DRenderer extends RendererBase {
       [-px, 0], [px, 0], [0, -px], [0, px],
       [-px, -px], [px, px], [-px, px], [px, -px],
     ];
-    if (theme.outline.glow) {
-      this._tintMask(theme.outline.glow);
-      ctx.save();
-      ctx.shadowColor = theme.outline.glow;
-      ctx.shadowBlur = theme.outline.glowBlur || 14;
-      for (const [dx, dy] of offsets) {
-        ctx.drawImage(off, 0, 0, off.width, off.height, dx, dy, W, H);
-      }
-      ctx.restore();
-      this._tintMask(theme.outline.color);
-      ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, W, H);
-    } else {
-      this._tintMask(theme.outline.color);
-      for (const [dx, dy] of offsets) {
-        ctx.drawImage(off, 0, 0, off.width, off.height, dx, dy, W, H);
-      }
+    this._tintMask(theme.outline.color);
+    for (const [dx, dy] of offsets) {
+      ctx.drawImage(off, 0, 0, off.width, off.height, dx, dy, W, H);
     }
 
     const sx = off.width / W;
