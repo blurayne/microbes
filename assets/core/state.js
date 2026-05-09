@@ -9,7 +9,7 @@ export const SETTINGS_KEY_V1 = 'microbes.settings.v1';
 
 export const ALL_CELL_KEYS = [
   'neutrophil', 'monocyte', 'mast', 'nk', 'macrophage', 'dendritic',
-  'basophil', 'platelet', 'tcell', 'bcell', 'eosinophil',
+  'basophil', 'platelet', 'tcell', 'bcell', 'eosinophil', 'rbc',
   'virus', 'germ', 'bacterium', 'amoebaP', 'slime', 'mite', 'spore', 'toxin',
 ];
 
@@ -32,7 +32,7 @@ export const DEFAULTS = {
   blendMode: 'overlay',
   speedMul: 1.0,
   cartoon: false,
-  lang: 'en',
+  lang: 'en',                               // 'en' | 'de' | 'es' | 'bar' | 'latin'
   allowBadGuys: true,
   cellSizeMul: 1.0,
   membraneIntensity: 0.55,
@@ -40,7 +40,7 @@ export const DEFAULTS = {
   renderScale: 1.0,
   upscaleMode: 'blur',
   scanlines: false,
-  highlightColor: '#ffffff',
+  useHighlight: true,                       // selection ring uses theme accent when on
   renderer: 'canvas2d',     // 'canvas2d' | 'webgl2' (added for the upcoming WebGL renderer)
 };
 
@@ -77,6 +77,15 @@ export function loadSettings() {
     if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
     if (parsed.renderer !== 'canvas2d' && parsed.renderer !== 'webgl2') parsed.renderer = DEFAULTS.renderer;
+    // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
+    if (parsed.lang === 'brbn') parsed.lang = 'bar';
+    // Migrate legacy `highlightColor` field to the new `useHighlight` toggle.
+    if (typeof parsed.useHighlight !== 'boolean') {
+      parsed.useHighlight = (typeof parsed.highlightColor === 'string')
+        ? parsed.highlightColor.toLowerCase() !== '#ffffff'
+        : true;
+    }
+    delete parsed.highlightColor;
     return { ...DEFAULTS, ...parsed };
   } catch { return { ...DEFAULTS }; }
 }
@@ -112,7 +121,7 @@ export const LOCALES = {
     max_cells: 'Max cells', auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
     wobble: 'Wobble', bg_flow: 'Background flow', outline_px: 'Outline px',
-    membrane: 'Membrane', cell_size: 'Cell size', highlight_color: 'Highlight colour',
+    membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
     cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS',
@@ -160,6 +169,8 @@ export const LOCALES = {
     cell_bcell_desc: 'Adaptive antibody factory; secretes antibodies tagged to specific pathogens.',
     cell_eosinophil_label: 'Eosinophil',
     cell_eosinophil_desc: 'Anti-parasite specialist; key in allergic responses, releases toxic granule contents.',
+    cell_rbc_label: 'Red Blood Cell',
+    cell_rbc_desc: 'Erythrocyte; biconcave disc full of haemoglobin that carries oxygen around the body.',
     cell_virus_label: 'Virus',
     cell_virus_desc: 'Spike-protein invader; hijacks cells to replicate inside them.',
     cell_germ_label: 'Germ',
@@ -189,7 +200,7 @@ export const LOCALES = {
     max_cells: 'Max. Zellen', auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
     wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
-    membrane: 'Membran', cell_size: 'Zellgröße', highlight_color: 'Akzentfarbe',
+    membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
     cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen',
@@ -237,6 +248,8 @@ export const LOCALES = {
     cell_bcell_desc: 'Adaptive Antikörperfabrik; produziert Antikörper passend zu jedem Erreger.',
     cell_eosinophil_label: 'Eosinophiler Granulozyt',
     cell_eosinophil_desc: 'Spezialist gegen Parasiten; wichtig bei Allergien, setzt giftige Granulen frei.',
+    cell_rbc_label: 'Rote Blutzelle',
+    cell_rbc_desc: 'Erythrozyt; bikonkave Scheibe voller Hämoglobin — transportiert Sauerstoff durch den Körper.',
     cell_virus_label: 'Virus',
     cell_virus_desc: 'Spike-Eindringling; kapert Zellen, um sich darin zu vermehren.',
     cell_germ_label: 'Keim',
@@ -266,7 +279,7 @@ export const LOCALES = {
     max_cells: 'Células máx.', auto_split: 'Auto-división (s)',
     friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
     wobble: 'Oscilación', bg_flow: 'Flujo de fondo', outline_px: 'Contorno px',
-    membrane: 'Membrana', cell_size: 'Tamaño de célula', highlight_color: 'Color de selección',
+    membrane: 'Membrana', cell_size: 'Tamaño de célula', use_highlight: 'Usar color de resalte',
     mode_target: 'Modo objetivo', mode_target_tip: 'Toca para seleccionar / enviar',
     mode_split: 'Modo división', mode_split_tip: 'Toca una célula para dividirla',
     cartoon_mode: 'Modo dibujo (caras)', show_fps: 'Mostrar FPS',
@@ -314,6 +327,8 @@ export const LOCALES = {
     cell_bcell_desc: 'Fábrica adaptativa de anticuerpos; secreta anticuerpos para patógenos específicos.',
     cell_eosinophil_label: 'Eosinófilo',
     cell_eosinophil_desc: 'Especialista anti-parásitos; clave en alergias, libera gránulos tóxicos.',
+    cell_rbc_label: 'Glóbulo rojo',
+    cell_rbc_desc: 'Eritrocito; disco bicóncavo lleno de hemoglobina que transporta oxígeno por el cuerpo.',
     cell_virus_label: 'Virus',
     cell_virus_desc: 'Invasor de espícula; secuestra células para replicarse en su interior.',
     cell_germ_label: 'Germen',
@@ -331,82 +346,165 @@ export const LOCALES = {
     cell_toxin_label: 'Toxina',
     cell_toxin_desc: 'Cristal tóxico dentado; deriva y quema al contacto.',
   },
-  brbn: {
-    settings_title: 'BARBARIAN SMASH SETTINGS',
-    theme: 'WORLD COLOR', background: 'WORLD PICTURE', gameplay: 'PLAY RULE',
-    splitting: 'CELL MAKE TWO', split_mode: 'TWO-MAKE STYLE', population: 'CELL CROWD',
-    physics: 'WORLD PUSH RULE', cell_blending: 'CELL MIX', look: 'EYE STUFF',
-    performance: 'GO FAST', language: 'TALK WAY',
-    allow_pathogens: 'LET BAD GUY IN',
-    split_on_tap: 'POKE MAKE TWO', random_split: 'CELL TWO BY SELF',
-    split_push: 'PUSH AND THROW', split_bond: 'STICK THEN FLOAT',
-    max_cells: 'MOST CELLS', auto_split: 'AUTO TWO TIME',
-    friction: 'STICKY WORLD', bounce: 'SPRING POWER', throw_strength: 'ROCK THROW POWER',
-    wobble: 'JIGGLE', bg_flow: 'WORLD MOVE', outline_px: 'EDGE THICK',
-    membrane: 'SKIN', cell_size: 'BIG CELL OR SMOL CELL', highlight_color: 'PICK SHINY COLOR',
-    mode_target: 'POINT MODE', mode_target_tip: 'TAP PICK GUY OR SET PLACE',
-    mode_split: 'SMASH MODE', mode_split_tip: 'TAP CELL MAKE TWO',
-    cartoon_mode: 'BIG SILLY FACES', show_fps: 'SHOW FAST NUMBER',
-    show_field: 'SHOW BLOB GRID', render_scale: 'BIG MAKE SIZE',
-    upscale: 'BIG GROW', scanlines: 'TV LINE THING',
-    renderer_engine: 'RENDER ENGINE',
-    renderer_canvas: 'OLD CANVAS WAY',
-    renderer_webgl: 'GPU SMASH',
-    reset_sim: 'MAKE WORLD NEW',
-    help_title: 'GOOD CELLS LIST',
-    add_cell: 'MAKE GOOD CELL', add_pathogen: 'MAKE BAD CELL',
-    palette_to_help: 'LEARN WHAT CELL DO →',
-    palette_bad_to_help: 'LEARN WHAT BAD GUY DO →',
-    nav_settings: 'CONTROL ROOM', nav_help: 'BIG QUESTION', nav_add_cell: 'MAKE GOOD CELL',
-    nav_add_pathogen: 'MAKE BAD CELL', nav_reload: 'WORLD RESTART',
-    adding: 'STUFF NEW: {name}',
-    fps_line: '{fps} FAST · CELLS {n}',
-    help_group_good: 'FRIENDLY GUYS (BODY ARMY)',
-    blend_none: 'NO MIX', blend_overlay: 'MIX (NORMAL)', blend_multiply: 'DARK MIX',
-    blend_darken: 'GO DARK', blend_lighter: 'GO BRIGHT', blend_screen: 'BIG BRIGHT',
-    blend_softlight: 'SOFT GLOW', blend_hardlight: 'HARD GLOW',
-    blend_burn: 'COLOR BURN', blend_dodge: 'COLOR SHINE',
-    upscale_blur: 'SMOOSH SMOOTH', upscale_pixel: 'BLOCKY CRISP',
-    pgroup_virus: 'TINY SPIKE GUYS', pgroup_bacteria: 'WIGGLE STICKS',
-    pgroup_parasite: 'CRAWL BUGS', pgroup_fungus: 'MOLD STUFF', pgroup_toxin: 'BURN ROCKS',
-    cell_neutrophil_label: 'NEUTROPHIL',
-    cell_neutrophil_desc: 'FIRST GUY ON SCENE. EAT BACTERIA. MOST COMMON WHITE BLOB.',
-    cell_monocyte_label: 'MONOCYTE',
-    cell_monocyte_desc: 'BLOOD GUARD. GROW UP INTO BIG EATER OR SHOW-AND-TELL CELL.',
-    cell_mast_label: 'MAST CELL',
-    cell_mast_desc: 'TISSUE WATCH. THROW HISTAMINE. MAKE SWELL AND ITCH.',
-    cell_nk_label: 'NATURAL KILLER',
-    cell_nk_desc: 'PATROL FOR SICK CELL. KILL ON SIGHT. NO QUESTION.',
-    cell_macrophage_label: 'MACROPHAGE',
-    cell_macrophage_desc: 'BIG EATER. CHOMP BUGS. SHOW CHEW BITS TO T-CELL.',
-    cell_dendritic_label: 'DENDRITIC CELL',
-    cell_dendritic_desc: 'COURIER GUY. GRAB BUG BIT. RUN TELL T-CELL IN LYMPH FORT.',
-    cell_basophil_label: 'BASOPHIL',
-    cell_basophil_desc: 'BLOOD GRAIN. SPRAY HISTAMINE. MAKE INFLAME LOUDER.',
-    cell_platelet_label: 'PLATELET',
-    cell_platelet_desc: 'TINY CRUMB. PLUG BLEED. CALL FRIENDS TO WOUND.',
-    cell_tcell_label: 'T CELL',
-    cell_tcell_desc: 'SMART KILLER. KNOW BAD GUY BY NAME. SMASH SICK CELL.',
-    cell_bcell_label: 'B CELL',
-    cell_bcell_desc: 'ARROW MAKER. SPIT STICKY ARROW THAT TAG BAD GUY.',
-    cell_eosinophil_label: 'EOSINOPHIL',
-    cell_eosinophil_desc: 'WORM SLAYER. THROW BURN BAG. ALSO MAKE ALLERGY HURT.',
-    cell_virus_label: 'VIRUS',
-    cell_virus_desc: 'SPIKE BALL. SNEAK IN CELL. MAKE MORE SELF.',
-    cell_germ_label: 'GERM',
-    cell_germ_desc: 'BUMPY BUG. JUST WANT EAT YOU.',
-    cell_bacterium_label: 'BACTERIUM',
-    cell_bacterium_desc: 'STICK BUG WITH WHIPPY TAIL. SWIM FAST.',
-    cell_amoebaP_label: 'AMOEBA',
-    cell_amoebaP_desc: 'BLOB CRAWLER. EAT FLESH BIT BY BIT.',
-    cell_slime_label: 'SLIME',
-    cell_slime_desc: 'GROSS GOO BLOB. DRIP NASTY DROP.',
-    cell_mite_label: 'MITE',
-    cell_mite_desc: 'TINY MANY-LEG SCURRY GUY.',
-    cell_spore_label: 'SPORE',
-    cell_spore_desc: 'MOLD SEED. FLOAT ON BREEZE. MAKE NEW MOLD.',
-    cell_toxin_label: 'TOXIN',
-    cell_toxin_desc: 'POINTY BURN ROCK. DRIFT AROUND. HURT ON TOUCH.',
+  bar: {
+    // Bayrisch / Boarisch — translated from the German entries.
+    settings_title: 'Eistellunga',
+    theme: 'Thema', background: 'Hintagrund', gameplay: 'Spui',
+    splitting: 'Teilung', split_mode: 'Teilungsmodus', population: 'Population',
+    physics: 'Physik', cell_blending: 'Zoinmischung', look: 'Ausschaung',
+    performance: 'Leistung', language: 'Sproch',
+    allow_pathogens: 'Bazilln daloum',
+    split_on_tap: 'Beim Drauflanga teiln', random_split: 'Zoifällige Teilung',
+    split_push: 'Mit Schwung auseinanda', split_bond: 'Vabinda, dann driftn',
+    max_cells: 'Max. Zoin', auto_split: 'Auto-Teilung (s)',
+    friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
+    wobble: 'Wackln', bg_flow: 'Hintagrundgflies', outline_px: 'Umrandung px',
+    membrane: 'Membran', cell_size: 'Zoingrässn', use_highlight: 'Akzentfarb vawendn',
+    mode_target: 'Zuimodus', mode_target_tip: 'Drauflanga: aussuacha / Zui setzn',
+    mode_split: 'Teilungsmodus', mode_split_tip: 'Drauflanga deid de Zoin teiln',
+    cartoon_mode: 'Cartoon-Modus (Gsichta)', show_fps: 'FPS oazoang',
+    show_field: 'Metaball-Föd zoang', render_scale: 'Renderskala',
+    upscale: 'Aufskaliern', scanlines: 'Scanlines (CRT)',
+    renderer_engine: 'Render',
+    renderer_canvas: 'Canvas2D (kompatibel)',
+    renderer_webgl: 'WebGL2 (schnoi)',
+    reset_sim: 'Simulation z\'rucksetzn',
+    help_title: 'Zoin vom Immunsystem',
+    add_cell: 'Zoin dazua', add_pathogen: 'Bazi dazua',
+    palette_to_help: 'Wos macht jede Zoin? →',
+    palette_bad_to_help: 'Wos macht jeda Bazi? →',
+    nav_settings: 'Eistellunga', nav_help: 'Huif', nav_add_cell: 'Zoin dazua',
+    nav_add_pathogen: 'Bazi dazua', nav_reload: 'Nei lodn',
+    adding: 'Dazua: {name}',
+    fps_line: '{fps} fps · Zoin {n}',
+    help_group_good: 'Guad (Immunsystem)',
+    blend_none: 'Koa', blend_overlay: 'Overlay (Stand)', blend_multiply: 'Multipliziarn',
+    blend_darken: 'Dunkla macha', blend_lighter: 'Hella', blend_screen: 'Aufhelln',
+    blend_softlight: 'Woach\'s Liacht', blend_hardlight: 'Hoats Liacht',
+    blend_burn: 'Nochbelichtn', blend_dodge: 'Owedln',
+    upscale_blur: 'Woachzeichna', upscale_pixel: 'Pixel (knacki)',
+    pgroup_virus: 'Viren', pgroup_bacteria: 'Bakterien',
+    pgroup_parasite: 'Parasitn', pgroup_fungus: 'Schwammerln', pgroup_toxin: 'Gifte',
+    cell_neutrophil_label: 'Neutrophil',
+    cell_neutrophil_desc: 'De erste Vateidigung; vaschlingt Bakterien per Phagozytose. De häufigste weiße Bluadzelln.',
+    cell_monocyte_label: 'Monozyt',
+    cell_monocyte_desc: 'Wachpostn im Bluad; reift im Gewebe zu Makrophagn oda dendritischn Zoin.',
+    cell_mast_label: 'Mastzelln',
+    cell_mast_desc: 'Gewebewachta; haut s\' Histamin raus und macht Entzündung und Allergie.',
+    cell_nk_label: 'Natürliche Killazelln',
+    cell_nk_desc: 'Patrouilliert nach virusinfiziertn und Tumorzelln; daschlogt bei Kontakt ohne Vorprägung.',
+    cell_macrophage_label: 'Makrophag',
+    cell_macrophage_desc: '"Großfressa" — langlebiga Phagozyt; vadaut Erreger und zoagt d\'Antigene de T-Zelln.',
+    cell_dendritic_label: 'Dendritische Zelln',
+    cell_dendritic_desc: 'Antigen-präsentierada Bot; bringt Erregaprobm zu de T-Zelln in de Lymphknotn.',
+    cell_basophil_label: 'Basophila Granulozyt',
+    cell_basophil_desc: 'Kreisada Granulozyt; setzt Histamin und Heparin frei und vastärkt d\'Entzündung.',
+    cell_platelet_label: 'Bluadplattl',
+    cell_platelet_desc: 'A winzigs Zellnstickl; verklebt s\'Bluad bei Wundn und huift, Immunzelln zsammz\'rufa.',
+    cell_tcell_label: 'T-Zelln',
+    cell_tcell_desc: 'Adaptiva Killa/Koordinator; daskennt spezifische Antigene und daschlogt infizierte Zelln.',
+    cell_bcell_label: 'B-Zelln',
+    cell_bcell_desc: 'Adaptive Antikörperfabrik; baut Antikörper, de zu jedem Erreger passn.',
+    cell_eosinophil_label: 'Eosinophila Granulozyt',
+    cell_eosinophil_desc: 'Spezialist gega Parasitn; wichti bei Allergien, haut giftige Granuln raus.',
+    cell_rbc_label: 'Rote Bluadzelln',
+    cell_rbc_desc: 'Erythrozyt; bikonkave Scheibm voi Hämoglobin — schleppt Sauastoff durch\'n Körpa.',
+    cell_virus_label: 'Virus',
+    cell_virus_desc: 'Spike-Eindringling; kapat Zelln, dass\'a si do drin vamehrn ko.',
+    cell_germ_label: 'Bazi',
+    cell_germ_desc: 'A allgmoa knubbliga Bazi — opportunistischa Erreger.',
+    cell_bacterium_label: 'Bakterium',
+    cell_bacterium_desc: 'Stäbchenbakterium, schwimmt mit am peitschadn Flagellum.',
+    cell_amoebaP_label: 'Amöbe (Parasit)',
+    cell_amoebaP_desc: 'Amöboida Parasit; kriacht und vaschlingt s\'Gewebe.',
+    cell_slime_label: 'Schleim',
+    cell_slime_desc: 'A schleimige Biofilm-Kugl; tropft giftige Bria.',
+    cell_mite_label: 'Milbn',
+    cell_mite_desc: 'A winziga Krabbla; vui kloane Hax\'n.',
+    cell_spore_label: 'Spor',
+    cell_spore_desc: 'Schwammalspor — treibt mit da Strömung und sät neis Wachstum.',
+    cell_toxin_label: 'Gift',
+    cell_toxin_desc: 'A zackiga Giftkristoi; treibt umadum und brennt bei Kontakt.',
+  },
+  latin: {
+    settings_title: 'Configuratio',
+    theme: 'Tema', background: 'Tergum', gameplay: 'Ludus',
+    splitting: 'Divisio', split_mode: 'Modus divisionis', population: 'Populatio',
+    physics: 'Physica', cell_blending: 'Confusio cellularum', look: 'Aspectus',
+    performance: 'Celeritas', language: 'Lingua',
+    allow_pathogens: 'Pathogenes admittere',
+    split_on_tap: 'Divide tactu', random_split: 'Divisio casualis',
+    split_push: 'Pelle cum impetu', split_bond: 'Conjunge, deinde fluctuent',
+    max_cells: 'Cellulae maximae', auto_split: 'Auto-divisio (s)',
+    friction: 'Frictio', bounce: 'Resilientia', throw_strength: 'Vis jactus',
+    wobble: 'Tremor', bg_flow: 'Fluxus tergi', outline_px: 'Linea (px)',
+    membrane: 'Membrana', cell_size: 'Magnitudo cellulae',
+    use_highlight: 'Colore luminis utere',
+    mode_target: 'Modus signi', mode_target_tip: 'Tange ut elige / mitte',
+    mode_split: 'Modus divisionis', mode_split_tip: 'Tange cellulam ut dividas',
+    cartoon_mode: 'Modus picturae (vultus)', show_fps: 'Monstra FPS',
+    show_field: 'Monstra campum metaball', render_scale: 'Scala depingendi',
+    upscale: 'Augmentum', scanlines: 'Lineae televisorii',
+    renderer_engine: 'Machina depingendi',
+    renderer_canvas: 'Canvas2D (compatibilis)',
+    renderer_webgl: 'WebGL2 (rapidus)',
+    reset_sim: 'Restituere simulationem',
+    help_title: 'Cellulae systematis immunitarii',
+    add_cell: 'Adde cellulam', add_pathogen: 'Adde pathogenem',
+    palette_to_help: 'Disce quid quaeque cellula faciat →',
+    palette_bad_to_help: 'Disce quid quisque pathogenes faciat →',
+    nav_settings: 'Configuratio', nav_help: 'Auxilium', nav_add_cell: 'Adde cellulam',
+    nav_add_pathogen: 'Adde pathogenem', nav_reload: 'Iterum onerare',
+    adding: 'Addendo: {name}',
+    fps_line: '{fps} fps · cellulae {n}',
+    help_group_good: 'Bonae (systema immunitarium)',
+    blend_none: 'Nullum', blend_overlay: 'Superpositio', blend_multiply: 'Multiplica',
+    blend_darken: 'Obscura', blend_lighter: 'Adde lucem', blend_screen: 'Velum',
+    blend_softlight: 'Lux mollis', blend_hardlight: 'Lux dura',
+    blend_burn: 'Incende', blend_dodge: 'Tolle',
+    upscale_blur: 'Mollis', upscale_pixel: 'Pixel (acutus)',
+    pgroup_virus: 'Virus', pgroup_bacteria: 'Bacteria',
+    pgroup_parasite: 'Parasiti', pgroup_fungus: 'Fungi', pgroup_toxin: 'Venena',
+    cell_neutrophil_label: 'Neutrophilus',
+    cell_neutrophil_desc: 'Primus respondens; bacteria phagocytosi devorat. Cellula alba sanguinis frequentissima.',
+    cell_monocyte_label: 'Monocytus',
+    cell_monocyte_desc: 'Custos circulans; in tissu maturat in macrophagos vel cellulas dendriticas.',
+    cell_mast_label: 'Mastocytus',
+    cell_mast_desc: 'Custos in tissu; histaminam emittit ad inflammationem allergiamque.',
+    cell_nk_label: 'Cellula NK',
+    cell_nk_desc: 'Patrouillat cellulas virusinfectas et tumores; ad contactum sine sensibilitate praevia necat.',
+    cell_macrophage_label: 'Macrophagus',
+    cell_macrophage_desc: '"Magnus edens" — phagocytus longaevus; pathogenes devorat et antigena T-cellulis ostendit.',
+    cell_dendritic_label: 'Cellula dendritica',
+    cell_dendritic_desc: 'Cursor antigeniferens; specimina hostium fert ad T-cellulas in nodis lymphaticis.',
+    cell_basophil_label: 'Basophilus',
+    cell_basophil_desc: 'Granulocytus circulans; histaminam et heparinam emittit ad inflammationem fortificandam.',
+    cell_platelet_label: 'Thrombocytus',
+    cell_platelet_desc: 'Fragmentum cellulare minimum; sanguinem in vulneribus coagulat et cellulas immunitarias accersit.',
+    cell_tcell_label: 'T-cellula',
+    cell_tcell_desc: 'Necator-coordinator adaptivus; antigena specifica agnoscit et cellulas infectas necat.',
+    cell_bcell_label: 'B-cellula',
+    cell_bcell_desc: 'Officina anticorporum adaptiva; anticorpora specifica facit.',
+    cell_eosinophil_label: 'Eosinophilus',
+    cell_eosinophil_desc: 'Specialista contra parasitos; granula toxica emittit.',
+    cell_rbc_label: 'Erythrocytus',
+    cell_rbc_desc: 'Discus biconcavus plenus haemoglobini; oxygenium per corpus portat.',
+    cell_virus_label: 'Virus',
+    cell_virus_desc: 'Invasor cum spinis; cellulas capit ut intra se multiplicet.',
+    cell_germ_label: 'Microbus',
+    cell_germ_desc: 'Microbus communis tuberosus — opportunisticus infector.',
+    cell_bacterium_label: 'Bacterium',
+    cell_bacterium_desc: 'Bacterium baculum; cum flagello flagellante natat.',
+    cell_amoebaP_label: 'Amoeba (parasitus)',
+    cell_amoebaP_desc: 'Parasitus amoebodialis; serpit et tissum devorat.',
+    cell_slime_label: 'Limus',
+    cell_slime_desc: 'Globus biofilmi limosus; venenum stillans gutta.',
+    cell_mite_label: 'Acarus',
+    cell_mite_desc: 'Bestiola minima; multa parva crura.',
+    cell_spore_label: 'Spora',
+    cell_spore_desc: 'Spora fungi — fluctibus fertur et novum incrementum seminat.',
+    cell_toxin_label: 'Toxinum',
+    cell_toxin_desc: 'Crystallum venenosum dentatum; fluctuat et tactus urit.',
   },
 };
 
@@ -613,6 +711,62 @@ export function currentTheme() {
   return THEMES[S.theme] || THEMES.petriDish;
 }
 
+// Effective highlight colour for selection visuals. When the user toggle is
+// off we drop to plain white (callers can read this as "no tint").
+export function currentHighlightColor() {
+  if (!S.useHighlight) return '#ffffff';
+  const t = currentTheme();
+  return (t && t.ui && t.ui.panelAccent) || '#ffffff';
+}
+
+// Map a hex colour to a coarse human-readable bucket via HSL hue. Handles
+// pastels and dark tones correctly: very low saturation falls to gray /
+// white / black; otherwise the hue maps onto a 12-name colour wheel.
+// Used by the theme dropdown so users can scan by hue ("Petri Dish
+// (amber)") instead of by hex code.
+export function colorNameFor(hex) {
+  let h = (hex || '').replace('#', '');
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  if (h.length !== 6) return '';
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 510;             // 0..1
+  let sat = 0;
+  if (max !== min) {
+    sat = (lightness < 0.5)
+      ? (max - min) / (max + min)
+      : (max - min) / (510 - max - min);
+  }
+  if (sat < 0.10) {
+    if (lightness < 0.18) return 'black';
+    if (lightness > 0.82) return 'white';
+    return 'gray';
+  }
+  let hue = 0;
+  const c = max - min;
+  if (max === r) hue = ((g - b) / c) % 6;
+  else if (max === g) hue = (b - r) / c + 2;
+  else hue = (r - g) / c + 4;
+  hue = (hue * 60 + 360) % 360;
+  // Hue → name; tightly tuned to the existing theme accents.
+  if (hue <  15) return 'red';
+  if (hue <  30) return lightness > 0.65 ? 'peach' : 'orange';
+  if (hue <  45) return lightness < 0.45 ? 'brown' : 'amber';
+  if (hue <  65) return 'yellow';
+  if (hue <  85) return 'lime';
+  if (hue < 165) return 'green';
+  if (hue < 185) return 'teal';
+  if (hue < 205) return 'cyan';
+  if (hue < 235) return 'blue';
+  if (hue < 265) return 'indigo';
+  if (hue < 295) return 'violet';
+  if (hue < 325) return 'magenta';
+  return 'pink';
+}
+
 // ---------- Backgrounds ----------
 // Decoupled from themes — any theme palette/outline can be paired with any
 // background scene. Built by lifting each theme's `bg` block plus a "solid"
@@ -771,6 +925,25 @@ export const CELL_TYPES = {
     colors: { cytoTop: '#fcc8a3', cytoBot: '#e0855a', nucleus: '#4d1d09', nucleusHi: '#ffe2cd', accent: '#8c3d18' },
     description: 'Anti-parasite specialist; key in allergic responses, releases toxic granule contents.',
   },
+  rbc: {
+    // Real erythrocytes are biconcave, anucleate, and slightly elliptic
+    // when seen face-on. body.kind:'oblong' + aspect:1.10 gives the
+    // ellipse; nucleus.kind:'none' is biologically correct (mature RBCs
+    // lack a nucleus); bodyHollow:true tells both renderers to darken
+    // the cell's centre in the cytoplasm pass — gives the donut-hole
+    // read characteristic of a fresh red blood cell viewed from above.
+    label: 'Red Blood Cell', category: 'good', sizeMul: 0.55,
+    body: { kind: 'oblong', aspect: 1.10 },
+    nucleus: { kind: 'none' },
+    bodyHollow: true,
+    decoration: { kind: 'none' },
+    granules: 0,
+    splitFactor: 1.6, brownianMul: 0.9,
+    move: { patrolSpeed: 35, attackSpeed: 65, patrolAccel: 55, alarmAccel: 80, weight: 0.7, friction: 1.0, hostility: 'idle' },
+    field: { blur: 5, contrast: 22, wobbleMul: 0.35 },
+    colors: { cytoTop: '#ff6b6b', cytoBot: '#a01818', nucleus: '#5a0a0a', nucleusHi: '#ffd2d2', accent: '#c43030' },
+    description: 'Erythrocyte; biconcave disc full of haemoglobin that carries oxygen around the body.',
+  },
   virus: {
     label: 'Virus', category: 'bad', subcategory: 'virus', sizeMul: 0.30,
     body: { kind: 'round', aspect: 1.0 },
@@ -926,7 +1099,7 @@ export const FACE = {
   macrophage: { eyes: 2, eyeR: 0.18, eyeY: -0.06, pupilR: 0.07, mouth: 'smile' },
   nk:         { eyes: 2, eyeR: 0.16, eyeY: -0.10, pupilR: 0.06, mouth: 'snarl' },
   mast:       { eyes: 2, eyeR: 0.14, eyeY: -0.08, pupilR: 0.05, mouth: 'smile' },
-  platelet:   { eyes: 0,                                          mouth: 'none' },
+  platelet:   { eyes: 1, eyeR: 0.20, eyeY: -0.06, pupilR: 0.09, mouth: 'smile' },
   virus:      { eyes: 2, eyeR: 0.16, eyeY: -0.12, pupilR: 0.06, mouth: 'fangs' },
   germ:       { eyes: 2, eyeR: 0.16, eyeY: -0.10, pupilR: 0.06, mouth: 'snarl' },
   bacterium:  { eyes: 1, eyeR: 0.18, eyeY: -0.06, pupilR: 0.07, mouth: 'tongue' },

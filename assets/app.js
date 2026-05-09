@@ -6,7 +6,7 @@ import {
   S, saveSettings, applyI18n,
   THEMES, BACKGROUNDS, CELL_TYPES, PATHOGEN_GROUPS, LOCALES,
   T, cellLabel, cellDesc,
-  currentTheme, currentBackground,
+  currentTheme, currentBackground, colorNameFor,
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { Sim } from './core/sim.js';
@@ -356,11 +356,11 @@ if (blendSel) {
   });
 }
 
-const hcEl = document.getElementById('highlightColor');
-if (hcEl) {
-  hcEl.value = S.highlightColor || '#ffffff';
-  hcEl.addEventListener('input', () => {
-    S.highlightColor = hcEl.value;
+const useHl = document.getElementById('useHighlight');
+if (useHl) {
+  useHl.checked = !!S.useHighlight;
+  useHl.addEventListener('change', () => {
+    S.useHighlight = useHl.checked;
     saveSettings();
   });
 }
@@ -427,7 +427,9 @@ const themeSelect = document.getElementById('themeSelect');
 for (const [key, t] of Object.entries(THEMES)) {
   const opt = document.createElement('option');
   opt.value = key;
-  opt.textContent = t.label;
+  // Append the theme's accent colour in parens so users can scan by hue.
+  const accent = (t.ui && t.ui.panelAccent) || '';
+  opt.textContent = accent ? `${t.label} (${colorNameFor(accent)})` : t.label;
   themeSelect.appendChild(opt);
 }
 themeSelect.value = S.theme in THEMES ? S.theme : 'petriDish';
@@ -440,12 +442,20 @@ themeSelect.addEventListener('change', () => {
   }
 });
 
+function bgAccent(b) {
+  if (Array.isArray(b.spotColors) && b.spotColors[0]) return b.spotColors[0];
+  return b.spotColor || b.botColor || b.topColor || b.base || '';
+}
+
 const bgSelect = document.getElementById('bgSelect');
 if (bgSelect) {
   for (const [key, b] of Object.entries(BACKGROUNDS)) {
     const opt = document.createElement('option');
     opt.value = key;
-    opt.textContent = b.label || key;
+    const lbl = b.label || key;
+    const accent = bgAccent(b);
+    const name = accent ? colorNameFor(accent) : '';
+    opt.textContent = name ? `${lbl} (${name})` : lbl;
     bgSelect.appendChild(opt);
   }
   bgSelect.value = (S.background in BACKGROUNDS) ? S.background : (S.theme in BACKGROUNDS ? S.theme : 'solid');
@@ -595,7 +605,10 @@ renderHelpList();
 // Language selector — re-renders dialogs on change.
 const langSelect = document.getElementById('langSelect');
 if (langSelect) {
-  const langs = [['en','English'],['de','Deutsch'],['es','Español'],['brbn','Barbarian']];
+  const langs = [
+    ['en','English'], ['de','Deutsch'], ['es','Español'],
+    ['bar','Bayrisch'], ['latin','Latina'],
+  ];
   for (const [k, label] of langs) {
     const opt = document.createElement('option');
     opt.value = k;

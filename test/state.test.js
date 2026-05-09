@@ -25,8 +25,10 @@ test('T() interpolates {name}-style placeholders', () => {
   assert.equal(T('adding', { name: 'Foo' }), 'Adding: Foo');
   S.lang = 'de';
   assert.equal(T('adding', { name: 'Foo' }), 'Hinzufügen: Foo');
-  S.lang = 'brbn';
-  assert.equal(T('adding', { name: 'Foo' }), 'STUFF NEW: Foo');
+  S.lang = 'bar';
+  assert.equal(T('adding', { name: 'Foo' }), 'Dazua: Foo');
+  S.lang = 'latin';
+  assert.equal(T('adding', { name: 'Foo' }), 'Addendo: Foo');
   S.lang = 'en';
 });
 
@@ -47,10 +49,10 @@ test('cellLabel / cellDesc cover all 19 cell types', () => {
   }
 });
 
-test('CELL_TYPES has the 11 immune + 8 pathogen entries', () => {
+test('CELL_TYPES has the 12 good (immune + RBC) + 8 pathogen entries', () => {
   const good = Object.values(CELL_TYPES).filter(t => t.category === 'good');
   const bad  = Object.values(CELL_TYPES).filter(t => t.category === 'bad');
-  assert.equal(good.length, 11);
+  assert.equal(good.length, 12);
   assert.equal(bad.length, 8);
 });
 
