@@ -25,7 +25,7 @@ export const DEFAULTS = {
   splitOnTap: false,
   randomSplit: false,
   metaSplit: true,          // metaball merge between the two halves while SPLITTING
-  metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu / pixi alike.
+  metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu alike.
   metaOutlineMode: 'edge',  // 'edge' | 'sdf' | 'polygon' — outline style for the merged blob during SPLITTING. 'edge': trace blurred-mask threshold (1 shared rim). 'sdf': stroke each half polygon (2 rims). 'polygon': polygon-union rim, sharp/no-blur.
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
@@ -47,7 +47,7 @@ export const DEFAULTS = {
   upscaleMode: 'blur',
   scanlines: false,
   useHighlight: true,                       // selection ring uses theme accent when on
-  renderer: 'pixi',         // 'canvas2d' | 'webgl2' | 'webgpu' | 'pixi' | 'pixi-webgpu' | 'pixi-webgl2'
+  renderer: 'webgpu',       // 'canvas2d' | 'webgl2' | 'webgpu'
 };
 
 const KNOWN_THEME_KEYS = [
@@ -82,7 +82,9 @@ export function loadSettings() {
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
     if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
-    const validRenderers = ['canvas2d', 'webgl2', 'webgpu', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    const validRenderers = ['canvas2d', 'webgl2', 'webgpu'];
+    // Migrate legacy renderer values (pixi / pixi-webgpu / pixi-webgl2) to
+    // the new default. Pixi support was removed in favour of native WebGPU.
     if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
     const validMetaRtModes = ['bbox', 'fullCanvas', 'sharedMax'];
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
@@ -149,11 +151,8 @@ export const LOCALES = {
     upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (legacy)',
-    renderer_webgpu: 'WebGPU (legacy)',
-    renderer_pixi_auto: 'Pixi (auto)',
-    renderer_pixi_webgpu: 'Pixi (WebGPU)',
-    renderer_pixi_webgl: 'Pixi (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Reset simulation',
     help_title: 'Cells of the immune system',
     add_cell: 'Add a cell', add_pathogen: 'Add a pathogen',
@@ -233,11 +232,8 @@ export const LOCALES = {
     upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (alt)',
-    renderer_webgpu: 'WebGPU (alt)',
-    renderer_pixi_auto: 'Pixi (auto)',
-    renderer_pixi_webgpu: 'Pixi (WebGPU)',
-    renderer_pixi_webgl: 'Pixi (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Simulation zurücksetzen',
     help_title: 'Zellen des Immunsystems',
     add_cell: 'Zelle hinzufügen', add_pathogen: 'Erreger hinzufügen',
@@ -317,11 +313,8 @@ export const LOCALES = {
     upscale: 'Reescalar', scanlines: 'Líneas de barrido (CRT)',
     renderer_engine: 'Motor de render',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (heredado)',
-    renderer_webgpu: 'WebGPU (heredado)',
-    renderer_pixi_auto: 'Pixi (auto)',
-    renderer_pixi_webgpu: 'Pixi (WebGPU)',
-    renderer_pixi_webgl: 'Pixi (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Reiniciar simulación',
     help_title: 'Células del sistema inmunitario',
     add_cell: 'Añadir célula', add_pathogen: 'Añadir patógeno',
@@ -402,11 +395,8 @@ export const LOCALES = {
     upscale: 'Aufskaliern', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Render',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (oid)',
-    renderer_webgpu: 'WebGPU (oid)',
-    renderer_pixi_auto: 'Pixi (automatisch)',
-    renderer_pixi_webgpu: 'Pixi (WebGPU)',
-    renderer_pixi_webgl: 'Pixi (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Simulation z\'rucksetzn',
     help_title: 'Zoin vom Immunsystem',
     add_cell: 'Zoin dazua', add_pathogen: 'Bazi dazua',
@@ -487,11 +477,8 @@ export const LOCALES = {
     upscale: 'Augmentum', scanlines: 'Lineae televisorii',
     renderer_engine: 'Machina depingendi',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (vetus)',
-    renderer_webgpu: 'WebGPU (vetus)',
-    renderer_pixi_auto: 'Pixius (automatice)',
-    renderer_pixi_webgpu: 'Pixius (WebGPU)',
-    renderer_pixi_webgl: 'Pixius (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Restituere simulationem',
     help_title: 'Cellulae systematis immunitarii',
     add_cell: 'Adde cellulam', add_pathogen: 'Adde pathogenem',

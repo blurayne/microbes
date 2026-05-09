@@ -354,9 +354,9 @@ void main() {
 //                   (matches canvas2d). Lowest GPU memory; reallocates as
 //                   pair sizes change. Sizes are rounded up to a 64-px grid
 //                   so the pool churn stays modest.
-//   'fullCanvas'  — pool of full-canvas RTs, one per active pair index
-//                   (matches Pixi's _pairPool). Highest GPU memory; zero
-//                   per-pair allocation after warmup.
+//   'fullCanvas'  — pool of full-canvas RTs, one per active pair index.
+//                   Highest GPU memory; zero per-pair allocation after
+//                   warmup.
 //   'sharedMax'   — single shared RT, sized to the largest active pair
 //                   this frame. Middle ground.
 const VERT_META_POLY = `#version 300 es
@@ -1403,7 +1403,7 @@ export class WebGL2Renderer extends RendererBase {
     // Partition: when S.metaSplit is on, group both halves of any
     // SPLITTING cell by id and render them through the metaball pass.
     // Pairs where only one half is in view fall back to the singleton
-    // path (matches canvas2d / pixi). Singletons feed the disk pass
+    // path (matches canvas2d / webgpu). Singletons feed the disk pass
     // unchanged.
     const useMetaSplit = !!S.metaSplit;
     const splittingByCellId = useMetaSplit ? new Map() : null;

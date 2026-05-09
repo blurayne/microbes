@@ -1,8 +1,8 @@
 // Microbes — renderer interface.
 //
-// JSDoc-only typedef shared by Canvas2DRenderer and PixiRenderer. The
-// frame loop in `app.js` calls only methods declared here, so swapping
-// renderers is a single line in app.js.
+// JSDoc-only typedef shared by Canvas2DRenderer / WebGL2Renderer /
+// WebGPURenderer. The frame loop in `app.js` calls only methods
+// declared here, so swapping renderers is a single line in app.js.
 
 /**
  * @typedef {Object} Cell

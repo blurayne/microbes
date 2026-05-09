@@ -32,6 +32,14 @@ the three "real" renderers, and recommends what to keep.
 
 ## Why not Pixi
 
+> **As of late 2026, Pixi has been removed from the codebase.** The
+> renderer dropdown now exposes Canvas2D · WebGL2 · WebGPU only, with
+> WebGPU as the default. Existing users on `pixi` / `pixi-webgpu` /
+> `pixi-webgl2` migrate to `webgpu` on next page load (the
+> `validRenderers` check rejects unknown values and falls back to
+> `DEFAULTS.renderer`). This section is kept for historical context
+> and reasoning.
+
 (Same audit findings as the perf research that preceded this doc.)
 
 ### Per-frame work — by the numbers

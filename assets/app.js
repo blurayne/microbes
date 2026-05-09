@@ -14,19 +14,12 @@ import { getShapes } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
 import { WebGPURenderer } from './render/webgpu.js';
-import { PixiRenderer } from './render/pixi.js';
 
 // ---------- DOM ----------
 const canvas = document.getElementById('stage');
 
 // ---------- Sim + renderer ----------
 const sim = new Sim();
-
-async function tryPixi(preference) {
-  const r = new PixiRenderer(canvas, sim, { preference });
-  await r.initAsync();
-  return r;
-}
 
 async function tryWebGPU() {
   const r = new WebGPURenderer(canvas, sim);
@@ -40,30 +33,6 @@ async function makeRenderer() {
   // back to Canvas2D for THIS load only — `S.renderer` is left as the
   // user picked it so the dropdown keeps showing their choice and the
   // next reload retries. Each path logs its outcome for DevTools.
-  if (k === 'pixi' || k === 'pixi-webgpu' || k === 'pixi-webgl2') {
-    try {
-      let r;
-      if (k === 'pixi') {
-        try {
-          r = await tryPixi('webgpu');
-          console.info('[microbes] PixiRenderer ready (auto → webgpu)');
-        } catch (eGpu) {
-          console.info('[microbes] PixiRenderer auto: webgpu failed (' + (eGpu && eGpu.message) + '), trying webgl');
-          r = await tryPixi('webgl');
-          console.info('[microbes] PixiRenderer ready (auto → webgl)');
-        }
-      } else if (k === 'pixi-webgpu') {
-        r = await tryPixi('webgpu');
-        console.info('[microbes] PixiRenderer ready (forced webgpu)');
-      } else {
-        r = await tryPixi('webgl');
-        console.info('[microbes] PixiRenderer ready (forced webgl)');
-      }
-      return r;
-    } catch (e) {
-      console.warn('[microbes] PixiJS unavailable, falling back to Canvas2D for this load (S.renderer kept as "' + k + '"):', e && (e.stack || e.message));
-    }
-  }
   if (k === 'webgpu') {
     try {
       const r = await tryWebGPU();
@@ -89,7 +58,7 @@ async function makeRenderer() {
   return r;
 }
 
-// Renderer construction is async (PixiJS needs `await app.init()`).
+// Renderer construction is async (WebGPU needs `await device.requestDevice()`).
 // Boot finishes via the bottom-of-file `bootRenderer` async block.
 let renderer = null;
 
@@ -632,7 +601,7 @@ if (rendererSel) {
   rendererSel.value = S.renderer;
   rendererSel.addEventListener('change', () => {
     let kind = rendererSel.value;
-    const valid = ['canvas2d', 'webgl2', 'webgpu', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    const valid = ['canvas2d', 'webgl2', 'webgpu'];
     if (!valid.includes(kind)) kind = 'canvas2d';
     if (kind === 'webgl2' && !webglSupported) kind = 'canvas2d';
     if (kind === 'webgpu' && !webgpuSupported) kind = 'canvas2d';
@@ -841,8 +810,7 @@ function frame(ts) {
   renderer.drawBackground(ts);
   // Always call drawCells / drawParticles so the renderer can clear
   // its own state. Both handle empty input cleanly (early-return after
-  // the initial clear) — gating here would leave stale Graphics in
-  // Pixi mode when the user kills every cell, which reads as a freeze.
+  // the initial clear).
   renderer.drawCells(shapes, t, ts);
   renderer.drawParticles(sim.particles, t, ts);
   renderer.drawSelection(shapes, t);
@@ -855,7 +823,7 @@ function frame(ts) {
 }
 
 // ---------- Boot ----------
-// Renderer init is async (PixiJS). We await it before the first
+// Renderer init is async (WebGPU). We await it before the first
 // resize() / frame() so those calls always see a live renderer.
 (async () => {
   renderer = await makeRenderer();
