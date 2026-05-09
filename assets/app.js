@@ -29,32 +29,47 @@ async function tryPixi(preference) {
 
 async function makeRenderer() {
   const k = S.renderer;
-  try {
-    if (k === 'pixi') {
-      // Auto: try WebGPU, fall back to WebGL2 silently.
-      try { return await tryPixi('webgpu'); }
-      catch { return await tryPixi('webgl'); }
+  // Runtime-only fallback: if a renderer fails to initialise we drop
+  // back to Canvas2D for THIS load only — `S.renderer` is left as the
+  // user picked it so the dropdown keeps showing their choice and the
+  // next reload retries. Each path logs its outcome for DevTools.
+  if (k === 'pixi' || k === 'pixi-webgpu' || k === 'pixi-webgl2') {
+    try {
+      let r;
+      if (k === 'pixi') {
+        try {
+          r = await tryPixi('webgpu');
+          console.info('[microbes] PixiRenderer ready (auto → webgpu)');
+        } catch (eGpu) {
+          console.info('[microbes] PixiRenderer auto: webgpu failed (' + (eGpu && eGpu.message) + '), trying webgl');
+          r = await tryPixi('webgl');
+          console.info('[microbes] PixiRenderer ready (auto → webgl)');
+        }
+      } else if (k === 'pixi-webgpu') {
+        r = await tryPixi('webgpu');
+        console.info('[microbes] PixiRenderer ready (forced webgpu)');
+      } else {
+        r = await tryPixi('webgl');
+        console.info('[microbes] PixiRenderer ready (forced webgl)');
+      }
+      return r;
+    } catch (e) {
+      console.warn('[microbes] PixiJS unavailable, falling back to Canvas2D for this load (S.renderer kept as "' + k + '"):', e && (e.stack || e.message));
     }
-    if (k === 'pixi-webgpu') return await tryPixi('webgpu');
-    if (k === 'pixi-webgl2') return await tryPixi('webgl');
-  } catch (e) {
-    console.warn('[microbes] PixiJS unavailable, falling back to Canvas2D:', e && e.message);
-    S.renderer = 'canvas2d';
-    saveSettings();
   }
-  if (S.renderer === 'webgl2') {
+  if (k === 'webgl2') {
     try {
       const r = new WebGL2Renderer(canvas, sim);
       r.init();
+      console.info('[microbes] WebGL2Renderer ready');
       return r;
     } catch (e) {
-      console.warn('[microbes] WebGL2 unavailable, falling back to Canvas2D:', e && e.message);
-      S.renderer = 'canvas2d';
-      saveSettings();
+      console.warn('[microbes] WebGL2 unavailable, falling back to Canvas2D for this load:', e && e.message);
     }
   }
   const r = new Canvas2DRenderer(canvas, sim);
   r.init();
+  console.info('[microbes] Canvas2DRenderer ready (S.renderer="' + k + '")');
   return r;
 }
 
