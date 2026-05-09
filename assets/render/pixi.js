@@ -14,13 +14,13 @@
 //   - Cytoplasm radial gradient + per-cell top-left highlight + RBC
 //     donut hole. The vertical linear gradient here is a close
 //     approximation of WebGL2's radial+top-lift effect.
-//   - Granules, decorations, nuclei, cartoon faces, target marker,
+//   - Granules, decorations, target marker,
 //     flash overlay, debug overlay.
 //   - Background extras (spots, vignette, agar rings, cybergrid,
 //     anatomy decor, RBC silhouettes).
 
 import {
-  S, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE, NUCLEUS_RATIO,
+  S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE, NUCLEUS_RATIO,
   cellColors, currentBackground, currentTheme, frac,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
@@ -62,6 +62,7 @@ export class PixiRenderer extends RendererBase {
     this.nucleiContainer = null;
     this.nucleiGfx = null;
     this.particlesGfx = null;
+    this.facesGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
 
@@ -121,11 +122,17 @@ export class PixiRenderer extends RendererBase {
     this.nucleiContainer.alpha = 0.78;
     this.nucleiContainer.filters = [new PIXI.BlurFilter({ strength: 2, quality: 3 })];
     this.particlesGfx = new PIXI.Graphics();
+    this.facesGfx = new PIXI.Graphics();
     this.selectionGfx = new PIXI.Graphics();
     this.debugGfx = new PIXI.Graphics();
+    // Z-order matches canvas2d's draw order: body+granules → nuclei →
+    // particles → faces → selection ring → debug overlay. Faces sit
+    // above the cell body but below selection so the highlight ring
+    // can overlay everything.
     this.worldLayer.addChild(this.cellsGfx);
     this.worldLayer.addChild(this.nucleiContainer);
     this.worldLayer.addChild(this.particlesGfx);
+    this.worldLayer.addChild(this.facesGfx);
     this.worldLayer.addChild(this.selectionGfx);
     this.worldLayer.addChild(this.debugGfx);
 
@@ -365,6 +372,10 @@ export class PixiRenderer extends RendererBase {
     // splitting partition above), since the splitting nucleus
     // animation is its own thing.
     this._drawNucleiPass(time);
+
+    // Cartoon-face overlay (eyes + mouth). Always clear so toggling
+    // S.cartoon off mid-run drops the faces immediately.
+    this._drawFacesPass(shapes, time);
   }
 
   // Per-kind nucleus rendering, ported from canvas2D's _drawNucleus.
@@ -457,6 +468,145 @@ export class PixiRenderer extends RendererBase {
       g.circle(x, y, r).fill({ color: nucColor }).stroke({ color: outlineColor, width: lw });
       g.circle(x - r * 0.35, y - r * 0.4, r * 0.24).fill({ color: nucHi });
     }
+  }
+
+  // Cartoon faces — eyes + mouth, gated by S.cartoon. Mirrors the
+  // canvas2d _drawCartoonFaces visual spec; layered above body / nuclei
+  // (in worldLayer order) so the eye whites read clean against the
+  // cytoplasm, but below the selection ring.
+  _drawFacesPass(shapes, t) {
+    const g = this.facesGfx;
+    g.clear();
+    if (!S.cartoon || !shapes || shapes.length === 0) return;
+    const theme = currentTheme();
+    const outline = (theme && theme.outline && theme.outline.color) || '#000000';
+    const cam = this.camera;
+    const lw = Math.max(1.5, (S.outlinePx || 5) * 0.6) / Math.max(0.0001, cam.scale);
+    const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+
+    for (const s of shapes) {
+      const c = s.cell;
+      const cfg = FACE[c.type] || FACE.default;
+      if (!cfg.eyes && cfg.mouth === 'none') continue;
+
+      // Blink: re-arm timer same as the canvas2d / webgl2 paths so the
+      // 120 ms squint fires every 3-6.5 s.
+      if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
+      const blinking = (c.nextBlink - now) < 120 && (c.nextBlink - now) > 0;
+
+      const cx = c.x, cy = c.y;
+      // Look direction: velocity-driven, falls back to alarm target.
+      let lookX = c.vx, lookY = c.vy;
+      if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
+        lookX = c.alarmTarget.x - cx;
+        lookY = c.alarmTarget.y - cy;
+      }
+      const lm = Math.hypot(lookX, lookY) || 1;
+
+      // ---- Eyes ----
+      if (cfg.eyes >= 1) {
+        const FACE_SCALE = 1.2;
+        const eyeR = c.r * cfg.eyeR * FACE_SCALE;
+        const eyeY = cy + c.r * cfg.eyeY;
+        const pupilR = c.r * cfg.pupilR * FACE_SCALE;
+        const pupilOff = eyeR * 0.45;
+        const pdx = (lookX / lm) * pupilOff;
+        const pdy = (lookY / lm) * pupilOff;
+        const eyeXs = cfg.eyes === 2
+          ? [cx - c.r * 0.22 * FACE_SCALE, cx + c.r * 0.22 * FACE_SCALE]
+          : [cx];
+        for (const ex of eyeXs) {
+          if (blinking) {
+            // Squint: a thin horizontal ellipse, body-radius-relative.
+            // Pixi v8 Graphics has no native ellipse(); approximate the
+            // squint with a low-aspect fill using the same ellipse path
+            // canvas2d uses. v8 exposes `ellipse(x, y, rx, ry)` directly.
+            g.ellipse(ex, eyeY, eyeR, eyeR * 0.12)
+              .fill('#ffffff')
+              .stroke({ color: outline, width: lw });
+          } else {
+            g.circle(ex, eyeY, eyeR)
+              .fill('#ffffff')
+              .stroke({ color: outline, width: lw });
+            g.circle(ex + pdx, eyeY + pdy, pupilR).fill('#101218');
+            // Pupil highlight (white glint, slightly inset toward
+            // the upper-left). Matches canvas2d's catchlight.
+            g.circle(
+              ex + pdx - pupilR * 0.35,
+              eyeY + pdy - pupilR * 0.35,
+              pupilR * 0.30,
+            ).fill({ color: '#ffffff', alpha: 0.85 });
+          }
+        }
+      }
+
+      // ---- Mouth ----
+      if (cfg.mouth && cfg.mouth !== 'none') {
+        const mY = cy + c.r * 0.18;
+        const mW = c.r * 0.34 * 1.2;
+        const cc = cellColors(c);
+        const mouthColor = cc.nucleus || '#1d1c5a';
+        const mlw = lw * 1.3;
+
+        if (cfg.mouth === 'smile') {
+          // Upper-arc smile spanning ~0.12π → 0.88π around (cx, mY-mW*0.3).
+          // Pixi's `arc(cx, cy, r, start, end)` matches canvas2d's signature.
+          this._strokeArc(g, cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI,
+            mouthColor, mlw);
+        } else if (cfg.mouth === 'frown') {
+          this._strokeArc(g, cx, mY + mW * 0.6, mW, 1.12 * Math.PI, 1.88 * Math.PI,
+            mouthColor, mlw);
+        } else if (cfg.mouth === 'snarl') {
+          // 5-segment zig-zag line; segments alternate y by mW*0.18.
+          const N = 5;
+          const pts = new Array((N + 1) * 2);
+          for (let i = 0; i <= N; i++) {
+            pts[i * 2] = cx - mW + (2 * mW) * (i / N);
+            pts[i * 2 + 1] = mY + (i % 2 === 0 ? 0 : mW * 0.18);
+          }
+          // poly() closes the path; for an open polyline we draw line
+          // segments individually via moveTo/lineTo.
+          g.moveTo(pts[0], pts[1]);
+          for (let i = 1; i <= N; i++) g.lineTo(pts[i * 2], pts[i * 2 + 1]);
+          g.stroke({ color: mouthColor, width: mlw });
+        } else if (cfg.mouth === 'fangs') {
+          // Maw: a horizontal ellipse filled with the mouth colour, plus
+          // two white triangle fangs hanging from the upper edge.
+          g.ellipse(cx, mY, mW, mW * 0.45).fill(mouthColor);
+          g.poly([
+            cx - mW * 0.55, mY - mW * 0.20,
+            cx - mW * 0.40, mY + mW * 0.45,
+            cx - mW * 0.25, mY - mW * 0.20,
+          ]).fill('#ffffff');
+          g.poly([
+            cx + mW * 0.25, mY - mW * 0.20,
+            cx + mW * 0.40, mY + mW * 0.45,
+            cx + mW * 0.55, mY - mW * 0.20,
+          ]).fill('#ffffff');
+        } else if (cfg.mouth === 'tongue') {
+          g.ellipse(cx, mY, mW, mW * 0.40).fill(mouthColor);
+          const wag = Math.sin(t * 5 + (c.phase || 0)) * mW * 0.18;
+          g.ellipse(cx + wag, mY + mW * 0.30, mW * 0.32, mW * 0.22)
+            .fill('#ff8aa0');
+        } else if (cfg.mouth === 'drool') {
+          // Same upper arc as smile, then an animated falling drip in
+          // a soft green that fades as it falls.
+          this._strokeArc(g, cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI,
+            mouthColor, mlw);
+          const dripPhase = ((t * 0.6 + (c.phase || 0)) % 1 + 1) % 1;
+          const dripY = mY + mW * 0.25 + dripPhase * mW * 0.8;
+          const dripA = 1 - dripPhase;
+          g.ellipse(cx + mW * 0.25, dripY, mW * 0.10, mW * 0.16)
+            .fill({ color: '#78dc82', alpha: dripA });
+        }
+      }
+    }
+  }
+
+  // Stroke a partial circle arc — Pixi v8 Graphics exposes this as
+  // `g.arc(x, y, r, startRad, endRad)` followed by stroke().
+  _strokeArc(g, x, y, r, startRad, endRad, color, width) {
+    g.arc(x, y, r, startRad, endRad).stroke({ color, width });
   }
 
   // metaSplit: render each splitting pair through the off-stage
@@ -577,6 +727,7 @@ export class PixiRenderer extends RendererBase {
     this.nucleiContainer = null;
     this.nucleiGfx = null;
     this.particlesGfx = null;
+    this.facesGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
     this.splittingLayer = null;
