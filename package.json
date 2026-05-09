@@ -5,6 +5,10 @@
   "scripts": {
     "test": "node --test",
     "serve": "python3 -m http.server 8000",
+    "build:docs": "npx --yes md2book build docs --out docs/_book",
     "vendor:pixi": "PIXI_VER=$(node -p \"require('fs').readFileSync('assets/vendor/pixi.min.mjs','utf8').match(/PixiJS - v([0-9.]+)/)[1]\") && echo \"refreshing pixi $PIXI_VER\" && cd /tmp && rm -rf pixi-vendor && mkdir pixi-vendor && cd pixi-vendor && npm pack pixi.js@$PIXI_VER >/dev/null && tar xzf pixi.js-$PIXI_VER.tgz package/dist/pixi.min.mjs && cp package/dist/pixi.min.mjs $OLDPWD/assets/vendor/pixi.min.mjs && cd $OLDPWD && rm -rf /tmp/pixi-vendor"
+  },
+  "devDependencies": {
+    "md2book": "*"
   }
 }

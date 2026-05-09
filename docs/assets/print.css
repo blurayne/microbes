@@ -1,0 +1,92 @@
+/* Print stylesheet for the Immune-System GDD book.
+ *
+ * Goals: black ink on white paper, no chrome, one chapter per page,
+ * no animations, external link URLs printed inline as footnotes.
+ *
+ * Loaded alongside style.css; @media print scopes everything so the
+ * on-screen design is untouched.
+ */
+
+@media print {
+  html, body {
+    background: #fff !important;
+    background-image: none !important;
+    color: #000 !important;
+  }
+
+  /* Top nav is screen-only chrome. */
+  nav.topnav,
+  .nav-links,
+  .nav-brand {
+    display: none !important;
+  }
+
+  /* Card / callout backgrounds → save ink, keep structure with a thin border. */
+  .cell-card,
+  .tier-group,
+  .tier-header,
+  .chapter-header,
+  .section-head,
+  .whats-new,
+  .title-block,
+  .frame,
+  .diagram-card,
+  .chapter-toc,
+  .chapter-toc-list {
+    background: #fff !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    border: 1px solid #888 !important;
+  }
+
+  /* One chapter per page; keep headings with their content. */
+  .chapter {
+    break-before: page;
+    page-break-before: always;
+  }
+  .chapter:first-of-type {
+    break-before: auto;
+    page-break-before: auto;
+  }
+  h1, h2, h3,
+  .chapter-header,
+  .section-head,
+  .tier-header {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  .cell-card,
+  .tier-group,
+  table,
+  .diagram-card,
+  .mermaid {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* Static visuals — no keyframe motion in print. */
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  /* Links: underline + spell out external URLs as footnotes so the
+   * book is useful as a printed artefact. */
+  a {
+    color: #000 !important;
+    text-decoration: underline;
+  }
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: #555;
+    word-break: break-all;
+  }
+
+  /* Mermaid diagrams: SVG renders fine; just make sure they don't get
+   * clipped by a ridiculous max-width. */
+  .mermaid svg {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+}

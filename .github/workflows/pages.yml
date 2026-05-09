@@ -33,6 +33,15 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Install npm deps
+        run: npm ci || npm install
+
+      - name: Build docs
+        # Renders the GDD markdown book in docs/ to docs/_book/.
+        # The output rides along in the upload-pages-artifact below
+        # since `path: .` ships the whole working tree.
+        run: npm run build:docs
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
