@@ -26,7 +26,13 @@ import {
 import { shapeVertex } from '../core/shape.js';
 import { RendererBase } from './renderer.js';
 
-const PIXI_URL = 'https://esm.sh/pixi.js@8.6.6';
+// Vendored Pixi v8.6.6 ESM bundle. Lives at assets/vendor/pixi.min.mjs
+// (~650 KB, MIT-licensed, copied verbatim from npm `pixi.js@8.6.6` →
+// `dist/pixi.min.mjs`). Vendoring removes the runtime dependency on a
+// CDN — the renderer works on `file://`, on offline pages, and on
+// deployments behind strict CSP. Refresh by re-extracting the
+// `pixi.min.mjs` from the same npm tarball.
+const PIXI_URL = new URL('../vendor/pixi.min.mjs', import.meta.url).href;
 
 let _pixiPromise = null;
 function loadPixi() {
