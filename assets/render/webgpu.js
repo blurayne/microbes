@@ -578,7 +578,7 @@ struct VsOut {
   @location(0) uv: vec2<f32>,        // -1..1 across the cell-radius quad
   @location(1) cfg0: vec4<f32>,      // (mouthKind, eyesCount, eyeR, eyeY)
   @location(2) cfg1: vec4<f32>,      // (pupilR, lookX, lookY, mouthW)
-  @location(3) cfg2: vec4<f32>,      // (blink, mouthY, phase, _)
+  @location(3) cfg2: vec4<f32>,      // (blink, mouthY, phase, blur)
   @location(4) mouthCol: vec3<f32>,
 };
 
@@ -587,7 +587,7 @@ struct VsOut {
   @location(1) inst: vec4<f32>,        // (worldX, worldY, r, mouthKind)
   @location(2) eyes: vec4<f32>,        // (eyesCount, eyeR, eyeY, pupilR)
   @location(3) look: vec4<f32>,        // (lookX, lookY, mouthW, blink)
-  @location(4) mouth: vec4<f32>,       // (mouthY, phase, _, _)
+  @location(4) mouth: vec4<f32>,       // (mouthY, phase, blur, _)
   @location(5) mouthCol: vec3<f32>,
 ) -> VsOut {
   let camScale = u.cam.x;
@@ -603,20 +603,28 @@ struct VsOut {
   out.uv = corner;
   out.cfg0 = vec4<f32>(inst.w, eyes.x, eyes.y, eyes.z);
   out.cfg1 = vec4<f32>(eyes.w, look.x, look.y, look.z);
-  out.cfg2 = vec4<f32>(look.w, mouth.x, mouth.y, 0.0);
+  out.cfg2 = vec4<f32>(look.w, mouth.x, mouth.y, mouth.z);
   out.mouthCol = mouthCol;
   return out;
 }
 
+// Edge-widening smoothstep — approximates Gaussian blur by extending the
+// AA band by 'blur' (in body-radius units). Used during SPLITTING to
+// soften the face without an offscreen pass. Cap blur <= 0.10 so eyes/
+// pupils don't dissolve.
+fn sstep(a: f32, b: f32, x: f32, blur: f32) -> f32 {
+  return smoothstep(a - blur, b + blur, x);
+}
+
 // Mirrors webgl2.js's arcA / discA helpers exactly so the visual is
 // 1:1 (mouth & eye geometry, sizes, smoothstep edges).
-fn discA(uv: vec2<f32>, c: vec2<f32>, r: f32) -> f32 {
-  return 1.0 - smoothstep(r * 0.92, r, length(uv - c));
+fn discA(uv: vec2<f32>, c: vec2<f32>, r: f32, blur: f32) -> f32 {
+  return 1.0 - sstep(r * 0.92, r, length(uv - c), blur);
 }
-fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32) -> f32 {
+fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f32) -> f32 {
   let d = uv - c;
   let dist = abs(length(d) - r);
-  let band = 1.0 - smoothstep(hw * 0.5, hw, dist);
+  let band = 1.0 - sstep(hw * 0.5, hw, dist, blur);
   let ang = atan2(d.y, d.x);
   let in_arc = step(a0, ang) * step(ang, a1);
   return band * in_arc;
@@ -636,6 +644,7 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32) -> f32 {
   let blink = in.cfg2.x;
   let mouthY = in.cfg2.y;
   let phase = in.cfg2.z;
+  let blur = in.cfg2.w;
 
   if (eyesCount == 0 && mouthKind == 0) { discard; }
 
@@ -657,23 +666,23 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32) -> f32 {
         let nx = d.x / max(eyeR, 0.001);
         let ny = d.y / max(eyeR * 0.12, 0.001);
         let ed = sqrt(nx * nx + ny * ny);
-        let wA = 1.0 - smoothstep(0.92, 1.0, ed);
+        let wA = 1.0 - sstep(0.92, 1.0, ed, blur);
         col = mix(col, vec3<f32>(1.0), wA);
         a = max(a, wA);
       } else {
         let ed = length(d) / max(eyeR, 0.001);
         if (ed < 1.05) {
-          let white = 1.0 - smoothstep(0.92, 1.0, ed);
+          let white = 1.0 - sstep(0.92, 1.0, ed, blur);
           col = mix(col, vec3<f32>(1.0), white);
           a = max(a, white);
           let pupilCentre = ec + look * (eyeR * 0.45);
           let pd = length(uv - pupilCentre) / max(pupilR, 0.001);
-          let pupilA = 1.0 - smoothstep(0.92, 1.05, pd);
+          let pupilA = 1.0 - sstep(0.92, 1.05, pd, blur);
           col = mix(col, vec3<f32>(0.06, 0.07, 0.09), pupilA);
           a = max(a, pupilA);
           let glintCentre = pupilCentre - vec2<f32>(pupilR * 0.35, pupilR * 0.35);
           let gd = length(uv - glintCentre) / max(pupilR * 0.30, 0.001);
-          let glintA = (1.0 - smoothstep(0.92, 1.05, gd)) * 0.85;
+          let glintA = (1.0 - sstep(0.92, 1.05, gd, blur)) * 0.85;
           col = mix(col, vec3<f32>(1.0), glintA);
         }
       }
@@ -687,21 +696,21 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32) -> f32 {
   if (mouthKind == 1 || mouthKind == 6) {
     // SMILE (or DROOL — base smile)
     let arc = arcA(uv, vec2<f32>(0.0, mouthY - mouthW * 0.3), mouthW, 0.04,
-      0.12 * PI, 0.88 * PI);
+      0.12 * PI, 0.88 * PI, blur);
     col = mix(col, in.mouthCol, arc);
     a = max(a, arc);
     if (mouthKind == 6) {
       let dripPhase = fract(time * 0.6 + phase);
       let dripC = vec2<f32>(mouthW * 0.25, mouthY + mouthW * 0.25 + dripPhase * mouthW * 0.8);
       let dr = (uv - dripC) / vec2<f32>(mouthW * 0.10, mouthW * 0.16);
-      let dripA = (1.0 - smoothstep(0.85, 1.0, length(dr))) * (1.0 - dripPhase);
+      let dripA = (1.0 - sstep(0.85, 1.0, length(dr), blur)) * (1.0 - dripPhase);
       col = mix(col, vec3<f32>(0.47, 0.86, 0.51), dripA);
       a = max(a, dripA);
     }
   } else if (mouthKind == 2) {
     // FROWN
     let arc = arcA(uv, vec2<f32>(0.0, mouthY + mouthW * 0.6), mouthW, 0.04,
-      1.12 * PI, 1.88 * PI);
+      1.12 * PI, 1.88 * PI, blur);
     col = mix(col, in.mouthCol, arc);
     a = max(a, arc);
   } else if (mouthKind == 3) {
@@ -712,35 +721,35 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32) -> f32 {
       let segMod = seg - 2.0 * floor(seg * 0.5);
       let yTarget = mouthY + select(0.0, mouthW * 0.18, segMod >= 0.5);
       let dy = abs(uv.y - yTarget);
-      let zigA = 1.0 - smoothstep(0.02, 0.04, dy);
+      let zigA = 1.0 - sstep(0.02, 0.04, dy, blur);
       col = mix(col, in.mouthCol, zigA);
       a = max(a, zigA);
     }
   } else if (mouthKind == 4) {
     // FANGS — open ellipse + two white wedges.
     let dn = d / vec2<f32>(mouthW, mouthW * 0.45);
-    let open = 1.0 - smoothstep(0.92, 1.0, length(dn));
+    let open = 1.0 - sstep(0.92, 1.0, length(dn), blur);
     col = mix(col, in.mouthCol, open);
     a = max(a, open);
     let fL = vec2<f32>(-mouthW * 0.40, mouthY + mouthW * 0.10);
     let fR = vec2<f32>( mouthW * 0.40, mouthY + mouthW * 0.10);
-    let fLA = 1.0 - smoothstep(0.85, 1.0,
-      length((uv - fL) / vec2<f32>(mouthW * 0.10, mouthW * 0.32)));
-    let fRA = 1.0 - smoothstep(0.85, 1.0,
-      length((uv - fR) / vec2<f32>(mouthW * 0.10, mouthW * 0.32)));
+    let fLA = 1.0 - sstep(0.85, 1.0,
+      length((uv - fL) / vec2<f32>(mouthW * 0.10, mouthW * 0.32)), blur);
+    let fRA = 1.0 - sstep(0.85, 1.0,
+      length((uv - fR) / vec2<f32>(mouthW * 0.10, mouthW * 0.32)), blur);
     let fA = max(fLA, fRA);
     col = mix(col, vec3<f32>(1.0), fA);
     a = max(a, fA);
   } else if (mouthKind == 5) {
     // TONGUE — open ellipse + pink wagging tongue below.
     let dn = d / vec2<f32>(mouthW, mouthW * 0.40);
-    let open = 1.0 - smoothstep(0.92, 1.0, length(dn));
+    let open = 1.0 - sstep(0.92, 1.0, length(dn), blur);
     col = mix(col, in.mouthCol, open);
     a = max(a, open);
     let wag = sin(time * 5.0 + phase) * mouthW * 0.18;
     let tc = vec2<f32>(wag, mouthY + mouthW * 0.30);
     let td = (uv - tc) / vec2<f32>(mouthW * 0.32, mouthW * 0.22);
-    let tA = 1.0 - smoothstep(0.85, 1.0, length(td));
+    let tA = 1.0 - sstep(0.85, 1.0, length(td), blur);
     col = mix(col, vec3<f32>(1.0, 0.54, 0.63), tA);
     a = max(a, tA);
   }
@@ -1992,7 +2001,12 @@ export class WebGPURenderer extends RendererBase {
       data[j + 11] = blink;
       data[j + 12] = 0.18;                // mouthY
       data[j + 13] = c.phase || 0;
-      data[j + 14] = 0;
+      // Blur during SPLITTING (sine envelope over splitProgress, peaks
+      // mid-split). Body-radius units; widens every smoothstep edge in
+      // the face shader. Cap below 0.10 so eyes/pupils don't dissolve.
+      data[j + 14] = (c.state === 'SPLITTING')
+        ? Math.sin(c.splitProgress * Math.PI) * 0.08
+        : 0;
       data[j + 15] = 0;
       data[j + 16] = mcRgb[0];
       data[j + 17] = mcRgb[1];

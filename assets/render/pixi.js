@@ -63,6 +63,7 @@ export class PixiRenderer extends RendererBase {
     this.nucleiGfx = null;
     this.particlesGfx = null;
     this.facesGfx = null;
+    this.facesBlurGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
 
@@ -151,6 +152,17 @@ export class PixiRenderer extends RendererBase {
     this.nucleiContainer.filters = [new PIXI.BlurFilter({ strength: 2, quality: 3 })];
     this.particlesGfx = new PIXI.Graphics();
     this.facesGfx = new PIXI.Graphics();
+    // Face blur buckets for SPLITTING cells. Each bucket has a static
+    // BlurFilter; per-cell blur strength is quantized to the nearest
+    // bucket. Sine envelope (sin(p·π) · maxBlur) over splitProgress.
+    // 4 buckets at 1.5/3.0/4.5/6.0 px = visually smooth with bounded
+    // filter cost.
+    this.faceBlurStrengths = [1.5, 3.0, 4.5, 6.0];
+    this.facesBlurGfx = this.faceBlurStrengths.map((strength) => {
+      const g = new PIXI.Graphics();
+      g.filters = [new PIXI.BlurFilter({ strength, quality: 3 })];
+      return g;
+    });
     this.selectionGfx = new PIXI.Graphics();
     this.debugGfx = new PIXI.Graphics();
     // Z-order matches canvas2d's draw order: body+granules → nuclei →
@@ -161,6 +173,7 @@ export class PixiRenderer extends RendererBase {
     this.worldLayer.addChild(this.nucleiContainer);
     this.worldLayer.addChild(this.particlesGfx);
     this.worldLayer.addChild(this.facesGfx);
+    for (const g of this.facesBlurGfx) this.worldLayer.addChild(g);
     this.worldLayer.addChild(this.selectionGfx);
     this.worldLayer.addChild(this.debugGfx);
 
@@ -553,19 +566,37 @@ export class PixiRenderer extends RendererBase {
   // (in worldLayer order) so the eye whites read clean against the
   // cytoplasm, but below the selection ring.
   _drawFacesPass(shapes, t) {
-    const g = this.facesGfx;
-    g.clear();
+    const gNorm = this.facesGfx;
+    gNorm.clear();
+    for (const bg of this.facesBlurGfx) bg.clear();
     if (!S.cartoon || !shapes || shapes.length === 0) return;
     const theme = currentTheme();
     const outline = (theme && theme.outline && theme.outline.color) || '#000000';
     const cam = this.camera;
     const lw = Math.max(1.5, (S.outlinePx || 5) * 0.6) / Math.max(0.0001, cam.scale);
     const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+    const blurStrengths = this.faceBlurStrengths;
+    const maxBlurPx = blurStrengths[blurStrengths.length - 1];
 
     for (const s of shapes) {
       const c = s.cell;
       const cfg = FACE[c.type] || FACE.default;
       if (!cfg.eyes && cfg.mouth === 'none') continue;
+      // Dispatch per-cell into the right blur bucket. Sine envelope
+      // over splitProgress; quantize to nearest available bucket so we
+      // don't allocate a Graphics per face.
+      let g = gNorm;
+      if (c.state === 'SPLITTING') {
+        const want = Math.sin(c.splitProgress * Math.PI) * maxBlurPx;
+        if (want > 0.5) {
+          let bestIdx = 0, bestErr = Infinity;
+          for (let i = 0; i < blurStrengths.length; i++) {
+            const err = Math.abs(blurStrengths[i] - want);
+            if (err < bestErr) { bestErr = err; bestIdx = i; }
+          }
+          g = this.facesBlurGfx[bestIdx];
+        }
+      }
 
       // Blink: re-arm timer same as the canvas2d / webgl2 paths so the
       // 120 ms squint fires every 3-6.5 s.
@@ -921,6 +952,7 @@ export class PixiRenderer extends RendererBase {
     this.nucleiGfx = null;
     this.particlesGfx = null;
     this.facesGfx = null;
+    this.facesBlurGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
     this.splittingLayer = null;

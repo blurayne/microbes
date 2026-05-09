@@ -955,6 +955,14 @@ export class Canvas2DRenderer extends RendererBase {
         const lm = Math.hypot(lookX, lookY) || 1;
 
         ctx.save();
+        // Face blur during SPLITTING: sine envelope, peaks mid-split,
+        // zero at endpoints. Width is in screen px (ctx.filter ignores
+        // canvas transform), scaled with cell radius and zoom so the
+        // effect reads consistently.
+        if (c.state === 'SPLITTING') {
+          const blurPx = Math.sin(c.splitProgress * Math.PI) * 0.06 * cr * cam.scale;
+          if (blurPx > 0.5) ctx.filter = `blur(${blurPx.toFixed(2)}px)`;
+        }
         ctx.lineWidth = lw;
         ctx.strokeStyle = theme.outline.color;
 
