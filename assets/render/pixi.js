@@ -1,39 +1,46 @@
 // Microbes — PixiJS renderer.
 //
-// Phase 1 of the Pixi migration. Implements the IRenderer interface
-// (renderer.js) using PixiJS v8. Pixi is loaded from an ESM CDN so the
-// project keeps its no-build-step deployment story.
+// Phase 2 of the Pixi migration: metaball mask + outline (8-direction
+// blits + glow-theme halo) + per-type tinted cytoplasm fill +
+// membrane stroke. Pixi v8 is loaded from an ESM CDN so the project
+// keeps its no-build-step deployment story.
 //
-// Scope right now:
-//   - init / resize / beginFrame / endFrame / destroy
-//   - drawBackground: gradient or flat base fill (theme-aware)
-//   - drawCells: each shape as a filled disc with the theme outline
-//   - drawSelection / drawDebug: minimal (selection ring; debug overlay)
+// Rendering pipeline per frame:
+//   1. drawBackground — gradient or flat base fill on `bgLayer`.
+//   2. Build `unionMaskRT` and `fillRT` per type group. White
+//      polygons in target-pixel space → BlurFilter + ColorMatrixFilter
+//      (alpha threshold) → scratchRT. Then composite scratchRT twice:
+//      once additively into `unionMaskRT` (white silhouette), once
+//      tinted with the type's `cytoBot` colour into `fillRT`.
+//   3. Outline = 8 offset Sprites of `unionMaskRT` tinted
+//      `theme.outline.color`. Glow themes prepend a blurred glow
+//      sprite tinted `theme.outline.glow`.
+//   4. Cytoplasm = Sprite of `fillRT` masked by a Sprite of
+//      `unionMaskRT` (alpha mask via `sprite.mask = maskSprite`).
+//   5. Membrane stroke — wobbly polygon outlines drawn directly into
+//      `worldLayer` (camera-transformed) by `Graphics.poly().stroke()`.
 //
-// Out of scope here (deferred to Phase 2 follow-up commit):
-//   - Metaball mask + 8-direction outline blit + per-cell cytoplasm
-//     gradient + inner highlight (canvas2d.js's drawMetaballMask /
-//     tintMask / drawMetaballToMain pipeline).
-//   - Membrane stroke, granules, decorations (spikes, tendrils,
-//     receptors, flagellum, drips, legs, fuzz), nuclei, cartoon
-//     faces, target marker, flash overlay, anatomy decor / spots /
-//     vignette / agar rings / cybergrid.
-//
-// Async note: Pixi v8's `Application.init()` is async, so this class
-// exposes `initAsync()` returning a Promise. `app.js` awaits it before
-// the first frame. The synchronous `init()` from RendererBase is kept
-// as a no-op so the IRenderer surface doesn't break for callers that
-// haven't been async-ified.
+// Out of scope here (next commits):
+//   - bodyHollow donut variant for RBCs.
+//   - Inner highlight (top-left soft glow). Per-cell radial cytoplasm
+//     gradient (currently uniform per type) — can be added later via
+//     pre-baked gradient textures or by switching `tint` to a
+//     per-cell value.
+//   - Granules, decorations (spikes / tendrils / Y-receptors /
+//     flagellum / drips / legs / fuzz), nuclei, cartoon faces, target
+//     marker, flash overlay.
+//   - Background extras: spots, vignette, agar rings, cybergrid,
+//     anatomy decor, RBC silhouettes.
 
 import {
-  S, CELL_TYPES, currentBackground, currentTheme, cellColors,
+  S, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE, DOWNSAMPLE,
+  cellColors, currentBackground, currentTheme,
 } from '../core/state.js';
+import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
 import { RendererBase } from './renderer.js';
 
-// Pixi v8 from the ESM CDN. Pin a version so the deployment is stable.
 const PIXI_URL = 'https://esm.sh/pixi.js@8.6.6';
 
-// Lazy-loaded Pixi module — only fetched if a PixiRenderer is constructed.
 let _pixiPromise = null;
 function loadPixi() {
   if (!_pixiPromise) {
@@ -53,20 +60,35 @@ export class PixiRenderer extends RendererBase {
     this.app = null;
     this.PIXI = null;
 
-    // Display layers — created in initAsync().
-    this.bgLayer = null;       // screen-space: background gradient/base
-    this.bgGfx = null;         // single Graphics for the background fill
-    this.worldLayer = null;    // world-space: cells, decorations, etc.
-    this.cellsGfx = null;      // single Graphics for the cell discs
+    // Display layers (added to app.stage in init).
+    this.bgLayer = null;
+    this.bgGfx = null;
+    this.outlineLayer = null;
+    this.outlineSprites = [];   // 8 sprites, tinted outline colour, at offsets
+    this.glowSprite = null;     // optional 9th sprite for glow themes
+    this.fillSprite = null;     // displays fillRT
+    this.fillMaskSprite = null; // unionMaskRT used as alpha mask for fillSprite
+    this.worldLayer = null;
+    this.membraneGfx = null;
+    this.selectionGfx = null;
+    this.debugGfx = null;
+
+    // Metaball machinery (created in init, RTs allocated in resize).
+    this.polyContainer = null;
+    this.polyGfx = null;
+    this.scratchSprite = null;
+    this.blurFilter = null;
+    this.thresholdFilter = null;
+    this.unionMaskRT = null;
+    this.scratchRT = null;
+    this.fillRT = null;
+
+    // Empty container used to clear an RT cheaply via `clear: true`.
+    this._empty = null;
 
     this._destroyed = false;
   }
 
-  /**
-   * Synchronous init is a no-op; the real work happens in initAsync().
-   * `app.js` awaits initAsync() before the first frame so the renderer
-   * is always ready by the time draw* runs.
-   */
   init() { /* see initAsync() */ }
 
   async initAsync() {
@@ -90,39 +112,116 @@ export class PixiRenderer extends RendererBase {
       app.destroy(true);
       return;
     }
-    // app.js drives the frame loop; Pixi's internal ticker would
-    // double-render every frame.
     app.ticker.stop();
     this.app = app;
 
+    // --- Display layers ---
     this.bgLayer = new PIXI.Container();
     this.bgGfx = new PIXI.Graphics();
     this.bgLayer.addChild(this.bgGfx);
 
+    this.outlineLayer = new PIXI.Container();
+    this.glowSprite = new PIXI.Sprite();
+    this.glowSprite.visible = false;
+    this.outlineLayer.addChild(this.glowSprite);
+    for (let i = 0; i < 8; i++) {
+      const s = new PIXI.Sprite();
+      this.outlineSprites.push(s);
+      this.outlineLayer.addChild(s);
+    }
+
+    this.fillSprite = new PIXI.Sprite();
+    this.fillMaskSprite = new PIXI.Sprite();
+    this.fillMaskSprite.renderable = false; // used only as alpha mask
+    this.fillSprite.addChild(this.fillMaskSprite);
+    this.fillSprite.mask = this.fillMaskSprite;
+
     this.worldLayer = new PIXI.Container();
-    this.cellsGfx = new PIXI.Graphics();
-    this.worldLayer.addChild(this.cellsGfx);
+    this.membraneGfx = new PIXI.Graphics();
+    this.selectionGfx = new PIXI.Graphics();
+    this.debugGfx = new PIXI.Graphics();
+    this.worldLayer.addChild(this.membraneGfx);
+    this.worldLayer.addChild(this.selectionGfx);
+    this.worldLayer.addChild(this.debugGfx);
 
     app.stage.addChild(this.bgLayer);
+    app.stage.addChild(this.outlineLayer);
+    app.stage.addChild(this.fillSprite);
     app.stage.addChild(this.worldLayer);
+
+    // --- Metaball offscreen machinery ---
+    this.polyContainer = new PIXI.Container();
+    this.polyGfx = new PIXI.Graphics();
+    this.polyContainer.addChild(this.polyGfx);
+
+    this.blurFilter = new PIXI.BlurFilter({ strength: 6, quality: 4 });
+    this.thresholdFilter = new PIXI.ColorMatrixFilter();
+    this._setThresholdContrast(this.thresholdFilter, 22);
+    this.polyContainer.filters = [this.blurFilter, this.thresholdFilter];
+
+    this.scratchSprite = new PIXI.Sprite();
+
+    this._empty = new PIXI.Container();
+  }
+
+  // Map alpha through `K*a - K/2` to threshold near 0.5 with sharpness K.
+  // RGB channels pass through untouched. The framebuffer clamps the
+  // output to [0,1] per-channel after the matrix multiply, which is
+  // exactly the threshold behaviour we want.
+  _setThresholdContrast(filter, K) {
+    filter.matrix = [
+      1, 0, 0, 0, 0,
+      0, 1, 0, 0, 0,
+      0, 0, 1, 0, 0,
+      0, 0, 0, K, -K * 0.5,
+    ];
   }
 
   resize(W, H, dpr, renderScale) {
     this.W = W; this.H = H;
     this.dpr = dpr; this.renderScale = renderScale;
     if (!this.app) return;
-    // Pixi owns the canvas backing-store via autoDensity + resolution.
-    // We pass the *logical* size; resolution stays at min(dpr, 2). The
-    // renderScale slider is honoured by mutating the renderer's
-    // resolution so the GPU paints fewer texels.
+    const PIXI = this.PIXI;
     const rs = Math.max(0.125, Math.min(1, renderScale || 1));
     this.app.renderer.resolution = Math.min(dpr || 1, 2) * rs;
     this.canvas.style.width = W + 'px';
     this.canvas.style.height = H + 'px';
     this.app.renderer.resize(W, H);
+
+    // Recreate render textures sized to canvas × DOWNSAMPLE so the
+    // metaball blur has the same perceived strength as canvas2D.
+    const ow = Math.max(2, Math.floor(W * DOWNSAMPLE * rs));
+    const oh = Math.max(2, Math.floor(H * DOWNSAMPLE * rs));
+    if (this.unionMaskRT) this.unionMaskRT.destroy(true);
+    if (this.scratchRT) this.scratchRT.destroy(true);
+    if (this.fillRT) this.fillRT.destroy(true);
+    this.unionMaskRT = PIXI.RenderTexture.create({ width: ow, height: oh, resolution: 1 });
+    this.scratchRT = PIXI.RenderTexture.create({ width: ow, height: oh, resolution: 1 });
+    this.fillRT = PIXI.RenderTexture.create({ width: ow, height: oh, resolution: 1 });
+
+    // Repoint sprites at the freshly-created textures.
+    this.scratchSprite.texture = this.scratchRT;
+    this.fillSprite.texture = this.fillRT;
+    this.fillMaskSprite.texture = this.unionMaskRT;
+    this.glowSprite.texture = this.unionMaskRT;
+    for (const s of this.outlineSprites) s.texture = this.unionMaskRT;
+
+    // Display sprites span the full canvas; sprite.width/height
+    // multiplies scale by (target / texture). RT is at half-res so
+    // scale ends up at (1/DOWNSAMPLE).
+    this.fillSprite.width = W;
+    this.fillSprite.height = H;
+    this.fillMaskSprite.width = W;
+    this.fillMaskSprite.height = H;
+    this.glowSprite.width = W;
+    this.glowSprite.height = H;
+    for (const s of this.outlineSprites) {
+      s.width = W;
+      s.height = H;
+    }
   }
 
-  beginFrame(/* timeMs, dt */) { /* no-op; render happens in endFrame */ }
+  beginFrame(/* timeMs, dt */) { /* render happens in endFrame */ }
 
   drawBackground(/* timeMs */) {
     if (!this.app || !this.bgGfx) return;
@@ -142,56 +241,147 @@ export class PixiRenderer extends RendererBase {
     }
   }
 
-  drawCells(shapes /* , time, timeMs */) {
-    if (!this.app || !this.cellsGfx) return;
+  drawCells(shapes, time /* , timeMs */) {
+    if (!this.app || !this.unionMaskRT) return;
+    const PIXI = this.PIXI;
     const cam = this.camera;
-    // Camera transform on the world layer.
+    const renderer = this.app.renderer;
+    const W = this.W;
+    const ow = this.unionMaskRT.width;
+    const sx = ow / W;
+    const cs = cam.scale, cTx = cam.tx, cTy = cam.ty;
+
+    // World-layer transform (membrane / selection / debug live here).
     this.worldLayer.position.set(cam.tx, cam.ty);
     this.worldLayer.scale.set(cam.scale);
 
+    // Always clear the RTs first — covers the empty-screen case where
+    // no shapes are visible (otherwise stale content would persist).
+    renderer.render({ container: this._empty, target: this.unionMaskRT, clear: true });
+    renderer.render({ container: this._empty, target: this.fillRT, clear: true });
+
+    // ---- Outline tints ----
     const theme = currentTheme();
     const outlineColor = (theme && theme.outline && theme.outline.color) || '#000000';
-    const outlineWidth = Math.max(1, S.outlinePx || 5) / Math.max(0.0001, cam.scale);
+    const px = Math.max(1, S.outlinePx || 5);
+    const offsets = [
+      [-px, 0], [px, 0], [0, -px], [0, px],
+      [-px, -px], [px, px], [-px, px], [px, -px],
+    ];
+    for (let i = 0; i < this.outlineSprites.length; i++) {
+      const s = this.outlineSprites[i];
+      const [dx, dy] = offsets[i];
+      s.tint = outlineColor;
+      s.x = dx; s.y = dy;
+      s.alpha = 1;
+      s.visible = shapes.length > 0;
+    }
+    // Glow halo for themes that want one.
+    if (theme && theme.outline && theme.outline.glow && shapes.length > 0) {
+      this.glowSprite.tint = theme.outline.glow;
+      this.glowSprite.x = 0; this.glowSprite.y = 0;
+      this.glowSprite.alpha = 0.85;
+      this.glowSprite.visible = true;
+      const glowBlur = (theme.outline.glowBlur || 14);
+      this.glowSprite.filters = this.glowSprite.filters && this.glowSprite.filters.length
+        ? this.glowSprite.filters
+        : [new PIXI.BlurFilter({ strength: glowBlur, quality: 3 })];
+      // Update strength on the existing filter if it's already there.
+      const f = this.glowSprite.filters[0];
+      if (f && 'strength' in f) f.strength = glowBlur;
+    } else {
+      this.glowSprite.visible = false;
+    }
 
-    const g = this.cellsGfx;
-    g.clear();
-    for (const s of shapes) {
-      const cc = cellColors(s.cell);
-      const fill = (cc && cc.cytoBot) || '#d36699';
-      g.circle(s.x, s.y, s.r)
-        .fill(fill)
-        .stroke({ color: outlineColor, width: outlineWidth, alignment: 0.5 });
+    // Membrane / selection / debug all redraw fresh each frame.
+    this.membraneGfx.clear();
+    this.selectionGfx.clear();
+    this.debugGfx.clear();
+    this.fillSprite.visible = shapes.length > 0;
+
+    if (shapes.length === 0) return;
+
+    // ---- Per-type pass: white polys → blur+threshold → scratchRT,
+    //      then composite into unionMaskRT (white) and fillRT (tinted).
+    const groups = {};
+    for (const s of shapes) (groups[s.cell.type] ||= []).push(s);
+
+    for (const [typeKey, group] of Object.entries(groups)) {
+      const type = CELL_TYPES[typeKey] || CELL_TYPES.neutrophil;
+      const field = type.field || { blur: 6, contrast: 20 };
+
+      // Build all of this type's polygons in target-pixel space.
+      this.polyGfx.clear();
+      for (const s of group) {
+        const pts = new Array(WOBBLE_VERTS * 2);
+        for (let i = 0; i < WOBBLE_VERTS; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], time);
+          pts[i * 2] = (v.x * cs + cTx) * sx;
+          pts[i * 2 + 1] = (v.y * cs + cTy) * sx;
+        }
+        this.polyGfx.poly(pts).fill(0xffffff);
+      }
+
+      // Configure the per-type filter chain.
+      this.blurFilter.strength = field.blur;
+      this._setThresholdContrast(this.thresholdFilter, field.contrast);
+
+      // Render filtered polys to scratchRT.
+      renderer.render({ container: this.polyContainer, target: this.scratchRT, clear: true });
+
+      // Composite scratchRT → unionMaskRT (white silhouette, additive).
+      this.scratchSprite.tint = 0xffffff;
+      this.scratchSprite.alpha = 1;
+      this.scratchSprite.blendMode = 'add';
+      renderer.render({ container: this.scratchSprite, target: this.unionMaskRT, clear: false });
+
+      // Composite scratchRT → fillRT (tinted with cytoBot).
+      const cc = (type.colors) || { cytoBot: '#d36699' };
+      this.scratchSprite.tint = cc.cytoBot || '#d36699';
+      this.scratchSprite.blendMode = 'normal';
+      renderer.render({ container: this.scratchSprite, target: this.fillRT, clear: false });
+    }
+
+    // ---- Membrane stroke (world-space polygon trace) ----
+    const membraneAlpha = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
+    if (membraneAlpha > 0) {
+      const lw = Math.max(1.5, (S.outlinePx || 5) * 0.55) / Math.max(0.0001, cam.scale);
+      const stroke = { color: outlineColor, width: lw, alpha: membraneAlpha, alignment: 0.5 };
+      for (const s of shapes) {
+        const pts = new Array(WOBBLE_VERTS * 2);
+        for (let i = 0; i < WOBBLE_VERTS; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], time);
+          pts[i * 2] = v.x;
+          pts[i * 2 + 1] = v.y;
+        }
+        this.membraneGfx.poly(pts).stroke(stroke);
+      }
     }
   }
 
   drawSelection(shapes /* , time */) {
-    if (!this.app || !this.cellsGfx) return;
-    // Phase 1: minimal selection ring drawn into the same world layer
-    // as the cells. The full target-marker + flash + brighten wash
-    // lands with the metaball pipeline in Phase 2.
+    if (!this.app || !this.selectionGfx) return;
     const sim = this.sim;
     if (!sim || !sim.selectedCells || sim.selectedCells.size === 0) return;
     const cam = this.camera;
     const theme = currentTheme();
     const ringColor = (theme && theme.outline && theme.outline.color) || '#ffffff';
     const w = Math.max(1.5, (S.outlinePx || 5) * 0.7) / Math.max(0.0001, cam.scale);
-    // Draw selection rings on top of cells using the same Graphics
-    // (called after drawCells inside the same frame).
-    const g = this.cellsGfx;
     for (const s of shapes) {
       if (!sim.selectedCells.has(s.cell)) continue;
-      g.circle(s.x, s.y, s.r * 1.30)
+      this.selectionGfx
+        .circle(s.x, s.y, s.r * 1.30)
         .stroke({ color: ringColor, width: w, alpha: 0.85, alignment: 0.5 });
     }
   }
 
   drawDebug(shapes) {
-    if (!this.app || !this.cellsGfx) return;
+    if (!this.app || !this.debugGfx) return;
     const cam = this.camera;
     const w = 1 / Math.max(0.0001, cam.scale);
-    const g = this.cellsGfx;
     for (const s of shapes) {
-      g.circle(s.x, s.y, s.r)
+      this.debugGfx
+        .circle(s.x, s.y, s.r)
         .stroke({ color: '#00ff66', width: w, alpha: 0.6, alignment: 0.5 });
     }
   }
@@ -203,17 +393,30 @@ export class PixiRenderer extends RendererBase {
 
   destroy() {
     this._destroyed = true;
+    if (this.unionMaskRT) { try { this.unionMaskRT.destroy(true); } catch {} this.unionMaskRT = null; }
+    if (this.scratchRT)   { try { this.scratchRT.destroy(true); } catch {} this.scratchRT = null; }
+    if (this.fillRT)      { try { this.fillRT.destroy(true); } catch {} this.fillRT = null; }
     if (this.app) {
-      // `removeView: false` keeps the <canvas> DOM node so a hot-swap
-      // back to canvas2d would still find #stage. We don't actually
-      // hot-swap today (renderer changes reload), so this is defensive.
       try { this.app.destroy({ removeView: false }, { children: true, texture: true }); }
       catch (e) { console.warn('[microbes] PixiRenderer destroy:', e && e.message); }
       this.app = null;
     }
     this.bgLayer = null;
     this.bgGfx = null;
+    this.outlineLayer = null;
+    this.outlineSprites = [];
+    this.glowSprite = null;
+    this.fillSprite = null;
+    this.fillMaskSprite = null;
     this.worldLayer = null;
-    this.cellsGfx = null;
+    this.membraneGfx = null;
+    this.selectionGfx = null;
+    this.debugGfx = null;
+    this.polyContainer = null;
+    this.polyGfx = null;
+    this.scratchSprite = null;
+    this.blurFilter = null;
+    this.thresholdFilter = null;
+    this._empty = null;
   }
 }
