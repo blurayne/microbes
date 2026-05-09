@@ -416,7 +416,16 @@ function setSplitOnTap(on) {
   const cb = document.getElementById('splitOnTap');
   if (cb) cb.checked = S.splitOnTap;
 }
-if (modeTargetBtn) modeTargetBtn.addEventListener('click', () => setSplitOnTap(false));
+if (modeTargetBtn) modeTargetBtn.addEventListener('click', () => {
+  // Pressing target while already in target mode is a "clear selection"
+  // gesture: drops any selected cells and the active target marker.
+  if (!S.splitOnTap) {
+    sim.selectedCells.clear();
+    sim.targetMarker = null;
+    return;
+  }
+  setSplitOnTap(false);
+});
 if (modeSplitBtn)  modeSplitBtn.addEventListener('click',  () => setSplitOnTap(true));
 bindCheckbox('splitOnTap', 'splitOnTap', applyModeUi);
 applyModeUi();
