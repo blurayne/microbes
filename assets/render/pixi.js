@@ -82,6 +82,14 @@ export class PixiRenderer extends RendererBase {
     this._singletonPtsPool = [];
     this._pairHalfPtsPool = [];
 
+    // Filter-state cache for _renderSplittingPairs: skip the
+    // BlurFilter.strength assignment + ColorMatrixFilter.matrix
+    // rebuild when consecutive pairs share the same `field` params
+    // (typical when several cells of the same type split at once).
+    // Persists across frames — the filter instances are owned here
+    // and only mutated through this code path.
+    this._lastPairFieldKey = null;
+
     this._destroyed = false;
   }
 
@@ -670,8 +678,14 @@ export class PixiRenderer extends RendererBase {
       }
 
       // Configure per-type field params on the shared filter chain.
-      this.pairBlur.strength = fld.blur;
-      this._setPairThreshold(fld.contrast);
+      // Cached so consecutive pairs of the same cell type don't
+      // re-upload identical uniforms / rebuild the threshold matrix.
+      const fieldKey = c.type + '|' + fld.blur + '|' + fld.contrast;
+      if (fieldKey !== this._lastPairFieldKey) {
+        this.pairBlur.strength = fld.blur;
+        this._setPairThreshold(fld.contrast);
+        this._lastPairFieldKey = fieldKey;
+      }
 
       const entry = this._getOrCreatePairEntry(idx++);
       renderer.render({ container: this.pairContainer, target: entry.rt, clear: true });
