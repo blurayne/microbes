@@ -41,7 +41,7 @@ export const DEFAULTS = {
   upscaleMode: 'blur',
   scanlines: false,
   useHighlight: true,                       // selection ring uses theme accent when on
-  renderer: 'canvas2d',     // 'canvas2d' | 'webgl2' | 'pixi'
+  renderer: 'pixi',         // 'canvas2d' | 'pixi' | 'pixi-webgpu' | 'pixi-webgl2'
 };
 
 const KNOWN_THEME_KEYS = [
@@ -76,7 +76,12 @@ export function loadSettings() {
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
     if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
-    if (parsed.renderer !== 'canvas2d' && parsed.renderer !== 'webgl2' && parsed.renderer !== 'pixi') parsed.renderer = DEFAULTS.renderer;
+    // Migrate legacy 'webgl2' saved value to 'pixi-webgl2' so users who
+    // previously chose the hand-rolled WebGL2 renderer (now retired)
+    // land on Pixi forced to WebGL2 instead.
+    if (parsed.renderer === 'webgl2') parsed.renderer = 'pixi-webgl2';
+    const validRenderers = ['canvas2d', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Migrate legacy `highlightColor` field to the new `useHighlight` toggle.
@@ -128,9 +133,10 @@ export const LOCALES = {
     show_field: 'Show metaball field', render_scale: 'Render scale',
     upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
-    renderer_canvas: 'Canvas2D (compatible)',
-    renderer_webgl: 'WebGL2 (fast)',
-    renderer_pixi: 'PixiJS (WebGL/WebGPU)',
+    renderer_canvas: 'Canvas2D',
+    renderer_pixi_auto: 'Pixi (auto)',
+    renderer_pixi_webgpu: 'Pixi (WebGPU)',
+    renderer_pixi_webgl: 'Pixi (WebGL2)',
     reset_sim: 'Reset simulation',
     help_title: 'Cells of the immune system',
     add_cell: 'Add a cell', add_pathogen: 'Add a pathogen',
@@ -208,9 +214,10 @@ export const LOCALES = {
     show_field: 'Metaball-Feld zeigen', render_scale: 'Renderskala',
     upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
-    renderer_canvas: 'Canvas2D (kompatibel)',
-    renderer_webgl: 'WebGL2 (schnell)',
-    renderer_pixi: 'PixiJS (WebGL/WebGPU)',
+    renderer_canvas: 'Canvas2D',
+    renderer_pixi_auto: 'Pixi (auto)',
+    renderer_pixi_webgpu: 'Pixi (WebGPU)',
+    renderer_pixi_webgl: 'Pixi (WebGL2)',
     reset_sim: 'Simulation zurücksetzen',
     help_title: 'Zellen des Immunsystems',
     add_cell: 'Zelle hinzufügen', add_pathogen: 'Erreger hinzufügen',
@@ -288,9 +295,10 @@ export const LOCALES = {
     show_field: 'Mostrar campo metaball', render_scale: 'Escala de render',
     upscale: 'Reescalar', scanlines: 'Líneas de barrido (CRT)',
     renderer_engine: 'Motor de render',
-    renderer_canvas: 'Canvas2D (compatible)',
-    renderer_webgl: 'WebGL2 (rápido)',
-    renderer_pixi: 'PixiJS (WebGL/WebGPU)',
+    renderer_canvas: 'Canvas2D',
+    renderer_pixi_auto: 'Pixi (auto)',
+    renderer_pixi_webgpu: 'Pixi (WebGPU)',
+    renderer_pixi_webgl: 'Pixi (WebGL2)',
     reset_sim: 'Reiniciar simulación',
     help_title: 'Células del sistema inmunitario',
     add_cell: 'Añadir célula', add_pathogen: 'Añadir patógeno',
@@ -369,9 +377,10 @@ export const LOCALES = {
     show_field: 'Metaball-Föd zoang', render_scale: 'Renderskala',
     upscale: 'Aufskaliern', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Render',
-    renderer_canvas: 'Canvas2D (kompatibel)',
-    renderer_webgl: 'WebGL2 (schnoi)',
-    renderer_pixi: 'PixiJS (WebGL/WebGPU)',
+    renderer_canvas: 'Canvas2D',
+    renderer_pixi_auto: 'Pixi (automatisch)',
+    renderer_pixi_webgpu: 'Pixi (WebGPU)',
+    renderer_pixi_webgl: 'Pixi (WebGL2)',
     reset_sim: 'Simulation z\'rucksetzn',
     help_title: 'Zoin vom Immunsystem',
     add_cell: 'Zoin dazua', add_pathogen: 'Bazi dazua',
@@ -450,9 +459,10 @@ export const LOCALES = {
     show_field: 'Monstra campum metaball', render_scale: 'Scala depingendi',
     upscale: 'Augmentum', scanlines: 'Lineae televisorii',
     renderer_engine: 'Machina depingendi',
-    renderer_canvas: 'Canvas2D (compatibilis)',
-    renderer_webgl: 'WebGL2 (rapidus)',
-    renderer_pixi: 'Pixius (WebGL/WebGPU)',
+    renderer_canvas: 'Canvas2D',
+    renderer_pixi_auto: 'Pixius (automatice)',
+    renderer_pixi_webgpu: 'Pixius (WebGPU)',
+    renderer_pixi_webgl: 'Pixius (WebGL2)',
     reset_sim: 'Restituere simulationem',
     help_title: 'Cellulae systematis immunitarii',
     add_cell: 'Adde cellulam', add_pathogen: 'Adde pathogenem',

@@ -55,10 +55,12 @@ function loadPixi() {
  * @implements {import('./renderer.js').IRenderer}
  */
 export class PixiRenderer extends RendererBase {
-  constructor(canvas, sim) {
+  constructor(canvas, sim, opts = {}) {
     super(canvas, sim);
     this.app = null;
     this.PIXI = null;
+    // 'webgl' | 'webgpu' | undefined (Pixi's default = 'webgl').
+    this.preference = opts.preference || undefined;
 
     // Display layers (added to app.stage in init).
     this.bgLayer = null;
@@ -97,17 +99,21 @@ export class PixiRenderer extends RendererBase {
     this.PIXI = PIXI;
 
     const app = new PIXI.Application();
-    await app.init({
+    const initOpts = {
       canvas: this.canvas,
       resolution: Math.min(window.devicePixelRatio || 1, 2),
       autoDensity: true,
       width: window.innerWidth,
       height: window.innerHeight,
       antialias: true,
-      preference: 'webgl',
       backgroundAlpha: 1,
       background: 0x000000,
-    });
+    };
+    // Caller controls the backend choice; Pixi defaults to 'webgl' if
+    // preference is omitted, and falls through to WebGL2 if WebGPU
+    // isn't available when 'webgpu' is requested.
+    if (this.preference) initOpts.preference = this.preference;
+    await app.init(initOpts);
     if (this._destroyed) {
       app.destroy(true);
       return;
