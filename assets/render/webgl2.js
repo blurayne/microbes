@@ -31,6 +31,7 @@ layout(location=3) in vec3 a_cytoTop;
 layout(location=4) in vec3 a_cytoBot;
 layout(location=5) in vec3 a_nucleus;
 layout(location=6) in vec4 a_outline;        // .a = c.flash (0..1)
+layout(location=7) in float a_diskAlpha;     // per-instance fade-in (split-end)
 
 uniform vec3 u_camera;
 uniform vec2 u_viewport;
@@ -42,6 +43,7 @@ out vec3 v_cytoTop;
 out vec3 v_cytoBot;
 out vec3 v_nucleus;
 out vec4 v_outline;
+out float v_diskAlpha;
 
 void main() {
   // 1.70× r — covers wobbly body extents (up to ~1.30) plus the
@@ -59,6 +61,7 @@ void main() {
   v_cytoBot = a_cytoBot;
   v_nucleus = a_nucleus;
   v_outline = a_outline;
+  v_diskAlpha = a_diskAlpha;
 }`;
 
 // Body-kind constants (must match TS-side encoding in drawCells).
@@ -72,6 +75,7 @@ in vec3 v_cytoTop;
 in vec3 v_cytoBot;
 in vec3 v_nucleus;
 in vec4 v_outline;
+in float v_diskAlpha;       // SPLITTING crossfade: 0..1 over p ∈ [0.5, 1.0]
 uniform float u_time;       // seconds
 uniform float u_wobbleAmp;  // S.wobbleAmp
 uniform vec3 u_highlight;   // S.highlightColor as rgb
@@ -138,7 +142,7 @@ void main() {
     if (ringT >= 1.0) discard;
     // Peak around ringT=0.5; smooth fade at both ends.
     float ringA = smoothstep(0.0, 0.20, ringT) * (1.0 - smoothstep(0.65, 1.0, ringT));
-    outColor = vec4(u_highlight, ringA);
+    outColor = vec4(u_highlight, ringA * v_diskAlpha);
     return;
   }
 
@@ -222,7 +226,7 @@ void main() {
     // parity ignores the brief 200ms tap flash for the WebGL backend.
   }
 
-  outColor = vec4(col, bodyA);
+  outColor = vec4(col, bodyA * v_diskAlpha);
 }`;
 
 // Full-screen quad: uses gl_VertexID to fabricate the four corners.
@@ -457,7 +461,7 @@ void main() {
   outColor = vec4(finalRGB, finalA);
 }`;
 
-const INSTANCE_FLOATS = 21; // see _diskVao layout in init()
+const INSTANCE_FLOATS = 22; // see _diskVao layout in init()
 
 // Body and nucleus kinds packed into a single float per instance:
 //   packedKind = bodyKind + nucKind * 16
@@ -1009,6 +1013,7 @@ export class WebGL2Renderer extends RendererBase {
     attr(4, 3); // a_cytoBot
     attr(5, 3); // a_nucleus
     attr(6, 4); // a_outline (rgba; .a = c.flash)
+    attr(7, 1); // a_diskAlpha (SPLITTING crossfade)
     gl.bindVertexArray(null);
 
     // ---- background program ----
@@ -1409,6 +1414,14 @@ export class WebGL2Renderer extends RendererBase {
           let arr = splittingByCellId.get(s.cell.id);
           if (!arr) { arr = []; splittingByCellId.set(s.cell.id, arr); }
           arr.push(s);
+          // Disk-pass crossfade: re-include the half in the disk pass
+          // over p ∈ [0.5, 1.0] with alpha ramping 0 → 1, so by the time
+          // finishSplit fires the disk content is already at full
+          // opacity and there's no pop when the metaball pass stops.
+          if (s.cell.splitProgress > 0.5) {
+            s.diskAlpha = (s.cell.splitProgress - 0.5) * 2;
+            singletons.push(s);
+          }
         } else {
           singletons.push(s);
         }
@@ -1454,6 +1467,7 @@ export class WebGL2Renderer extends RendererBase {
         data[j + 14] = nuc[0]; data[j + 15] = nuc[1]; data[j + 16] = nuc[2];
         data[j + 17] = outlineRgb[0]; data[j + 18] = outlineRgb[1]; data[j + 19] = outlineRgb[2];
         data[j + 20] = c.flash || 0;
+        data[j + 21] = (s.diskAlpha !== undefined) ? s.diskAlpha : 1;
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceVbo);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, singletons.length * INSTANCE_FLOATS);

@@ -75,6 +75,7 @@ export class PixiRenderer extends RendererBase {
     this.bgGfx = null;
     this.worldLayer = null;
     this.cellsGfx = null;       // polygon fill + membrane stroke + donut + highlight + granules
+    this._fadeGraphicsPool = []; // per-cell Graphics pool for SPLITTING-end disk-pass crossfade
     this.nucleiContainer = null;
     this.nucleiGfx = null;
     this.particlesGfx = null;
@@ -327,6 +328,15 @@ export class PixiRenderer extends RendererBase {
     const g = this.cellsGfx;
     g.clear();
 
+    // Disk-pass crossfade pool (SPLITTING halves with p > 0.5 each get
+    // their own Graphics so we can set per-cell .alpha cleanly without
+    // threading alpha through every fill/stroke call). Reset state;
+    // the loop below un-hides the entries it actually uses.
+    for (const fg of this._fadeGraphicsPool) {
+      fg.clear();
+      fg.visible = false;
+    }
+
     // Hide all pool sprites first; we'll un-hide and re-render the
     // ones we use below.
     for (const entry of this._pairPool) entry.sprite.visible = false;
@@ -348,6 +358,14 @@ export class PixiRenderer extends RendererBase {
           let arr = splittingByCellId.get(s.cell.id);
           if (!arr) { arr = []; splittingByCellId.set(s.cell.id, arr); }
           arr.push(s);
+          // Disk-pass crossfade: re-include the half in the singleton
+          // loop over p ∈ [0.5, 1.0], with a per-shape alpha multiplier
+          // (s.diskAlpha) that's threaded into each fill/stroke call so
+          // the disk content reaches full opacity by finishSplit.
+          if (s.cell.splitProgress > 0.5) {
+            s.diskAlpha = (s.cell.splitProgress - 0.5) * 2;
+            singletons.push(s);
+          }
         } else {
           singletons.push(s);
         }
@@ -372,6 +390,7 @@ export class PixiRenderer extends RendererBase {
     const strokeWidth = Math.max(1.5, (S.outlinePx || 5) * 0.55) / Math.max(0.0001, cam.scale);
 
     let singletonIdx = 0;
+    let fadeIdx = 0;
     for (const s of singletons) {
       const cc = cellColors(s.cell);
       const cytoTop = cc.cytoTop || '#ffffff';
@@ -379,6 +398,23 @@ export class PixiRenderer extends RendererBase {
       const nucleusHi = cc.nucleusHi || '#ffffff';
       const cType = CELL_TYPES[s.cell.type] || CELL_TYPES.neutrophil;
       const hollow = !!cType.bodyHollow;
+      // SPLITTING halves with p > 0.5 ride this loop with a fade-in
+      // alpha. Route them to a per-cell Graphics from the pool so we
+      // can set .alpha = s.diskAlpha at the Graphics level — cleaner
+      // than threading an alpha multiplier through every fill/stroke.
+      let target = g;
+      if (s.diskAlpha !== undefined && s.diskAlpha < 1) {
+        let fg = this._fadeGraphicsPool[fadeIdx];
+        if (!fg) {
+          fg = new PIXI.Graphics();
+          this._fadeGraphicsPool.push(fg);
+          this.worldLayer.addChild(fg);
+        }
+        fg.alpha = s.diskAlpha;
+        fg.visible = true;
+        fadeIdx++;
+        target = fg;
+      }
 
       // Build wobble polygon vertices in world space. The buffer is
       // owned by _singletonPtsPool[singletonIdx]; Pixi retains a
@@ -403,9 +439,9 @@ export class PixiRenderer extends RendererBase {
       grad.addColorStop(0, cytoTop);
       grad.addColorStop(1, cytoBot);
 
-      g.poly(pts).fill(grad);
+      target.poly(pts).fill(grad);
       if (membraneAlpha > 0) {
-        g.poly(pts).stroke({
+        target.poly(pts).stroke({
           color: cytoBot,
           width: strokeWidth,
           alpha: membraneAlpha,
@@ -418,10 +454,10 @@ export class PixiRenderer extends RendererBase {
       // translucent concentric circles (smaller + denser inward).
       if (hollow) {
         const dr = s.r * 0.55;
-        g.circle(s.x, s.y, dr * 1.00).fill({ color: cytoBot, alpha: 0.10 });
-        g.circle(s.x, s.y, dr * 0.75).fill({ color: cytoBot, alpha: 0.20 });
-        g.circle(s.x, s.y, dr * 0.50).fill({ color: cytoBot, alpha: 0.36 });
-        g.circle(s.x, s.y, dr * 0.25).fill({ color: cytoBot, alpha: 0.55 });
+        target.circle(s.x, s.y, dr * 1.00).fill({ color: cytoBot, alpha: 0.10 });
+        target.circle(s.x, s.y, dr * 0.75).fill({ color: cytoBot, alpha: 0.20 });
+        target.circle(s.x, s.y, dr * 0.50).fill({ color: cytoBot, alpha: 0.36 });
+        target.circle(s.x, s.y, dr * 0.25).fill({ color: cytoBot, alpha: 0.55 });
       }
 
       // Top-left highlight — same stacked-circles trick as the donut.
@@ -430,10 +466,10 @@ export class PixiRenderer extends RendererBase {
       const hx = s.x - s.r * 0.35;
       const hy = s.y - s.r * 0.45;
       const hr = s.r * 0.75;
-      g.circle(hx, hy, hr * 1.00).fill({ color: nucleusHi, alpha: 0.05 });
-      g.circle(hx, hy, hr * 0.70).fill({ color: nucleusHi, alpha: 0.10 });
-      g.circle(hx, hy, hr * 0.45).fill({ color: nucleusHi, alpha: 0.20 });
-      g.circle(hx, hy, hr * 0.22).fill({ color: nucleusHi, alpha: 0.32 });
+      target.circle(hx, hy, hr * 1.00).fill({ color: nucleusHi, alpha: 0.05 });
+      target.circle(hx, hy, hr * 0.70).fill({ color: nucleusHi, alpha: 0.10 });
+      target.circle(hx, hy, hr * 0.45).fill({ color: nucleusHi, alpha: 0.20 });
+      target.circle(hx, hy, hr * 0.22).fill({ color: nucleusHi, alpha: 0.32 });
 
       // Granules — small darker dots scattered inside the cell. Same
       // placement formula as the canvas2D renderer's _drawGranules so
@@ -478,7 +514,7 @@ export class PixiRenderer extends RendererBase {
           const wx = s.x + gc.cosAng[i] * rr;
           const wy = s.y + gc.sinAng[i] * rr;
           const gr = s.r * gc.gFactor[i];
-          g.circle(wx, wy, gr).fill({ color: granColor, alpha: granAlpha });
+          target.circle(wx, wy, gr).fill({ color: granColor, alpha: granAlpha });
         }
       }
     }
@@ -1057,6 +1093,7 @@ export class PixiRenderer extends RendererBase {
     this.bgGfx = null;
     this.worldLayer = null;
     this.cellsGfx = null;
+    this._fadeGraphicsPool = [];
     this.nucleiContainer = null;
     this.nucleiGfx = null;
     this.particlesGfx = null;
