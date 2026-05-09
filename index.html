@@ -49,6 +49,13 @@
         <label><input type="checkbox" id="splitOnTap" /> <span data-i18n="split_on_tap">Split on tap</span></label>
         <label><input type="checkbox" id="randomSplit" /> <span data-i18n="random_split">Random splitting</span></label>
         <label><input type="checkbox" id="metaSplit" /> <span data-i18n="meta_split">Metaball split</span></label>
+        <label><span data-i18n="meta_rt_mode">Metaball RT mode</span>
+          <select id="metaRtMode">
+            <option value="bbox"       data-i18n="meta_rt_bbox">Per-pair bbox (default)</option>
+            <option value="fullCanvas" data-i18n="meta_rt_full">Full-canvas pool</option>
+            <option value="sharedMax"  data-i18n="meta_rt_shared">Shared (largest pair)</option>
+          </select>
+        </label>
       </section>
 
       <section>

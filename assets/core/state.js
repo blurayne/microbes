@@ -25,6 +25,7 @@ export const DEFAULTS = {
   splitOnTap: false,
   randomSplit: false,
   metaSplit: true,          // metaball merge between the two halves while SPLITTING
+  metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass in the webgl2 / webgpu renderers. Pixi has its own internal RT strategy (effectively 'fullCanvas') and ignores this knob.
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
@@ -81,6 +82,8 @@ export function loadSettings() {
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
     const validRenderers = ['canvas2d', 'webgl2', 'webgpu', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
     if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
+    const validMetaRtModes = ['bbox', 'fullCanvas', 'sharedMax'];
+    if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Migrate legacy `highlightColor` field to the new `useHighlight` toggle.
@@ -121,6 +124,10 @@ export const LOCALES = {
     performance: 'Performance', language: 'Language',
     allow_pathogens: 'Allow pathogens',
     split_on_tap: 'Split on tap', random_split: 'Random splitting', meta_split: 'Metaball split',
+    meta_rt_mode: 'Metaball RT mode',
+    meta_rt_bbox: 'Per-pair bbox (default)',
+    meta_rt_full: 'Full-canvas pool',
+    meta_rt_shared: 'Shared (largest pair)',
     split_push: 'Push apart with momentum', split_bond: 'Bond, then drift',
     max_cells: 'Max cells', auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',

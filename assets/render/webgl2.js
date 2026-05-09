@@ -11,7 +11,8 @@
 // files, no build step.
 
 import {
-  S, FACE, CELL_TYPES, currentBackground, currentTheme, currentHighlightColor, cellColors, frac,
+  S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
+  currentBackground, currentTheme, currentHighlightColor, cellColors, frac,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { RendererBase } from './renderer.js';
@@ -330,6 +331,111 @@ void main() {
   }
 
   outColor = vec4(col, 1.0);
+}`;
+
+// ---------- metaSplit (S.metaSplit) — per-pair metaball pass ----------
+// Renders both halves of a SPLITTING cell as filled white wobble polygons
+// into an off-screen RT, blurs separably, then a single fragment pass
+// applies the alpha threshold (α' = clamp(K·α − K/2, 0, 1)) and the
+// canvas2d-spec radial gradient tint, blending onto the main framebuffer.
+//
+// Three RT-sizing strategies, selected via S.metaRtMode:
+//   'bbox'        — per-pair RT sized to the screen-space bbox + blur padding
+//                   (matches canvas2d). Lowest GPU memory; reallocates as
+//                   pair sizes change. Sizes are rounded up to a 64-px grid
+//                   so the pool churn stays modest.
+//   'fullCanvas'  — pool of full-canvas RTs, one per active pair index
+//                   (matches Pixi's _pairPool). Highest GPU memory; zero
+//                   per-pair allocation after warmup.
+//   'sharedMax'   — single shared RT, sized to the largest active pair
+//                   this frame. Middle ground.
+const VERT_META_POLY = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_pos;   // physical px from top-left of the RT
+uniform vec2 u_rtSize;              // RT size in physical px
+uniform vec2 u_rtOrigin;            // top-left of RT in canvas physical px (0,0 for fullCanvas)
+void main() {
+  vec2 local = a_pos - u_rtOrigin;
+  vec2 ndc = (local / u_rtSize) * 2.0 - 1.0;
+  ndc.y = -ndc.y;
+  gl_Position = vec4(ndc, 0.0, 1.0);
+}`;
+
+const FRAG_FLAT_WHITE = `#version 300 es
+precision highp float;
+out vec4 outColor;
+void main() { outColor = vec4(1.0, 1.0, 1.0, 1.0); }`;
+
+// Separable Gaussian blur. u_dir is a 1-source-pixel step in uv space —
+// i.e. (1/srcW, 0) horizontal, (0, 1/srcH) vertical. u_radius is in
+// source pixels; kernel is sized at compile time to MAX_TAPS. uv is
+// derived from gl_FragCoord so the shader works both when the RT == the
+// viewport (bbox mode) and when the viewport is a sub-rect of a larger
+// canvas-sized RT (fullCanvas / sharedMax modes).
+const FRAG_META_BLUR = `#version 300 es
+precision highp float;
+uniform sampler2D u_src;
+uniform vec2 u_srcSize;
+uniform vec2 u_dir;
+uniform float u_radius;
+out vec4 outColor;
+const int MAX_TAPS = 16;
+void main() {
+  vec2 uv = gl_FragCoord.xy / u_srcSize;
+  float sigma = max(u_radius * 0.5, 0.5);
+  float twoS2 = 2.0 * sigma * sigma;
+  vec4 sum = vec4(0.0);
+  float wsum = 0.0;
+  for (int i = -MAX_TAPS; i <= MAX_TAPS; i++) {
+    float d = float(i);
+    float mask = step(abs(d), u_radius);
+    float w = exp(-(d * d) / twoS2) * mask;
+    sum += texture(u_src, uv + u_dir * d) * w;
+    wsum += w;
+  }
+  outColor = sum / max(wsum, 1e-4);
+}`;
+
+// Combined threshold + canvas2d-style radial gradient tint, blends onto
+// the destination framebuffer with SRC_ALPHA, ONE_MINUS_SRC_ALPHA (we
+// output pre-multiplied so the dst factor still works). The tint is the
+// same 3-stop gradient canvas2d builds in the source-in step of
+// _renderSplittingPair: cytoTop @ 0, cytoBot @ 0.55, cytoBotTransp @ 1.
+const FRAG_META_TINT = `#version 300 es
+precision highp float;
+uniform sampler2D u_src;
+uniform vec2 u_srcSize;        // RT size in physical px
+uniform vec2 u_rtOrigin;       // canvas top-left of the RT in physical px (0,0 for fullCanvas)
+uniform vec2 u_canvasSize;     // canvas physical size, for top-left flip
+uniform vec2 u_midPx;          // gradient centre in canvas physical px (top-left)
+uniform float u_gr;             // gradient radius in physical px
+uniform float u_K;              // threshold contrast (field.contrast)
+uniform vec3 u_cytoTop;
+uniform vec3 u_cytoBot;
+out vec4 outColor;
+void main() {
+  // gl_FragCoord is canvas-window coords (bottom-left). Translate to
+  // top-left, subtract the RT origin, then convert to source uv (which
+  // is itself bottom-left, so flip y again).
+  vec2 canvasPxTL = vec2(gl_FragCoord.x, u_canvasSize.y - gl_FragCoord.y);
+  vec2 rtLocalTL = canvasPxTL - u_rtOrigin;
+  vec2 uv = vec2(rtLocalTL.x / u_srcSize.x, 1.0 - rtLocalTL.y / u_srcSize.y);
+  vec4 m = texture(u_src, uv);
+  vec2 ctr = u_midPx + vec2(0.0, -u_gr * 0.18);
+  float r = distance(canvasPxTL, ctr);
+  float t = clamp(r / max(u_gr, 0.001), 0.0, 1.0);
+  vec3 col;
+  float alphaMul;
+  if (t < 0.55) {
+    col = mix(u_cytoTop, u_cytoBot, t / 0.55);
+    alphaMul = 1.0;
+  } else {
+    col = u_cytoBot;
+    alphaMul = 1.0 - (t - 0.55) / 0.45;
+  }
+  float thresholded = clamp(u_K * m.a - u_K * 0.5, 0.0, 1.0);
+  float a = thresholded * alphaMul;
+  outColor = vec4(col, a);
 }`;
 
 const INSTANCE_FLOATS = 21; // see _diskVao layout in init()
@@ -721,6 +827,26 @@ export class WebGL2Renderer extends RendererBase {
     this._bgU = {};
     this._bgVao = null;
 
+    // metaSplit (per-pair metaball pass). Programs / VBOs / FBOs created
+    // in init(); the RT pool layout depends on S.metaRtMode (see header).
+    this._metaPolyProg = null;
+    this._metaPolyU = {};
+    this._metaBlurProg = null;
+    this._metaBlurU = {};
+    this._metaTintProg = null;
+    this._metaTintU = {};
+    this._metaPolyVbo = null;
+    this._metaPolyVao = null;
+    // 34 verts per half (1 fan-centre + 32 rim + 1 closer) × 2 floats × 2 halves.
+    this._metaPolyData = new Float32Array(2 * (WOBBLE_VERTS + 2) * 2);
+    // Pool entries: { fbo, tex, w, h }. Indexed by pair index for 'bbox'
+    // and 'fullCanvas'; 'sharedMax' uses index 0 only.
+    this._metaPool = [];
+    this._metaPoolMode = null;            // last-applied mode; rebuild on change
+    this._metaPoolCanvasW = 0;            // canvas size that fullCanvas pool was sized for
+    this._metaPoolCanvasH = 0;
+    this._metaActivePairCount = 0;        // hide pool sprites equivalent (just a counter for debug)
+
     // One-time random light spots, matching Canvas2D's SPOTS layout.
     this._spots = [];
     for (let i = 0; i < MAX_SPOTS; i++) {
@@ -922,6 +1048,119 @@ export class WebGL2Renderer extends RendererBase {
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
     gl.bindVertexArray(null);
+
+    this._buildMetaballPipeline();
+  }
+
+  _buildMetaballPipeline() {
+    const gl = this.gl;
+    this._metaPolyProg = link(gl, VERT_META_POLY, FRAG_FLAT_WHITE);
+    this._metaPolyU = {
+      rtSize: gl.getUniformLocation(this._metaPolyProg, 'u_rtSize'),
+      rtOrigin: gl.getUniformLocation(this._metaPolyProg, 'u_rtOrigin'),
+    };
+    this._metaBlurProg = link(gl, VERT_FULLSCREEN, FRAG_META_BLUR);
+    this._metaBlurU = {
+      src: gl.getUniformLocation(this._metaBlurProg, 'u_src'),
+      srcSize: gl.getUniformLocation(this._metaBlurProg, 'u_srcSize'),
+      dir: gl.getUniformLocation(this._metaBlurProg, 'u_dir'),
+      radius: gl.getUniformLocation(this._metaBlurProg, 'u_radius'),
+    };
+    this._metaTintProg = link(gl, VERT_FULLSCREEN, FRAG_META_TINT);
+    this._metaTintU = {
+      src: gl.getUniformLocation(this._metaTintProg, 'u_src'),
+      srcSize: gl.getUniformLocation(this._metaTintProg, 'u_srcSize'),
+      rtOrigin: gl.getUniformLocation(this._metaTintProg, 'u_rtOrigin'),
+      canvasSize: gl.getUniformLocation(this._metaTintProg, 'u_canvasSize'),
+      midPx: gl.getUniformLocation(this._metaTintProg, 'u_midPx'),
+      gr: gl.getUniformLocation(this._metaTintProg, 'u_gr'),
+      K: gl.getUniformLocation(this._metaTintProg, 'u_K'),
+      cytoTop: gl.getUniformLocation(this._metaTintProg, 'u_cytoTop'),
+      cytoBot: gl.getUniformLocation(this._metaTintProg, 'u_cytoBot'),
+    };
+
+    this._metaPolyVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._metaPolyVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, this._metaPolyData.byteLength, gl.DYNAMIC_DRAW);
+    this._metaPolyVao = gl.createVertexArray();
+    gl.bindVertexArray(this._metaPolyVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._metaPolyVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+    gl.bindVertexArray(null);
+  }
+
+  // RT pool acquisition. Each entry owns *two* FBO/texture pairs so the
+  // metaball chain can ping-pong scratchA → scratchB → scratchA without
+  // a third allocation. Sizing depends on S.metaRtMode:
+  //   'bbox'        — reqW × reqH, rounded up to a 64-px grid (so the
+  //                   pool reuses entries as the pair gradually grows).
+  //   'fullCanvas'  — the canvas physical size, regardless of req.
+  //   'sharedMax'   — pairIdx is forced to 0 by the caller; size grows
+  //                   monotonically to the largest req seen.
+  _metaAcquireRt(pairIdx, reqW, reqH) {
+    const gl = this.gl;
+    const mode = this._metaResolvedMode || 'bbox';
+    let entry = this._metaPool[pairIdx];
+
+    let targetW, targetH;
+    if (mode === 'bbox') {
+      const grid = 64;
+      targetW = Math.max(grid, Math.ceil(reqW / grid) * grid);
+      targetH = Math.max(grid, Math.ceil(reqH / grid) * grid);
+    } else if (mode === 'fullCanvas') {
+      targetW = this.canvas.width;
+      targetH = this.canvas.height;
+    } else { // sharedMax
+      const prevW = (entry && entry.w) || 0;
+      const prevH = (entry && entry.h) || 0;
+      const grid = 128;
+      targetW = Math.max(prevW, Math.ceil(reqW / grid) * grid, grid);
+      targetH = Math.max(prevH, Math.ceil(reqH / grid) * grid, grid);
+    }
+
+    if (entry && entry.w === targetW && entry.h === targetH) return entry;
+    if (entry) this._metaFreeEntry(entry);
+
+    const make = () => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, targetW, targetH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      return { fbo, tex };
+    };
+    const a = make();
+    const b = make();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+
+    entry = {
+      fboA: a.fbo, texA: a.tex,
+      fboB: b.fbo, texB: b.tex,
+      w: targetW, h: targetH,
+    };
+    this._metaPool[pairIdx] = entry;
+    return entry;
+  }
+
+  _metaFreeEntry(entry) {
+    const gl = this.gl;
+    if (!entry) return;
+    if (entry.fboA) gl.deleteFramebuffer(entry.fboA);
+    if (entry.texA) gl.deleteTexture(entry.texA);
+    if (entry.fboB) gl.deleteFramebuffer(entry.fboB);
+    if (entry.texB) gl.deleteTexture(entry.texB);
+  }
+
+  _metaDestroyPool() {
+    for (const entry of this._metaPool) this._metaFreeEntry(entry);
+    this._metaPool = [];
   }
 
   _growFaceBuffer(target) {
@@ -942,6 +1181,12 @@ export class WebGL2Renderer extends RendererBase {
     this.canvas.style.width = W + 'px';
     this.canvas.style.height = H + 'px';
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    // Pool RTs are sized to canvas in 'fullCanvas' mode; resize forces
+    // a rebuild. For 'bbox' / 'sharedMax' the next per-pair acquire
+    // will redetermine size, so the safest move is to wipe the pool.
+    this._metaDestroyPool();
+    this._metaPoolCanvasW = this.canvas.width;
+    this._metaPoolCanvasH = this.canvas.height;
   }
 
   beginFrame() {
@@ -1019,57 +1264,259 @@ export class WebGL2Renderer extends RendererBase {
   drawCells(shapes, time /*, timeMs */) {
     if (shapes.length === 0) return;
     const gl = this.gl;
-    this._growInstanceBuffer(shapes.length);
-    const data = this._instanceData;
-    const outlineRgb = hexToVec3(currentTheme().outline.color);
-    for (let i = 0; i < shapes.length; i++) {
-      const s = shapes[i];
-      const c = s.cell;
-      const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
-      const cc = type.colors;
-      const top = hexToVec3(cc.cytoTop);
-      const bot = hexToVec3(cc.cytoBot);
-      const nuc = hexToVec3(cc.nucleus);
-      const bodyK = BODY_KIND_FLOAT[(type.body && type.body.kind) || 'round'] || 0;
-      const nucK = NUC_KIND_FLOAT[(type.nucleus && type.nucleus.kind) || 'none'] || 0;
-      const sel = this.sim.selectedCells.has(c) ? 1 : 0;
-      const hollow = type.bodyHollow ? 1 : 0;
-      const kind = bodyK + nucK * 16 + sel * 256 + hollow * 4096;
-      const wobMul = (type.field && type.field.wobbleMul) || 1.0;
-      const j = i * INSTANCE_FLOATS;
-      data[j]     = s.x;
-      data[j + 1] = s.y;
-      data[j + 2] = s.r;
-      data[j + 3] = kind;
-      data[j + 4] = c.phase || 0;
-      data[j + 5] = c.wobbleSeed || 0;
-      data[j + 6] = c.wobbleFreq || 1;
-      data[j + 7] = wobMul;
-      data[j + 8] = top[0];  data[j + 9] = top[1];  data[j + 10] = top[2];
-      data[j + 11] = bot[0]; data[j + 12] = bot[1]; data[j + 13] = bot[2];
-      data[j + 14] = nuc[0]; data[j + 15] = nuc[1]; data[j + 16] = nuc[2];
-      data[j + 17] = outlineRgb[0]; data[j + 18] = outlineRgb[1]; data[j + 19] = outlineRgb[2];
-      data[j + 20] = c.flash || 0;
-    }
-    gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceVbo);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, shapes.length * INSTANCE_FLOATS);
 
-    gl.useProgram(this._diskProg);
-    gl.uniform3f(this._diskU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
-    gl.uniform2f(this._diskU.viewport, this.W, this.H);
-    gl.uniform1f(this._diskU.time, time);
-    gl.uniform1f(this._diskU.wobbleAmp, S.wobbleAmp || 0);
-    gl.uniform3fv(this._diskU.highlight, hexToVec3(currentHighlightColor()));
-    gl.uniform1f(this._diskU.membraneIntensity,
-      (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
-    gl.bindVertexArray(this._diskVao);
-    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, shapes.length);
-    gl.bindVertexArray(null);
+    // Partition: when S.metaSplit is on, group both halves of any
+    // SPLITTING cell by id and render them through the metaball pass.
+    // Pairs where only one half is in view fall back to the singleton
+    // path (matches canvas2d / pixi). Singletons feed the disk pass
+    // unchanged.
+    const useMetaSplit = !!S.metaSplit;
+    const splittingByCellId = useMetaSplit ? new Map() : null;
+    const singletons = useMetaSplit ? [] : shapes;
+    if (useMetaSplit) {
+      for (const s of shapes) {
+        if (s.cell.state === 'SPLITTING') {
+          let arr = splittingByCellId.get(s.cell.id);
+          if (!arr) { arr = []; splittingByCellId.set(s.cell.id, arr); }
+          arr.push(s);
+        } else {
+          singletons.push(s);
+        }
+      }
+      for (const [id, pair] of splittingByCellId) {
+        if (pair.length < 2) {
+          for (const s of pair) singletons.push(s);
+          splittingByCellId.delete(id);
+        }
+      }
+    }
+
+    // ---- Disk pass (singletons only when metaSplit is on) ----
+    if (singletons.length > 0) {
+      this._growInstanceBuffer(singletons.length);
+      const data = this._instanceData;
+      const outlineRgb = hexToVec3(currentTheme().outline.color);
+      for (let i = 0; i < singletons.length; i++) {
+        const s = singletons[i];
+        const c = s.cell;
+        const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+        const cc = type.colors;
+        const top = hexToVec3(cc.cytoTop);
+        const bot = hexToVec3(cc.cytoBot);
+        const nuc = hexToVec3(cc.nucleus);
+        const bodyK = BODY_KIND_FLOAT[(type.body && type.body.kind) || 'round'] || 0;
+        const nucK = NUC_KIND_FLOAT[(type.nucleus && type.nucleus.kind) || 'none'] || 0;
+        const sel = this.sim.selectedCells.has(c) ? 1 : 0;
+        const hollow = type.bodyHollow ? 1 : 0;
+        const kind = bodyK + nucK * 16 + sel * 256 + hollow * 4096;
+        const wobMul = (type.field && type.field.wobbleMul) || 1.0;
+        const j = i * INSTANCE_FLOATS;
+        data[j]     = s.x;
+        data[j + 1] = s.y;
+        data[j + 2] = s.r;
+        data[j + 3] = kind;
+        data[j + 4] = c.phase || 0;
+        data[j + 5] = c.wobbleSeed || 0;
+        data[j + 6] = c.wobbleFreq || 1;
+        data[j + 7] = wobMul;
+        data[j + 8] = top[0];  data[j + 9] = top[1];  data[j + 10] = top[2];
+        data[j + 11] = bot[0]; data[j + 12] = bot[1]; data[j + 13] = bot[2];
+        data[j + 14] = nuc[0]; data[j + 15] = nuc[1]; data[j + 16] = nuc[2];
+        data[j + 17] = outlineRgb[0]; data[j + 18] = outlineRgb[1]; data[j + 19] = outlineRgb[2];
+        data[j + 20] = c.flash || 0;
+      }
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceVbo);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, singletons.length * INSTANCE_FLOATS);
+
+      gl.useProgram(this._diskProg);
+      gl.uniform3f(this._diskU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+      gl.uniform2f(this._diskU.viewport, this.W, this.H);
+      gl.uniform1f(this._diskU.time, time);
+      gl.uniform1f(this._diskU.wobbleAmp, S.wobbleAmp || 0);
+      gl.uniform3fv(this._diskU.highlight, hexToVec3(currentHighlightColor()));
+      gl.uniform1f(this._diskU.membraneIntensity,
+        (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
+      gl.bindVertexArray(this._diskVao);
+      gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, singletons.length);
+      gl.bindVertexArray(null);
+    }
+
+    // ---- metaSplit pass (one fused blob per SPLITTING pair) ----
+    if (splittingByCellId && splittingByCellId.size > 0) {
+      this._renderSplittingPairs(splittingByCellId, time);
+    }
 
     // Cartoon faces — only when the toggle is on.
     // Per-cell decorations (spikes, tendrils, flagella, etc.).
     this._drawDecorations(shapes, time);
     if (S.cartoon) this._drawFaces(shapes, time);
+  }
+
+  // Per-pair metaball pass. Renders both halves' wobble polygons in
+  // white onto an offscreen RT, separable Gaussian blur, then a single
+  // fragment pass folds together the alpha threshold and the canvas2d
+  // 3-stop radial-gradient tint, blending onto the main canvas.
+  _renderSplittingPairs(splittingByCellId, time) {
+    const gl = this.gl;
+    const cam = this.camera;
+    const fbW = this.canvas.width;
+    const fbH = this.canvas.height;
+    // CSS-px → physical-px scale (dpr * renderScale). The disk pass
+    // viewport is also at this resolution, so the metaball tint blends
+    // 1:1 over it. `field.blur` is specified in CSS px; multiply for the
+    // RT (which is at physical px).
+    const pxScale = fbW / Math.max(1, this.W);
+
+    // Resolve mode: rebuild the pool if S.metaRtMode changed since the
+    // last frame, so a settings toggle takes effect immediately.
+    const mode = (S.metaRtMode === 'fullCanvas' || S.metaRtMode === 'sharedMax')
+      ? S.metaRtMode : 'bbox';
+    if (mode !== this._metaResolvedMode) {
+      this._metaDestroyPool();
+      this._metaResolvedMode = mode;
+    }
+
+    let pairIdx = 0;
+    for (const [, pair] of splittingByCellId) {
+      const c = pair[0].cell;
+      const cType = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+      const fld = cType.field || { blur: 6, contrast: 20 };
+      const cc = cellColors(c);
+      const blurPx = Math.max(0, fld.blur * pxScale);
+      const padPx = Math.ceil(blurPx * 3 + 4);
+
+      // Pack polygon verts (both halves) into _metaPolyData.
+      // Layout per half: [center, rim0..rim31, rim0_again] = 34 verts.
+      const poly = this._metaPolyData;
+      let off = 0;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      let mx = 0, my = 0; // gradient centre = avg of half centers (physical px)
+      let maxR = 0;
+      for (let p = 0; p < pair.length; p++) {
+        const s = pair[p];
+        mx += (s.x * cam.scale + cam.tx) * pxScale;
+        my += (s.y * cam.scale + cam.ty) * pxScale;
+        maxR = Math.max(maxR, s.r * cam.scale * pxScale);
+        const rimStart = off + 2;
+        let cxAcc = 0, cyAcc = 0;
+        for (let i = 0; i < WOBBLE_VERTS; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], time);
+          const px = (v.x * cam.scale + cam.tx) * pxScale;
+          const py = (v.y * cam.scale + cam.ty) * pxScale;
+          poly[rimStart + i * 2]     = px;
+          poly[rimStart + i * 2 + 1] = py;
+          cxAcc += px; cyAcc += py;
+          if (px < minX) minX = px; if (px > maxX) maxX = px;
+          if (py < minY) minY = py; if (py > maxY) maxY = py;
+        }
+        poly[off]     = cxAcc / WOBBLE_VERTS;
+        poly[off + 1] = cyAcc / WOBBLE_VERTS;
+        const rimEnd = rimStart + WOBBLE_VERTS * 2;
+        poly[rimEnd]     = poly[rimStart];
+        poly[rimEnd + 1] = poly[rimStart + 1];
+        off = rimEnd + 2;
+      }
+      mx /= pair.length;
+      my /= pair.length;
+      const gr = Math.max(maxR, 1) * 1.95;
+
+      // Bbox in canvas physical px (top-left origin), clamped to canvas.
+      const bboxX = Math.max(0, Math.floor(minX - padPx));
+      const bboxY = Math.max(0, Math.floor(minY - padPx));
+      const bboxRight = Math.min(fbW, Math.ceil(maxX + padPx));
+      const bboxBottom = Math.min(fbH, Math.ceil(maxY + padPx));
+      const bboxW = bboxRight - bboxX;
+      const bboxH = bboxBottom - bboxY;
+      if (bboxW <= 0 || bboxH <= 0) { pairIdx++; continue; }
+
+      // Acquire RT. For 'sharedMax' all pairs share index 0.
+      const acquireIdx = (mode === 'sharedMax') ? 0 : pairIdx;
+      const rt = this._metaAcquireRt(
+        acquireIdx,
+        (mode === 'fullCanvas') ? fbW : bboxW,
+        (mode === 'fullCanvas') ? fbH : bboxH,
+      );
+
+      // For 'fullCanvas' mode, the RT origin is (0,0) in canvas coords —
+      // the polygon and viewport sit at the bbox subregion of a canvas-
+      // sized RT. For 'bbox' / 'sharedMax', the RT is local: origin
+      // becomes the bbox top-left, viewport covers the bbox in the RT.
+      const rtOriginX = (mode === 'fullCanvas') ? 0 : bboxX;
+      const rtOriginY = (mode === 'fullCanvas') ? 0 : bboxY;
+      const rtViewportX = (mode === 'fullCanvas') ? bboxX : 0;
+      // gl.viewport is bottom-left; convert from top-left bbox coords.
+      const rtViewportY = (mode === 'fullCanvas')
+        ? (rt.h - bboxY - bboxH)
+        : (rt.h - bboxH);
+
+      // ---- Pass 1: clear scratchA, render polygons (white) ----
+      gl.bindFramebuffer(gl.FRAMEBUFFER, rt.fboA);
+      gl.viewport(0, 0, rt.w, rt.h);
+      gl.disable(gl.SCISSOR_TEST);
+      gl.disable(gl.BLEND);
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+
+      gl.useProgram(this._metaPolyProg);
+      gl.uniform2f(this._metaPolyU.rtSize, rt.w, rt.h);
+      gl.uniform2f(this._metaPolyU.rtOrigin, rtOriginX, rtOriginY);
+      gl.bindBuffer(gl.ARRAY_BUFFER, this._metaPolyVbo);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, poly, 0, off);
+      gl.bindVertexArray(this._metaPolyVao);
+      const vertsPerHalf = WOBBLE_VERTS + 2;
+      for (let p = 0; p < pair.length; p++) {
+        gl.drawArrays(gl.TRIANGLE_FAN, p * vertsPerHalf, vertsPerHalf);
+      }
+      gl.bindVertexArray(null);
+
+      // ---- Pass 2: clear scratchB, horizontal blur scratchA → scratchB ----
+      gl.bindFramebuffer(gl.FRAMEBUFFER, rt.fboB);
+      gl.viewport(0, 0, rt.w, rt.h);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      gl.viewport(rtViewportX, rtViewportY, bboxW, bboxH);
+      gl.useProgram(this._metaBlurProg);
+      gl.uniform2f(this._metaBlurU.srcSize, rt.w, rt.h);
+      gl.uniform2f(this._metaBlurU.dir, 1.0 / rt.w, 0);
+      gl.uniform1f(this._metaBlurU.radius, blurPx);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, rt.texA);
+      gl.uniform1i(this._metaBlurU.src, 0);
+      gl.bindVertexArray(this._bgVao); // empty VAO → fullscreen via gl_VertexID
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      // ---- Pass 3: vertical blur scratchB → scratchA (overwriting bbox) ----
+      gl.bindFramebuffer(gl.FRAMEBUFFER, rt.fboA);
+      gl.viewport(rtViewportX, rtViewportY, bboxW, bboxH);
+      gl.uniform2f(this._metaBlurU.dir, 0, 1.0 / rt.h);
+      gl.bindTexture(gl.TEXTURE_2D, rt.texB);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+      // ---- Pass 4: tint+threshold scratchA → main canvas (alpha blend) ----
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      // Convert bbox from canvas top-left to GL bottom-left for viewport.
+      gl.viewport(bboxX, fbH - bboxY - bboxH, bboxW, bboxH);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+      gl.useProgram(this._metaTintProg);
+      gl.uniform2f(this._metaTintU.srcSize, rt.w, rt.h);
+      gl.uniform2f(this._metaTintU.rtOrigin, rtOriginX, rtOriginY);
+      gl.uniform2f(this._metaTintU.canvasSize, fbW, fbH);
+      gl.uniform2f(this._metaTintU.midPx, mx, my);
+      gl.uniform1f(this._metaTintU.gr, gr);
+      gl.uniform1f(this._metaTintU.K, fld.contrast);
+      gl.uniform3fv(this._metaTintU.cytoTop, hexToVec3(cc.cytoTop));
+      gl.uniform3fv(this._metaTintU.cytoBot, hexToVec3(cc.cytoBot));
+      gl.bindTexture(gl.TEXTURE_2D, rt.texA);
+      gl.uniform1i(this._metaTintU.src, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.bindVertexArray(null);
+
+      pairIdx++;
+    }
+
+    // Restore default viewport for subsequent passes.
+    gl.viewport(0, 0, fbW, fbH);
+    this._metaActivePairCount = pairIdx;
   }
 
   _drawFaces(shapes, time) {
@@ -1537,6 +1984,12 @@ export class WebGL2Renderer extends RendererBase {
     if (this._dashVao) gl.deleteVertexArray(this._dashVao);
     if (this._markerProg) gl.deleteProgram(this._markerProg);
     if (this._markerVao) gl.deleteVertexArray(this._markerVao);
+    if (this._metaPolyProg) gl.deleteProgram(this._metaPolyProg);
+    if (this._metaBlurProg) gl.deleteProgram(this._metaBlurProg);
+    if (this._metaTintProg) gl.deleteProgram(this._metaTintProg);
+    if (this._metaPolyVbo) gl.deleteBuffer(this._metaPolyVbo);
+    if (this._metaPolyVao) gl.deleteVertexArray(this._metaPolyVao);
+    this._metaDestroyPool();
     this.gl = null;
   }
 }

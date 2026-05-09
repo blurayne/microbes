@@ -477,6 +477,17 @@ bindCheckbox('splitOnTap', 'splitOnTap', applyModeUi);
 applyModeUi();
 bindCheckbox('randomSplit', 'randomSplit');
 bindCheckbox('metaSplit', 'metaSplit');
+const metaRtModeSel = document.getElementById('metaRtMode');
+if (metaRtModeSel) {
+  metaRtModeSel.value = S.metaRtMode || 'bbox';
+  metaRtModeSel.addEventListener('change', () => {
+    const v = metaRtModeSel.value;
+    if (v !== 'bbox' && v !== 'fullCanvas' && v !== 'sharedMax') return;
+    if (v === S.metaRtMode) return;
+    S.metaRtMode = v;
+    saveSettings();
+  });
+}
 bindCheckbox('cartoon', 'cartoon');
 bindCheckbox('showFPS', 'showFPS', (on) => {
   const el = document.getElementById('fps');

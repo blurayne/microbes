@@ -74,6 +74,22 @@ export class PixiRenderer extends RendererBase {
     this.pairPolyGfx = null;        // Graphics inside pairContainer (cleared per pair)
     this._pairPool = [];            // [{ rt, sprite }] reused across frames
 
+    // Wobble-polygon vertex buffers, reused across frames. Pixi v8's
+    // Polygon stores `this.points = inputArray` by reference (no copy),
+    // so within a frame each cell needs its own backing array — we
+    // grow these pools to the high-water-mark cell count and never
+    // shrink, so steady-state frames allocate nothing.
+    this._singletonPtsPool = [];
+    this._pairHalfPtsPool = [];
+
+    // Filter-state cache for _renderSplittingPairs: skip the
+    // BlurFilter.strength assignment + ColorMatrixFilter.matrix
+    // rebuild when consecutive pairs share the same `field` params
+    // (typical when several cells of the same type split at once).
+    // Persists across frames — the filter instances are owned here
+    // and only mutated through this code path.
+    this._lastPairFieldKey = null;
+
     this._destroyed = false;
   }
 
@@ -286,6 +302,7 @@ export class PixiRenderer extends RendererBase {
     const membraneAlpha = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
     const strokeWidth = Math.max(1.5, (S.outlinePx || 5) * 0.55) / Math.max(0.0001, cam.scale);
 
+    let singletonIdx = 0;
     for (const s of singletons) {
       const cc = cellColors(s.cell);
       const cytoTop = cc.cytoTop || '#ffffff';
@@ -294,8 +311,16 @@ export class PixiRenderer extends RendererBase {
       const cType = CELL_TYPES[s.cell.type] || CELL_TYPES.neutrophil;
       const hollow = !!cType.bodyHollow;
 
-      // Build wobble polygon vertices in world space.
-      const pts = new Array(WOBBLE_VERTS * 2);
+      // Build wobble polygon vertices in world space. The buffer is
+      // owned by _singletonPtsPool[singletonIdx]; Pixi retains a
+      // reference until the next clear(), so each cell needs its own
+      // slot for the duration of the frame.
+      let pts = this._singletonPtsPool[singletonIdx];
+      if (!pts) {
+        pts = new Array(WOBBLE_VERTS * 2);
+        this._singletonPtsPool[singletonIdx] = pts;
+      }
+      singletonIdx++;
       for (let i = 0; i < WOBBLE_VERTS; i++) {
         const v = shapeVertex(s, THETA_TABLE[i], time);
         pts[i * 2] = v.x;
@@ -356,13 +381,34 @@ export class PixiRenderer extends RendererBase {
         const sizeJitter = isBig ? 0.05 : 0.04;
         const granAlpha = isBig ? 0.85 : 0.55;
         const granColor = cc.nucleus || cytoBot;
+
+        // Per-cell cache of the seed-derived constants so we skip the
+        // frac/cos/sin/sqrt work on every frame. cell.id, wobbleSeed,
+        // and cell.type don't change during a cell's lifetime; the
+        // cache is invalidated defensively if any of those mutate.
+        let gc = cell._granuleCache;
+        if (!gc || gc.seed !== seed || gc.Ng !== Ng) {
+          const cosAng = new Float32Array(Ng);
+          const sinAng = new Float32Array(Ng);
+          const rRel = new Float32Array(Ng);
+          const gFactor = new Float32Array(Ng);
+          for (let i = 0; i < Ng; i++) {
+            const ang = frac(seed * 1.3 + i * 0.61) * Math.PI * 2;
+            cosAng[i] = Math.cos(ang);
+            sinAng[i] = Math.sin(ang);
+            rRel[i] = 0.05 + 0.85 * Math.sqrt(frac(seed + i * 0.317));
+            gFactor[i] = baseSize + sizeJitter * frac(seed * 1.7 + i * 0.13);
+          }
+          gc = { seed, Ng, cosAng, sinAng, rRel, gFactor };
+          cell._granuleCache = gc;
+        }
+
         for (let i = 0; i < Ng; i++) {
-          const ang = frac(seed * 1.3 + i * 0.61) * Math.PI * 2;
-          const rRel = 0.05 + 0.85 * Math.sqrt(frac(seed + i * 0.317));
           const wob = 0.04 * Math.sin(time * 0.5 + i + seed);
-          const wx = s.x + Math.cos(ang) * s.r * (rRel + wob);
-          const wy = s.y + Math.sin(ang) * s.r * (rRel + wob);
-          const gr = s.r * (baseSize + sizeJitter * frac(seed * 1.7 + i * 0.13));
+          const rr = s.r * (gc.rRel[i] + wob);
+          const wx = s.x + gc.cosAng[i] * rr;
+          const wy = s.y + gc.sinAng[i] * rr;
+          const gr = s.r * gc.gFactor[i];
           g.circle(wx, wy, gr).fill({ color: granColor, alpha: granAlpha });
         }
       }
@@ -614,6 +660,14 @@ export class PixiRenderer extends RendererBase {
   // then display via a Sprite tinted with the cell's cytoBot. The
   // splittingLayer sits above worldLayer so the merged blob covers
   // any bleed from the singleton pass under it.
+  //
+  // S.metaRtMode is honoured by the webgl2 / webgpu renderers but not
+  // here — Pixi keeps its own pool of full-canvas RenderTextures (one
+  // per active pair, equivalent to 'fullCanvas') because the pair
+  // pipeline runs through Pixi's own filter chain on a screen-space
+  // Sprite. Refactoring to per-pair bbox would require shifting the
+  // pairContainer transform per pair and resizing the Sprite, which
+  // is outside the scope of the metaSplit feature work.
   _renderSplittingPairs(splittingByCellId, time) {
     const PIXI = this.PIXI;
     const cam = this.camera;
@@ -632,10 +686,18 @@ export class PixiRenderer extends RendererBase {
       const fld = cType.field || { blur: 6, contrast: 20 };
       const cc = cellColors(c);
 
-      // Polygons for both halves, in world space.
+      // Polygons for both halves, in world space. Each half writes
+      // into its own pool slot — the two halves coexist in
+      // pairPolyGfx until renderer.render() flushes them, so they
+      // need distinct backing arrays (Pixi stores them by reference).
       this.pairPolyGfx.clear();
-      for (const s of pair) {
-        const pts = new Array(WOBBLE_VERTS * 2);
+      for (let halfIdx = 0; halfIdx < pair.length; halfIdx++) {
+        const s = pair[halfIdx];
+        let pts = this._pairHalfPtsPool[halfIdx];
+        if (!pts) {
+          pts = new Array(WOBBLE_VERTS * 2);
+          this._pairHalfPtsPool[halfIdx] = pts;
+        }
         for (let i = 0; i < WOBBLE_VERTS; i++) {
           const v = shapeVertex(s, THETA_TABLE[i], time);
           pts[i * 2] = v.x;
@@ -645,8 +707,14 @@ export class PixiRenderer extends RendererBase {
       }
 
       // Configure per-type field params on the shared filter chain.
-      this.pairBlur.strength = fld.blur;
-      this._setPairThreshold(fld.contrast);
+      // Cached so consecutive pairs of the same cell type don't
+      // re-upload identical uniforms / rebuild the threshold matrix.
+      const fieldKey = c.type + '|' + fld.blur + '|' + fld.contrast;
+      if (fieldKey !== this._lastPairFieldKey) {
+        this.pairBlur.strength = fld.blur;
+        this._setPairThreshold(fld.contrast);
+        this._lastPairFieldKey = fieldKey;
+      }
 
       const entry = this._getOrCreatePairEntry(idx++);
       renderer.render({ container: this.pairContainer, target: entry.rt, clear: true });
@@ -735,5 +803,7 @@ export class PixiRenderer extends RendererBase {
     this.pairThreshold = null;
     this.pairContainer = null;
     this.pairPolyGfx = null;
+    this._singletonPtsPool = [];
+    this._pairHalfPtsPool = [];
   }
 }
