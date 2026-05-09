@@ -572,7 +572,10 @@ export class PixiRenderer extends RendererBase {
       if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
       const blinking = (c.nextBlink - now) < 120 && (c.nextBlink - now) > 0;
 
-      const cx = c.x, cy = c.y;
+      // Face follows each shape entry. During SPLITTING getShapes
+      // emits two entries with correct half centres + radius
+      // (shape.js:96-97); for NORMAL cells s.{x,y,r} === c.{x,y,r}.
+      const cx = s.x, cy = s.y, cr = s.r;
       // Look direction: velocity-driven, falls back to alarm target.
       let lookX = c.vx, lookY = c.vy;
       if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
@@ -584,14 +587,14 @@ export class PixiRenderer extends RendererBase {
       // ---- Eyes ----
       if (cfg.eyes >= 1) {
         const FACE_SCALE = 1.2;
-        const eyeR = c.r * cfg.eyeR * FACE_SCALE;
-        const eyeY = cy + c.r * cfg.eyeY;
-        const pupilR = c.r * cfg.pupilR * FACE_SCALE;
+        const eyeR = cr * cfg.eyeR * FACE_SCALE;
+        const eyeY = cy + cr * cfg.eyeY;
+        const pupilR = cr * cfg.pupilR * FACE_SCALE;
         const pupilOff = eyeR * 0.45;
         const pdx = (lookX / lm) * pupilOff;
         const pdy = (lookY / lm) * pupilOff;
         const eyeXs = cfg.eyes === 2
-          ? [cx - c.r * 0.22 * FACE_SCALE, cx + c.r * 0.22 * FACE_SCALE]
+          ? [cx - cr * 0.22 * FACE_SCALE, cx + cr * 0.22 * FACE_SCALE]
           : [cx];
         for (const ex of eyeXs) {
           if (blinking) {
@@ -620,8 +623,8 @@ export class PixiRenderer extends RendererBase {
 
       // ---- Mouth ----
       if (cfg.mouth && cfg.mouth !== 'none') {
-        const mY = cy + c.r * 0.18;
-        const mW = c.r * 0.34 * 1.2;
+        const mY = cy + cr * 0.18;
+        const mW = cr * 0.34 * 1.2;
         const cc = cellColors(c);
         const mouthColor = cc.nucleus || '#1d1c5a';
         const mlw = lw * 1.3;

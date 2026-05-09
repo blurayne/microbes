@@ -1631,10 +1631,13 @@ export class WebGL2Renderer extends RendererBase {
       const mc = (CELL_TYPES[c.type] || CELL_TYPES.neutrophil).colors;
       const mcRgb = hexToVec3(mc.nucleus);
 
+      // Face follows each shape entry. During SPLITTING getShapes
+      // emits two entries with correct half centres + radius
+      // (shape.js:96-97); for NORMAL cells s.{x,y,r} === c.{x,y,r}.
       const j = n * FACE_INSTANCE_FLOATS;
-      data[j]     = c.x;
-      data[j + 1] = c.y;
-      data[j + 2] = c.r;
+      data[j]     = s.x;
+      data[j + 1] = s.y;
+      data[j + 2] = s.r;
       data[j + 3] = mouthKind;
       data[j + 4] = eyesCount;
       data[j + 5] = cfg.eyeR != null ? cfg.eyeR : 0.18;

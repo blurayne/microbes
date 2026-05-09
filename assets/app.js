@@ -488,6 +488,17 @@ if (metaRtModeSel) {
     saveSettings();
   });
 }
+const metaOutlineModeSel = document.getElementById('metaOutlineMode');
+if (metaOutlineModeSel) {
+  metaOutlineModeSel.value = S.metaOutlineMode || 'edge';
+  metaOutlineModeSel.addEventListener('change', () => {
+    const v = metaOutlineModeSel.value;
+    if (v !== 'edge' && v !== 'sdf' && v !== 'polygon') return;
+    if (v === S.metaOutlineMode) return;
+    S.metaOutlineMode = v;
+    saveSettings();
+  });
+}
 bindCheckbox('cartoon', 'cartoon');
 bindCheckbox('showFPS', 'showFPS', (on) => {
   const el = document.getElementById('fps');
