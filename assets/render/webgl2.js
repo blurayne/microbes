@@ -538,6 +538,41 @@ void main() {
   outColor = vec4(1.0, 1.0, 1.0, a);
 }`;
 
+// ---------- Particles (kill-mode protein/gut explosions) ----------
+// One instanced quad per particle. Per-instance: (worldX, worldY, r,
+// alpha) + (R, G, B, _pad). Soft-disc fragment shader anti-aliases
+// the rim. Mirrors the WebGPU PARTICLE_WGSL pipeline 1:1.
+const PARTICLE_INSTANCE_FLOATS = 8;
+const VERT_PARTICLE = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_corner;
+layout(location=1) in vec4 a_inst;        // (x, y, r, alpha)
+layout(location=2) in vec4 a_rgb;         // (R, G, B, _)
+uniform vec3 u_camera;
+uniform vec2 u_viewport;
+out vec2 v_uv;
+out vec4 v_col;
+void main() {
+  vec2 worldPos = a_inst.xy + a_corner * a_inst.z;
+  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
+  clipPos.y = -clipPos.y;
+  gl_Position = vec4(clipPos, 0.0, 1.0);
+  v_uv = a_corner;
+  v_col = vec4(a_rgb.rgb, a_inst.w);
+}`;
+const FRAG_PARTICLE = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+in vec4 v_col;
+out vec4 outColor;
+void main() {
+  float d = length(v_uv);
+  float a = (1.0 - smoothstep(0.85, 1.0, d)) * v_col.a;
+  if (a <= 0.0) discard;
+  outColor = vec4(v_col.rgb, a);
+}`;
+
 // ---------- Cartoon face pass (only drawn when S.cartoon = true) ----------
 //
 // One instanced quad per cell. Per-instance: world position + cell.r,
@@ -1049,7 +1084,48 @@ export class WebGL2Renderer extends RendererBase {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
     gl.bindVertexArray(null);
 
+    this._buildParticlePipeline();
     this._buildMetaballPipeline();
+  }
+
+  _buildParticlePipeline() {
+    const gl = this.gl;
+    this._particleProg = link(gl, VERT_PARTICLE, FRAG_PARTICLE);
+    this._particleU = {
+      camera: gl.getUniformLocation(this._particleProg, 'u_camera'),
+      viewport: gl.getUniformLocation(this._particleProg, 'u_viewport'),
+    };
+    this._particleVbo = gl.createBuffer();
+    this._particleCapacity = 0;          // capacity in particles (8 floats each)
+    this._particleData = new Float32Array(0);
+    this._growParticleBuffer(64);
+
+    this._particleVao = gl.createVertexArray();
+    gl.bindVertexArray(this._particleVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._cornerVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._particleVbo);
+    {
+      const stride = PARTICLE_INSTANCE_FLOATS * 4;
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 0);
+      gl.vertexAttribDivisor(1, 1);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 4, gl.FLOAT, false, stride, 16);
+      gl.vertexAttribDivisor(2, 1);
+    }
+    gl.bindVertexArray(null);
+  }
+
+  _growParticleBuffer(target) {
+    if (target <= this._particleCapacity) return;
+    const newCap = Math.max(64, Math.ceil(target * 1.5));
+    this._particleData = new Float32Array(newCap * PARTICLE_INSTANCE_FLOATS);
+    this._particleCapacity = newCap;
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._particleVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, this._particleData.byteLength, gl.DYNAMIC_DRAW);
   }
 
   _buildMetaballPipeline() {
@@ -1887,6 +1963,43 @@ export class WebGL2Renderer extends RendererBase {
     }
   }
 
+  // Kill-mode protein/gut explosions. One instanced quad per particle,
+  // 8 floats per instance. Soft-disc fragment shader anti-aliases the
+  // rim. sim.particles entries: { x, y, vx, vy, r, color (hex string),
+  // life, maxLife }.
+  drawParticles(particles /* , time, timeMs */) {
+    if (!particles || particles.length === 0) return;
+    const gl = this.gl;
+    this._growParticleBuffer(particles.length);
+    const data = this._particleData;
+    let n = 0;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const a = Math.max(0, Math.min(1, p.life / Math.max(p.maxLife, 1e-3)));
+      if (a <= 0) continue;
+      const rgb = hexToVec3(p.color || '#ffffff');
+      const j = n * PARTICLE_INSTANCE_FLOATS;
+      data[j]     = p.x;
+      data[j + 1] = p.y;
+      data[j + 2] = p.r;
+      data[j + 3] = a;
+      data[j + 4] = rgb[0];
+      data[j + 5] = rgb[1];
+      data[j + 6] = rgb[2];
+      data[j + 7] = 0;
+      n++;
+    }
+    if (n === 0) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._particleVbo);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * PARTICLE_INSTANCE_FLOATS);
+    gl.useProgram(this._particleProg);
+    gl.uniform3f(this._particleU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform2f(this._particleU.viewport, this.W, this.H);
+    gl.bindVertexArray(this._particleVao);
+    gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
+    gl.bindVertexArray(null);
+  }
+
   drawSelection(shapes, time) {
     // The per-cell selection ring + tap-flash live in the cell pass
     // (handled by the kind / a_outline.a packing). What's left is the
@@ -1984,6 +2097,9 @@ export class WebGL2Renderer extends RendererBase {
     if (this._dashVao) gl.deleteVertexArray(this._dashVao);
     if (this._markerProg) gl.deleteProgram(this._markerProg);
     if (this._markerVao) gl.deleteVertexArray(this._markerVao);
+    if (this._particleProg) gl.deleteProgram(this._particleProg);
+    if (this._particleVbo) gl.deleteBuffer(this._particleVbo);
+    if (this._particleVao) gl.deleteVertexArray(this._particleVao);
     if (this._metaPolyProg) gl.deleteProgram(this._metaPolyProg);
     if (this._metaBlurProg) gl.deleteProgram(this._metaBlurProg);
     if (this._metaTintProg) gl.deleteProgram(this._metaTintProg);
