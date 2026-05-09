@@ -18,7 +18,7 @@
 // work; app.js's makeRenderer awaits it.
 
 import {
-  S, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
+  S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
   currentBackground, currentTheme, currentHighlightColor, cellColors,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
@@ -43,6 +43,9 @@ const BODY_KIND_FLOAT = {
 };
 const NUC_KIND_FLOAT = {
   none: 0, round: 1, kidney: 2, bilobed: 3, multilobed: 4, 'round-small': 5,
+};
+const MOUTH_KIND_FLOAT = {
+  none: 0, smile: 1, frown: 2, snarl: 3, fangs: 4, tongue: 5, drool: 6,
 };
 
 // ---------- Shaders (WGSL) ----------
@@ -373,6 +376,340 @@ struct TintU {
 }
 `;
 
+// ---------- Target marker: dashed lines from selected cells -----------
+// Mirrors webgl2.js's VERT_DASH / FRAG_DASH. Each line vertex carries
+// (worldX, worldY, distAlongLine_in_screenPx); the fragment shader
+// dashes by `mod(dist + offset, 14) > 8 ? discard : white`. dashOffset
+// scrolls negatively over time so the pattern marches forward.
+const DASH_WGSL = /* wgsl */ `
+struct DashU {
+  cam: vec4<f32>,        // (scale, tx, ty, _)
+  vp_dash: vec4<f32>,    // (viewportW, viewportH, dashOffset, alpha)
+};
+@group(0) @binding(0) var<uniform> u: DashU;
+
+struct VsOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) dist: f32,
+};
+
+@vertex fn vs_main(
+  @location(0) pos: vec2<f32>,
+  @location(1) dist: f32,
+) -> VsOut {
+  let camScale = u.cam.x;
+  let camT = u.cam.yz;
+  let vp = u.vp_dash.xy;
+  let screenPos = pos * camScale + camT;
+  var clip = (screenPos / vp) * 2.0 - 1.0;
+  clip.y = -clip.y;
+  var out: VsOut;
+  out.pos = vec4<f32>(clip, 0.0, 1.0);
+  out.dist = dist;
+  return out;
+}
+
+@fragment fn fs_main(@location(0) dist: f32) -> @location(0) vec4<f32> {
+  let dashOffset = u.vp_dash.z;
+  let alpha = u.vp_dash.w;
+  // Euclidean mod via fract so negative dashOffset wraps correctly.
+  let m = 14.0 * fract((dist + dashOffset) / 14.0);
+  if (m > 8.0) { discard; }
+  return vec4<f32>(1.0, 1.0, 1.0, alpha);
+}
+`;
+
+// ---------- Target marker: pulsing-circle quad ----------
+// Mirrors webgl2.js's VERT_MARKER / FRAG_MARKER. Reuses the existing
+// 6-vertex unit-square corner buffer; the vertex shader scales the
+// quad to (markerWorld + corner * scaledRadius), the fragment shader
+// composes inner-dot + expanding ring band with smoothstep edges.
+const MARKER_WGSL = /* wgsl */ `
+struct MarkerU {
+  cam: vec4<f32>,         // (scale, tx, ty, _)
+  vp_pos: vec4<f32>,      // (viewportW, viewportH, markerX, markerY)
+  cfg: vec4<f32>,         // (scaledRadius, age, innerNorm, ringNorm)
+  half: vec4<f32>,        // (ringHalfPx, _, _, _)
+};
+@group(0) @binding(0) var<uniform> u: MarkerU;
+
+struct VsOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+};
+
+@vertex fn vs_main(@location(0) corner: vec2<f32>) -> VsOut {
+  let camScale = u.cam.x;
+  let camT = u.cam.yz;
+  let vp = u.vp_pos.xy;
+  let mWorld = u.vp_pos.zw;
+  let r = u.cfg.x;
+  let worldPos = mWorld + corner * r;
+  let screenPos = worldPos * camScale + camT;
+  var clip = (screenPos / vp) * 2.0 - 1.0;
+  clip.y = -clip.y;
+  var out: VsOut;
+  out.pos = vec4<f32>(clip, 0.0, 1.0);
+  out.uv = corner;
+  return out;
+}
+
+@fragment fn fs_main(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
+  let age = u.cfg.y;
+  let innerNorm = u.cfg.z;
+  let ringNorm = u.cfg.w;
+  let ringHalfPx = u.half.x;
+  let d = length(uv);
+  let fade = 1.0 - age;
+  let dotA = 1.0 - smoothstep(innerNorm * 0.92, innerNorm * 1.05, d);
+  let ringA = 1.0 - smoothstep(ringHalfPx, ringHalfPx * 1.4, abs(d - ringNorm));
+  let a = max(dotA, ringA) * fade;
+  if (a <= 0.0) { discard; }
+  return vec4<f32>(1.0, 1.0, 1.0, a);
+}
+`;
+
+// ---------- Particles: kill-mode protein/gut explosions ----------
+// One instanced quad per particle. Per-instance: (worldX, worldY, r,
+// alpha) packed as float32x4. Fragment shader fills a smooth disc.
+// Particle colours all live in a small palette (a few cell-type
+// colours from sim.killCell), so we pre-multiply the chosen colour
+// in the instance data and the shader just modulates by alpha.
+const PARTICLE_WGSL = /* wgsl */ `
+struct ParticleU {
+  cam: vec4<f32>,        // (scale, tx, ty, _)
+  vp: vec4<f32>,         // (viewportW, viewportH, _, _)
+};
+@group(0) @binding(0) var<uniform> u: ParticleU;
+
+struct VsOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+  @location(1) col: vec4<f32>,  // rgb + alpha
+};
+
+@vertex fn vs_main(
+  @location(0) corner: vec2<f32>,
+  @location(1) inst: vec4<f32>,   // (x, y, r, alpha)
+  @location(2) rgb: vec4<f32>,    // (r, g, b, _)
+) -> VsOut {
+  let camScale = u.cam.x;
+  let camT = u.cam.yz;
+  let vp = u.vp.xy;
+  let r = inst.z;
+  let worldPos = inst.xy + corner * r;
+  let screenPos = worldPos * camScale + camT;
+  var clip = (screenPos / vp) * 2.0 - 1.0;
+  clip.y = -clip.y;
+  var out: VsOut;
+  out.pos = vec4<f32>(clip, 0.0, 1.0);
+  out.uv = corner;
+  out.col = vec4<f32>(rgb.rgb, inst.w);
+  return out;
+}
+
+@fragment fn fs_main(@location(0) uv: vec2<f32>, @location(1) col: vec4<f32>) -> @location(0) vec4<f32> {
+  let d = length(uv);
+  // Soft disc: full opacity inside 0.85, fades to 0 by 1.0.
+  let a = (1.0 - smoothstep(0.85, 1.0, d)) * col.a;
+  if (a <= 0.0) { discard; }
+  return vec4<f32>(col.rgb, a);
+}
+`;
+
+// ---------- Cartoon faces (eyes + mouth, S.cartoon = true) ----------
+// One instanced quad per face-bearing cell. Fragment shader composes
+// 1-2 white eye discs (with dark pupils + glints), or a horizontal
+// ellipse squint when blinking, plus a per-type mouth (smile / frown /
+// snarl / fangs / tongue / drool). Mouth kind is packed into the
+// instance data as a float; the shader branches on it.
+//
+// MOUTH_KIND_FLOAT mirrors webgl2.js:
+//   0=none, 1=smile, 2=frown, 3=snarl, 4=fangs, 5=tongue, 6=drool.
+const FACE_WGSL = /* wgsl */ `
+struct FaceU {
+  cam: vec4<f32>,        // (scale, tx, ty, _)
+  vp_time: vec4<f32>,    // (viewportW, viewportH, time, _)
+};
+@group(0) @binding(0) var<uniform> u: FaceU;
+
+struct VsOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) uv: vec2<f32>,        // -1..1 across the cell-radius quad
+  @location(1) cfg0: vec4<f32>,      // (mouthKind, eyesCount, eyeR, eyeY)
+  @location(2) cfg1: vec4<f32>,      // (pupilR, lookX, lookY, mouthW)
+  @location(3) cfg2: vec4<f32>,      // (blink, mouthY, phase, _)
+  @location(4) mouthCol: vec3<f32>,
+};
+
+@vertex fn vs_main(
+  @location(0) corner: vec2<f32>,
+  @location(1) inst: vec4<f32>,        // (worldX, worldY, r, mouthKind)
+  @location(2) eyes: vec4<f32>,        // (eyesCount, eyeR, eyeY, pupilR)
+  @location(3) look: vec4<f32>,        // (lookX, lookY, mouthW, blink)
+  @location(4) mouth: vec4<f32>,       // (mouthY, phase, _, _)
+  @location(5) mouthCol: vec3<f32>,
+) -> VsOut {
+  let camScale = u.cam.x;
+  let camT = u.cam.yz;
+  let vp = u.vp_time.xy;
+  let r = inst.z;
+  let worldPos = inst.xy + corner * r;
+  let screenPos = worldPos * camScale + camT;
+  var clip = (screenPos / vp) * 2.0 - 1.0;
+  clip.y = -clip.y;
+  var out: VsOut;
+  out.pos = vec4<f32>(clip, 0.0, 1.0);
+  out.uv = corner;
+  out.cfg0 = vec4<f32>(inst.w, eyes.x, eyes.y, eyes.z);
+  out.cfg1 = vec4<f32>(eyes.w, look.x, look.y, look.z);
+  out.cfg2 = vec4<f32>(look.w, mouth.x, mouth.y, 0.0);
+  out.mouthCol = mouthCol;
+  return out;
+}
+
+// Mirrors webgl2.js's arcA / discA helpers exactly so the visual is
+// 1:1 (mouth & eye geometry, sizes, smoothstep edges).
+fn discA(uv: vec2<f32>, c: vec2<f32>, r: f32) -> f32 {
+  return 1.0 - smoothstep(r * 0.92, r, length(uv - c));
+}
+fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32) -> f32 {
+  let d = uv - c;
+  let dist = abs(length(d) - r);
+  let band = 1.0 - smoothstep(hw * 0.5, hw, dist);
+  let ang = atan2(d.y, d.x);
+  let in_arc = step(a0, ang) * step(ang, a1);
+  return band * in_arc;
+}
+
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+  let FACE_SCALE: f32 = 1.2;
+  let PI: f32 = 3.14159;
+  let time = u.vp_time.z;
+  let mouthKind = i32(in.cfg0.x + 0.5);
+  let eyesCount = i32(in.cfg0.y + 0.5);
+  let eyeRBase = in.cfg0.z;
+  let eyeY = in.cfg0.w;
+  let pupilRBase = in.cfg1.x;
+  let look = vec2<f32>(in.cfg1.y, in.cfg1.z);
+  let mouthW = in.cfg1.w;
+  let blink = in.cfg2.x;
+  let mouthY = in.cfg2.y;
+  let phase = in.cfg2.z;
+
+  if (eyesCount == 0 && mouthKind == 0) { discard; }
+
+  let uv = in.uv;
+  var col = vec3<f32>(0.0);
+  var a = 0.0;
+
+  // ---------- Eyes ----------
+  if (eyesCount > 0) {
+    let eyeR = eyeRBase * FACE_SCALE;
+    let pupilR = pupilRBase * FACE_SCALE;
+    let eL = select(vec2<f32>(0.0, eyeY), vec2<f32>(-0.22 * FACE_SCALE, eyeY), eyesCount >= 2);
+    let eR = vec2<f32>(0.22 * FACE_SCALE, eyeY);
+    for (var i: i32 = 0; i < 2; i = i + 1) {
+      if (i >= eyesCount) { break; }
+      let ec = select(eR, eL, i == 0);
+      let d = uv - ec;
+      if (blink > 0.5) {
+        let nx = d.x / max(eyeR, 0.001);
+        let ny = d.y / max(eyeR * 0.12, 0.001);
+        let ed = sqrt(nx * nx + ny * ny);
+        let wA = 1.0 - smoothstep(0.92, 1.0, ed);
+        col = mix(col, vec3<f32>(1.0), wA);
+        a = max(a, wA);
+      } else {
+        let ed = length(d) / max(eyeR, 0.001);
+        if (ed < 1.05) {
+          let white = 1.0 - smoothstep(0.92, 1.0, ed);
+          col = mix(col, vec3<f32>(1.0), white);
+          a = max(a, white);
+          let pupilCentre = ec + look * (eyeR * 0.45);
+          let pd = length(uv - pupilCentre) / max(pupilR, 0.001);
+          let pupilA = 1.0 - smoothstep(0.92, 1.05, pd);
+          col = mix(col, vec3<f32>(0.06, 0.07, 0.09), pupilA);
+          a = max(a, pupilA);
+          let glintCentre = pupilCentre - vec2<f32>(pupilR * 0.35, pupilR * 0.35);
+          let gd = length(uv - glintCentre) / max(pupilR * 0.30, 0.001);
+          let glintA = (1.0 - smoothstep(0.92, 1.05, gd)) * 0.85;
+          col = mix(col, vec3<f32>(1.0), glintA);
+        }
+      }
+    }
+  }
+
+  // ---------- Mouth ----------
+  let mc = vec2<f32>(0.0, mouthY);
+  let d = uv - mc;
+
+  if (mouthKind == 1 || mouthKind == 6) {
+    // SMILE (or DROOL — base smile)
+    let arc = arcA(uv, vec2<f32>(0.0, mouthY - mouthW * 0.3), mouthW, 0.04,
+      0.12 * PI, 0.88 * PI);
+    col = mix(col, in.mouthCol, arc);
+    a = max(a, arc);
+    if (mouthKind == 6) {
+      let dripPhase = fract(time * 0.6 + phase);
+      let dripC = vec2<f32>(mouthW * 0.25, mouthY + mouthW * 0.25 + dripPhase * mouthW * 0.8);
+      let dr = (uv - dripC) / vec2<f32>(mouthW * 0.10, mouthW * 0.16);
+      let dripA = (1.0 - smoothstep(0.85, 1.0, length(dr))) * (1.0 - dripPhase);
+      col = mix(col, vec3<f32>(0.47, 0.86, 0.51), dripA);
+      a = max(a, dripA);
+    }
+  } else if (mouthKind == 2) {
+    // FROWN
+    let arc = arcA(uv, vec2<f32>(0.0, mouthY + mouthW * 0.6), mouthW, 0.04,
+      1.12 * PI, 1.88 * PI);
+    col = mix(col, in.mouthCol, arc);
+    a = max(a, arc);
+  } else if (mouthKind == 3) {
+    // SNARL — 5-segment zig-zag teeth.
+    let xrel = uv.x / max(mouthW, 0.001);
+    if (abs(xrel) < 1.0) {
+      let seg = floor((xrel + 1.0) * 2.5);
+      let segMod = seg - 2.0 * floor(seg * 0.5);
+      let yTarget = mouthY + select(0.0, mouthW * 0.18, segMod >= 0.5);
+      let dy = abs(uv.y - yTarget);
+      let zigA = 1.0 - smoothstep(0.02, 0.04, dy);
+      col = mix(col, in.mouthCol, zigA);
+      a = max(a, zigA);
+    }
+  } else if (mouthKind == 4) {
+    // FANGS — open ellipse + two white wedges.
+    let dn = d / vec2<f32>(mouthW, mouthW * 0.45);
+    let open = 1.0 - smoothstep(0.92, 1.0, length(dn));
+    col = mix(col, in.mouthCol, open);
+    a = max(a, open);
+    let fL = vec2<f32>(-mouthW * 0.40, mouthY + mouthW * 0.10);
+    let fR = vec2<f32>( mouthW * 0.40, mouthY + mouthW * 0.10);
+    let fLA = 1.0 - smoothstep(0.85, 1.0,
+      length((uv - fL) / vec2<f32>(mouthW * 0.10, mouthW * 0.32)));
+    let fRA = 1.0 - smoothstep(0.85, 1.0,
+      length((uv - fR) / vec2<f32>(mouthW * 0.10, mouthW * 0.32)));
+    let fA = max(fLA, fRA);
+    col = mix(col, vec3<f32>(1.0), fA);
+    a = max(a, fA);
+  } else if (mouthKind == 5) {
+    // TONGUE — open ellipse + pink wagging tongue below.
+    let dn = d / vec2<f32>(mouthW, mouthW * 0.40);
+    let open = 1.0 - smoothstep(0.92, 1.0, length(dn));
+    col = mix(col, in.mouthCol, open);
+    a = max(a, open);
+    let wag = sin(time * 5.0 + phase) * mouthW * 0.18;
+    let tc = vec2<f32>(wag, mouthY + mouthW * 0.30);
+    let td = (uv - tc) / vec2<f32>(mouthW * 0.32, mouthW * 0.22);
+    let tA = 1.0 - smoothstep(0.85, 1.0, length(td));
+    col = mix(col, vec3<f32>(1.0, 0.54, 0.63), tA);
+    a = max(a, tA);
+  }
+
+  if (a <= 0.0) { discard; }
+  return vec4<f32>(col, a);
+}
+`;
+
 // ---------- Helpers ----------
 
 function hexToRgb(hex) {
@@ -458,6 +795,33 @@ export class WebGPURenderer extends RendererBase {
     this._metaPool = [];
     this._metaResolvedMode = null;
 
+    // Target marker (dashed lines + pulsing circle, drawn from
+    // drawSelection when sim.targetMarker is present).
+    this._dashPipeline = null;
+    this._dashUniformBuffer = null;
+    this._dashBindGroup = null;
+    this._dashVertexBuffer = null;
+    this._dashCapacity = 0;             // line vertex capacity (each is 3 floats)
+    this._markerPipeline = null;
+    this._markerUniformBuffer = null;
+    this._markerBindGroup = null;
+
+    // Particles (kill-mode protein/gut explosions).
+    this._particlePipeline = null;
+    this._particleUniformBuffer = null;
+    this._particleBindGroup = null;
+    this._particleInstanceBuffer = null;
+    this._particleCapacity = 0;         // particles
+    this._particleData = new Float32Array(0);
+
+    // Cartoon faces (S.cartoon).
+    this._facePipeline = null;
+    this._faceUniformBuffer = null;
+    this._faceBindGroup = null;
+    this._faceInstanceBuffer = null;
+    this._faceCapacity = 0;             // face-bearing cells
+    this._faceData = new Float32Array(0);
+
     // Per-frame transient state (set in beginFrame, cleared in endFrame).
     this._frameEncoder = null;
     this._frameView = null;
@@ -488,6 +852,200 @@ export class WebGPURenderer extends RendererBase {
     this._buildDiskPipeline();
     this._growInstanceBuffer(64);
     this._buildMetaPipelines();
+    this._buildOverlayPipelines();
+  }
+
+  // Dashed-line target lines, pulsing-circle marker, particles, and
+  // cartoon faces. All four use the existing _cornerBuffer (or a
+  // dedicated dynamic vertex buffer for dashed lines / particles /
+  // faces) and a per-pipeline uniform + bind group.
+  _buildOverlayPipelines() {
+    const device = this.device;
+    const fmt = this.format;
+
+    const stdBlend = {
+      color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+      alpha: { srcFactor: 'one',       dstFactor: 'one-minus-src-alpha', operation: 'add' },
+    };
+
+    // ---- Dashed lines (LineList) ----
+    const dashModule = device.createShaderModule({ code: DASH_WGSL });
+    this._dashPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: dashModule,
+        entryPoint: 'vs_main',
+        buffers: [{
+          arrayStride: 12, // (x, y, dist) — 3 floats
+          stepMode: 'vertex',
+          attributes: [
+            { shaderLocation: 0, offset: 0, format: 'float32x2' },
+            { shaderLocation: 1, offset: 8, format: 'float32' },
+          ],
+        }],
+      },
+      fragment: {
+        module: dashModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: fmt, blend: stdBlend }],
+      },
+      primitive: { topology: 'line-list' },
+    });
+    this._dashUniformBuffer = device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._dashBindGroup = device.createBindGroup({
+      layout: this._dashPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this._dashUniformBuffer } }],
+    });
+
+    // ---- Marker quad ----
+    const markerModule = device.createShaderModule({ code: MARKER_WGSL });
+    this._markerPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: markerModule,
+        entryPoint: 'vs_main',
+        buffers: [{
+          arrayStride: 8,
+          stepMode: 'vertex',
+          attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }],
+        }],
+      },
+      fragment: {
+        module: markerModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: fmt, blend: stdBlend }],
+      },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._markerUniformBuffer = device.createBuffer({
+      size: 64,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._markerBindGroup = device.createBindGroup({
+      layout: this._markerPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this._markerUniformBuffer } }],
+    });
+
+    // ---- Particles (instanced quad, 8 floats per particle) ----
+    const partModule = device.createShaderModule({ code: PARTICLE_WGSL });
+    this._particlePipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: partModule,
+        entryPoint: 'vs_main',
+        buffers: [
+          {
+            arrayStride: 8,
+            stepMode: 'vertex',
+            attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }],
+          },
+          {
+            arrayStride: 32,             // (x, y, r, alpha, R, G, B, _pad)
+            stepMode: 'instance',
+            attributes: [
+              { shaderLocation: 1, offset: 0,  format: 'float32x4' },
+              { shaderLocation: 2, offset: 16, format: 'float32x4' },
+            ],
+          },
+        ],
+      },
+      fragment: {
+        module: partModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: fmt, blend: stdBlend }],
+      },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._particleUniformBuffer = device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._particleBindGroup = device.createBindGroup({
+      layout: this._particlePipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this._particleUniformBuffer } }],
+    });
+    this._growParticleBuffer(64);
+
+    // ---- Cartoon faces (instanced quad, 19 floats per face) ----
+    const faceModule = device.createShaderModule({ code: FACE_WGSL });
+    this._facePipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: faceModule,
+        entryPoint: 'vs_main',
+        buffers: [
+          {
+            arrayStride: 8,
+            stepMode: 'vertex',
+            attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }],
+          },
+          {
+            arrayStride: 76,             // 19 floats per face
+            stepMode: 'instance',
+            attributes: [
+              { shaderLocation: 1, offset: 0,  format: 'float32x4' }, // (x, y, r, mouthKind)
+              { shaderLocation: 2, offset: 16, format: 'float32x4' }, // (eyesCount, eyeR, eyeY, pupilR)
+              { shaderLocation: 3, offset: 32, format: 'float32x4' }, // (lookX, lookY, mouthW, blink)
+              { shaderLocation: 4, offset: 48, format: 'float32x4' }, // (mouthY, phase, _, _)
+              { shaderLocation: 5, offset: 64, format: 'float32x3' }, // mouthCol
+            ],
+          },
+        ],
+      },
+      fragment: {
+        module: faceModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: fmt, blend: stdBlend }],
+      },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._faceUniformBuffer = device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._faceBindGroup = device.createBindGroup({
+      layout: this._facePipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this._faceUniformBuffer } }],
+    });
+    this._growFaceBuffer(64);
+  }
+
+  _growParticleBuffer(target) {
+    if (target <= this._particleCapacity) return;
+    const newCap = Math.max(64, Math.ceil(target * 1.5));
+    this._particleData = new Float32Array(newCap * 8);
+    this._particleCapacity = newCap;
+    if (this._particleInstanceBuffer) this._particleInstanceBuffer.destroy();
+    this._particleInstanceBuffer = this.device.createBuffer({
+      size: this._particleData.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  _growFaceBuffer(target) {
+    if (target <= this._faceCapacity) return;
+    const newCap = Math.max(64, Math.ceil(target * 1.5));
+    this._faceData = new Float32Array(newCap * 19);
+    this._faceCapacity = newCap;
+    if (this._faceInstanceBuffer) this._faceInstanceBuffer.destroy();
+    this._faceInstanceBuffer = this.device.createBuffer({
+      size: this._faceData.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  _ensureDashCapacity(vertCount) {
+    if (vertCount <= this._dashCapacity) return;
+    const newCap = Math.max(64, Math.ceil(vertCount * 1.5));
+    this._dashCapacity = newCap;
+    if (this._dashVertexBuffer) this._dashVertexBuffer.destroy();
+    this._dashVertexBuffer = this.device.createBuffer({
+      size: newCap * 12, // 3 floats per vertex
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
   }
 
   _buildMetaPipelines() {
@@ -933,6 +1491,8 @@ export class WebGPURenderer extends RendererBase {
     if (splittingByCellId && splittingByCellId.size > 0) {
       this._renderSplittingPairs(splittingByCellId, time);
     }
+
+    if (S.cartoon) this._drawFacesPass(shapes, time);
   }
 
   // Per-pair metaball pass (S.metaSplit). Renders both halves' wobble
@@ -1129,12 +1689,201 @@ export class WebGPURenderer extends RendererBase {
     }
   }
 
-  // Decorations, cartoon faces, dashed-line target marker, particles,
-  // and debug overlay are deferred. The selection ring + brighten wash
-  // *are* already inline in the disk fragment shader, so drawSelection
-  // is a no-op here (the equivalent webgl2.js path also folds the ring
-  // into the disk pass via the `sel` packed bit).
-  drawSelection(/* shapes, time */) {}
+  // Selection ring + brighten wash are inline in the disk fragment
+  // shader (folded in via the `sel` packed bit, same as webgl2). What's
+  // left here is the target marker — pulsing circle + dashed lines from
+  // each selected cell to the marker point — drawn when sim.targetMarker
+  // is set. Decorations + debug overlay are still deferred.
+  drawSelection(/* shapes, time */) {
+    if (!this._frameEncoder || !this._frameView) return;
+    if (this.sim && this.sim.targetMarker) this._drawTargetMarker();
+  }
+
+  _drawTargetMarker() {
+    const device = this.device;
+    const m = this.sim.targetMarker;
+    const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+    const age = (now - m.t0) / 1500;
+    if (age >= 1) {
+      this.sim.targetMarker = null;
+      return;
+    }
+    const fade = 1 - age;
+    const cam = this.camera;
+    const camScale = cam.scale;
+
+    // ---- Dashed lines from each selected cell to the marker ----
+    const sel = this.sim.selectedCells;
+    if (sel && sel.size > 0) {
+      const verts = [];
+      for (const c of sel) {
+        if (c.state !== 'NORMAL') continue;
+        const dx = m.x - c.x, dy = m.y - c.y;
+        const screenLen = Math.hypot(dx, dy) * camScale;
+        verts.push(c.x, c.y, 0);
+        verts.push(m.x, m.y, screenLen);
+      }
+      if (verts.length > 0) {
+        const arr = new Float32Array(verts);
+        const vertCount = verts.length / 3;
+        this._ensureDashCapacity(vertCount);
+        device.queue.writeBuffer(this._dashVertexBuffer, 0, arr.buffer, arr.byteOffset, arr.byteLength);
+        device.queue.writeBuffer(this._dashUniformBuffer, 0, new Float32Array([
+          camScale, cam.tx, cam.ty, 0,
+          this.W, this.H, -now * 0.04, fade,
+        ]));
+        const pass = this._frameEncoder.beginRenderPass({
+          colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+        });
+        pass.setPipeline(this._dashPipeline);
+        pass.setBindGroup(0, this._dashBindGroup);
+        pass.setVertexBuffer(0, this._dashVertexBuffer);
+        pass.draw(vertCount, 1, 0, 0);
+        pass.end();
+      }
+    }
+
+    // ---- Pulsing circle + inner dot at the marker ----
+    const ringWorld = (18 / camScale) * (1 + 0.4 * age);
+    const innerWorld = 4 / camScale;
+    const quadR = ringWorld + 6 / camScale;
+    device.queue.writeBuffer(this._markerUniformBuffer, 0, new Float32Array([
+      camScale, cam.tx, cam.ty, 0,
+      this.W, this.H, m.x, m.y,
+      quadR, age, innerWorld / quadR, ringWorld / quadR,
+      (3 / camScale) / quadR, 0, 0, 0,
+    ]));
+    const pass = this._frameEncoder.beginRenderPass({
+      colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+    });
+    pass.setPipeline(this._markerPipeline);
+    pass.setBindGroup(0, this._markerBindGroup);
+    pass.setVertexBuffer(0, this._cornerBuffer);
+    pass.draw(6, 1, 0, 0);
+    pass.end();
+  }
+
+  // Particle pass — kill-mode protein/gut explosions. One instanced
+  // quad per particle. sim.particles entries: { x, y, vx, vy, r, color
+  // (hex string), life, maxLife }.
+  drawParticles(particles /* , time, timeMs */) {
+    if (!this._frameEncoder || !this._frameView) return;
+    if (!particles || particles.length === 0) return;
+    const device = this.device;
+    this._growParticleBuffer(particles.length);
+    const data = this._particleData;
+    let n = 0;
+    for (let i = 0; i < particles.length; i++) {
+      const p = particles[i];
+      const a = Math.max(0, Math.min(1, p.life / Math.max(p.maxLife, 1e-3)));
+      if (a <= 0) continue;
+      const rgb = hexToRgb(p.color || '#ffffff');
+      const j = n * 8;
+      data[j]     = p.x;
+      data[j + 1] = p.y;
+      data[j + 2] = p.r;
+      data[j + 3] = a;
+      data[j + 4] = rgb[0];
+      data[j + 5] = rgb[1];
+      data[j + 6] = rgb[2];
+      data[j + 7] = 0;
+      n++;
+    }
+    if (n === 0) return;
+    device.queue.writeBuffer(
+      this._particleInstanceBuffer, 0,
+      data.buffer, data.byteOffset, n * 32,
+    );
+    const cam = this.camera;
+    device.queue.writeBuffer(this._particleUniformBuffer, 0, new Float32Array([
+      cam.scale, cam.tx, cam.ty, 0,
+      this.W, this.H, 0, 0,
+    ]));
+    const pass = this._frameEncoder.beginRenderPass({
+      colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+    });
+    pass.setPipeline(this._particlePipeline);
+    pass.setBindGroup(0, this._particleBindGroup);
+    pass.setVertexBuffer(0, this._cornerBuffer);
+    pass.setVertexBuffer(1, this._particleInstanceBuffer);
+    pass.draw(6, n, 0, 0);
+    pass.end();
+  }
+
+  // Cartoon-face pass. Called from drawCells (after the disk pass)
+  // when S.cartoon is on. Per-cell instance: position + radius +
+  // mouth kind, eye config (count / size / Y / pupil size), look
+  // direction + mouth width + blink, mouth Y + animation phase, mouth
+  // colour. Cells with no eyes and no mouth are skipped.
+  _drawFacesPass(shapes, time) {
+    if (!this._frameEncoder || !this._frameView) return;
+    if (!shapes || shapes.length === 0) return;
+    const device = this.device;
+    const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+    this._growFaceBuffer(shapes.length);
+    const data = this._faceData;
+    let n = 0;
+    for (let i = 0; i < shapes.length; i++) {
+      const s = shapes[i];
+      const c = s.cell;
+      const cfg = FACE[c.type] || FACE.default;
+      const eyesCount = cfg.eyes || 0;
+      const mouthName = cfg.mouth || 'none';
+      const mouthKind = MOUTH_KIND_FLOAT[mouthName] || 0;
+      if (eyesCount === 0 && mouthKind === 0) continue;
+      let lookX = c.vx, lookY = c.vy;
+      if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
+        lookX = c.alarmTarget.x - c.x;
+        lookY = c.alarmTarget.y - c.y;
+      }
+      const lm = Math.hypot(lookX, lookY) || 1;
+      lookX /= lm; lookY /= lm;
+      if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
+      const blink = ((c.nextBlink - now) < 120 && (c.nextBlink - now) > 0) ? 1 : 0;
+      const mc = (CELL_TYPES[c.type] || CELL_TYPES.neutrophil).colors;
+      const mcRgb = hexToRgb(mc.nucleus);
+      const j = n * 19;
+      data[j]      = c.x;
+      data[j + 1]  = c.y;
+      data[j + 2]  = c.r;
+      data[j + 3]  = mouthKind;
+      data[j + 4]  = eyesCount;
+      data[j + 5]  = cfg.eyeR != null ? cfg.eyeR : 0.18;
+      data[j + 6]  = cfg.eyeY != null ? cfg.eyeY : -0.10;
+      data[j + 7]  = cfg.pupilR != null ? cfg.pupilR : 0.07;
+      data[j + 8]  = lookX;
+      data[j + 9]  = lookY;
+      data[j + 10] = 0.34 * 1.2;          // mouthW (half-extent in body-r units)
+      data[j + 11] = blink;
+      data[j + 12] = 0.18;                // mouthY
+      data[j + 13] = c.phase || 0;
+      data[j + 14] = 0;
+      data[j + 15] = 0;
+      data[j + 16] = mcRgb[0];
+      data[j + 17] = mcRgb[1];
+      data[j + 18] = mcRgb[2];
+      n++;
+    }
+    if (n === 0) return;
+    device.queue.writeBuffer(
+      this._faceInstanceBuffer, 0,
+      data.buffer, data.byteOffset, n * 76,
+    );
+    const cam = this.camera;
+    device.queue.writeBuffer(this._faceUniformBuffer, 0, new Float32Array([
+      cam.scale, cam.tx, cam.ty, 0,
+      this.W, this.H, time, 0,
+    ]));
+    const pass = this._frameEncoder.beginRenderPass({
+      colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+    });
+    pass.setPipeline(this._facePipeline);
+    pass.setBindGroup(0, this._faceBindGroup);
+    pass.setVertexBuffer(0, this._cornerBuffer);
+    pass.setVertexBuffer(1, this._faceInstanceBuffer);
+    pass.draw(6, n, 0, 0);
+    pass.end();
+  }
 
   endFrame() {
     if (!this._frameEncoder) return;
@@ -1152,21 +1901,44 @@ export class WebGPURenderer extends RendererBase {
       try { this.context.unconfigure(); } catch {}
       this.context = null;
     }
-    if (this._instanceBuffer) { try { this._instanceBuffer.destroy(); } catch {} }
-    if (this._cornerBuffer)   { try { this._cornerBuffer.destroy(); }   catch {} }
-    if (this._uniformBuffer)  { try { this._uniformBuffer.destroy(); }  catch {} }
-    if (this._metaPolyBuffer) { try { this._metaPolyBuffer.destroy(); } catch {} }
+    const tryDestroy = (b) => { if (b) { try { b.destroy(); } catch {} } };
+    tryDestroy(this._instanceBuffer);
+    tryDestroy(this._cornerBuffer);
+    tryDestroy(this._uniformBuffer);
+    tryDestroy(this._metaPolyBuffer);
+    tryDestroy(this._dashUniformBuffer);
+    tryDestroy(this._dashVertexBuffer);
+    tryDestroy(this._markerUniformBuffer);
+    tryDestroy(this._particleUniformBuffer);
+    tryDestroy(this._particleInstanceBuffer);
+    tryDestroy(this._faceUniformBuffer);
+    tryDestroy(this._faceInstanceBuffer);
     this._metaDestroyPool();
     this._instanceBuffer = null;
     this._cornerBuffer = null;
     this._uniformBuffer = null;
     this._metaPolyBuffer = null;
+    this._dashUniformBuffer = null;
+    this._dashVertexBuffer = null;
+    this._markerUniformBuffer = null;
+    this._particleUniformBuffer = null;
+    this._particleInstanceBuffer = null;
+    this._faceUniformBuffer = null;
+    this._faceInstanceBuffer = null;
     this._diskPipeline = null;
     this._diskBindGroup = null;
     this._metaPolyPipeline = null;
     this._metaBlurPipeline = null;
     this._metaTintPipeline = null;
     this._metaSampler = null;
+    this._dashPipeline = null;
+    this._dashBindGroup = null;
+    this._markerPipeline = null;
+    this._markerBindGroup = null;
+    this._particlePipeline = null;
+    this._particleBindGroup = null;
+    this._facePipeline = null;
+    this._faceBindGroup = null;
     if (this.device) {
       try { this.device.destroy(); } catch {}
       this.device = null;
