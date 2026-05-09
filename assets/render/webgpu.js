@@ -8,9 +8,12 @@
 // Coverage: instanced SDF disks (round / lobed / rippled / oblong /
 // pseudopod / star) with per-type nucleus, membrane, selection ring,
 // flash overlay; per-pair metaSplit metaball merge with three
-// configurable RT-sizing strategies (S.metaRtMode). Decorations,
-// cartoon faces, dashed-line target marker, particles, and the debug
-// overlay are still deferred — they layer on top in follow-up commits.
+// configurable RT-sizing strategies (S.metaRtMode); per-type
+// decorations (spikes / tendrils / flagella / cilia / drips / legs /
+// fuzz / Y-receptors); cartoon faces (eyes + mouth, S.cartoon);
+// dashed-line target marker + pulsing-circle marker; kill-mode
+// particles. Only the debug overlay is still deferred (it's stubbed
+// in webgl2.js too — needs a design first).
 //
 // Async note: WebGPU's adapter + device requests are async, but the
 // IRenderer interface's init() is sync. Mirroring the PixiRenderer
@@ -19,7 +22,7 @@
 
 import {
   S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
-  currentBackground, currentTheme, currentHighlightColor, cellColors,
+  currentBackground, currentTheme, currentHighlightColor, cellColors, frac,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { RendererBase } from './renderer.js';
@@ -517,6 +520,43 @@ struct VsOut {
 }
 `;
 
+// ---------- Decorations (per-type spikes / tendrils / flagella / etc.) ----------
+// Mirrors webgl2.js's VERT_DECOR / FRAG_DECOR. Two pipelines share this
+// module — same vertex layout (x, y, r, g, b, a), one drawn as line-list
+// and one as triangle-list.
+const DECOR_WGSL = /* wgsl */ `
+struct DecorU {
+  cam: vec4<f32>,        // (scale, tx, ty, _)
+  vp: vec4<f32>,         // (viewportW, viewportH, _, _)
+};
+@group(0) @binding(0) var<uniform> u: DecorU;
+
+struct VsOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) col: vec4<f32>,
+};
+
+@vertex fn vs_main(
+  @location(0) pos: vec2<f32>,
+  @location(1) col: vec4<f32>,
+) -> VsOut {
+  let camScale = u.cam.x;
+  let camT = u.cam.yz;
+  let vp = u.vp.xy;
+  let screenPos = pos * camScale + camT;
+  var clip = (screenPos / vp) * 2.0 - 1.0;
+  clip.y = -clip.y;
+  var out: VsOut;
+  out.pos = vec4<f32>(clip, 0.0, 1.0);
+  out.col = col;
+  return out;
+}
+
+@fragment fn fs_main(@location(0) col: vec4<f32>) -> @location(0) vec4<f32> {
+  return col;
+}
+`;
+
 // ---------- Cartoon faces (eyes + mouth, S.cartoon = true) ----------
 // One instanced quad per face-bearing cell. Fragment shader composes
 // 1-2 white eye discs (with dark pupils + glints), or a horizontal
@@ -814,6 +854,20 @@ export class WebGPURenderer extends RendererBase {
     this._particleCapacity = 0;         // particles
     this._particleData = new Float32Array(0);
 
+    // Decorations (per-type spikes / tendrils / flagella / etc.).
+    // Two flat arrays of vertex floats, refilled per frame, then
+    // uploaded into separate line / triangle vertex buffers.
+    this._decorLines = [];
+    this._decorTris = [];
+    this._decorLinePipeline = null;
+    this._decorTriPipeline = null;
+    this._decorUniformBuffer = null;
+    this._decorBindGroup = null;
+    this._decorLineBuffer = null;
+    this._decorTriBuffer = null;
+    this._decorLineCap = 0;            // line vert capacity
+    this._decorTriCap = 0;             // tri vert capacity
+
     // Cartoon faces (S.cartoon).
     this._facePipeline = null;
     this._faceUniformBuffer = null;
@@ -969,6 +1023,58 @@ export class WebGPURenderer extends RendererBase {
     });
     this._growParticleBuffer(64);
 
+    // ---- Decorations (line-list + triangle-list pipelines) ----
+    // Both pipelines share an explicit bind-group layout so a single
+    // bind group works for both — auto-derived layouts aren't
+    // guaranteed cross-pipeline-compatible by the WebGPU spec.
+    const decorModule = device.createShaderModule({ code: DECOR_WGSL });
+    const decorBgLayout = device.createBindGroupLayout({
+      entries: [{
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: 'uniform' },
+      }],
+    });
+    const decorPipelineLayout = device.createPipelineLayout({
+      bindGroupLayouts: [decorBgLayout],
+    });
+    const decorVertexLayout = {
+      arrayStride: 24,                 // (x, y, r, g, b, a) — 6 floats
+      stepMode: 'vertex',
+      attributes: [
+        { shaderLocation: 0, offset: 0, format: 'float32x2' },
+        { shaderLocation: 1, offset: 8, format: 'float32x4' },
+      ],
+    };
+    this._decorLinePipeline = device.createRenderPipeline({
+      layout: decorPipelineLayout,
+      vertex: { module: decorModule, entryPoint: 'vs_main', buffers: [decorVertexLayout] },
+      fragment: {
+        module: decorModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: fmt, blend: stdBlend }],
+      },
+      primitive: { topology: 'line-list' },
+    });
+    this._decorTriPipeline = device.createRenderPipeline({
+      layout: decorPipelineLayout,
+      vertex: { module: decorModule, entryPoint: 'vs_main', buffers: [decorVertexLayout] },
+      fragment: {
+        module: decorModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: fmt, blend: stdBlend }],
+      },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._decorUniformBuffer = device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._decorBindGroup = device.createBindGroup({
+      layout: decorBgLayout,
+      entries: [{ binding: 0, resource: { buffer: this._decorUniformBuffer } }],
+    });
+
     // ---- Cartoon faces (instanced quad, 19 floats per face) ----
     const faceModule = device.createShaderModule({ code: FACE_WGSL });
     this._facePipeline = device.createRenderPipeline({
@@ -1044,6 +1150,28 @@ export class WebGPURenderer extends RendererBase {
     if (this._dashVertexBuffer) this._dashVertexBuffer.destroy();
     this._dashVertexBuffer = this.device.createBuffer({
       size: newCap * 12, // 3 floats per vertex
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  _ensureDecorLineCapacity(vertCount) {
+    if (vertCount <= this._decorLineCap) return;
+    const newCap = Math.max(64, Math.ceil(vertCount * 1.5));
+    this._decorLineCap = newCap;
+    if (this._decorLineBuffer) this._decorLineBuffer.destroy();
+    this._decorLineBuffer = this.device.createBuffer({
+      size: newCap * 24, // 6 floats per vertex
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  _ensureDecorTriCapacity(vertCount) {
+    if (vertCount <= this._decorTriCap) return;
+    const newCap = Math.max(64, Math.ceil(vertCount * 1.5));
+    this._decorTriCap = newCap;
+    if (this._decorTriBuffer) this._decorTriBuffer.destroy();
+    this._decorTriBuffer = this.device.createBuffer({
+      size: newCap * 24,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
   }
@@ -1492,6 +1620,10 @@ export class WebGPURenderer extends RendererBase {
       this._renderSplittingPairs(splittingByCellId, time);
     }
 
+    // Per-cell decorations layer on top of the disk pass (matches
+    // webgl2's render order). Faces draw last so they sit above
+    // decoration lines.
+    this._drawDecorations(shapes, time);
     if (S.cartoon) this._drawFacesPass(shapes, time);
   }
 
@@ -1892,6 +2024,318 @@ export class WebGPURenderer extends RendererBase {
     this._frameView = null;
   }
 
+  // Decoration pass (S.metaSplit-independent). Per-type spikes /
+  // tendrils / flagella / cilia / drips / legs / fuzz / Y-receptors.
+  // Geometry is generated CPU-side (each helper pushes line + triangle
+  // verts into shared arrays); two GPU draws upload + render the
+  // accumulated data. The helpers are 1:1 ports of webgl2.js's
+  // _decor* methods — same Math, same constants — so the visual
+  // output matches.
+  _drawDecorations(shapes, time) {
+    if (!this._frameEncoder || !this._frameView) return;
+    if (!shapes || shapes.length === 0) return;
+    this._decorLines.length = 0;
+    this._decorTris.length = 0;
+    const theme = currentTheme();
+    for (const s of shapes) {
+      const c = s.cell;
+      const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+      const kind = type.decoration && type.decoration.kind;
+      if (!kind || kind === 'none') continue;
+      switch (kind) {
+        case 'bigSpikes':         this._decorBigSpikes(s, theme, time); break;
+        case 'spikesPulsing':     this._decorSpikesPulsing(s, theme, time); break;
+        case 'tendrils':          this._decorTendrils(s, theme, time); break;
+        case 'tentaclesWiggling': this._decorTentacles(s, theme, time); break;
+        case 'flagellum':         this._decorFlagellum(s, theme, time); break;
+        case 'drips':             this._decorDrips(s, theme, time); break;
+        case 'legs':              this._decorLegs(s, theme, time); break;
+        case 'fuzz':              this._decorFuzz(s, theme, time); break;
+        case 'yReceptorsFew':     this._decorY(s, theme, time, 6); break;
+        case 'yReceptorsMany':    this._decorY(s, theme, time, 14); break;
+      }
+    }
+    if (this._decorLines.length === 0 && this._decorTris.length === 0) return;
+    this._uploadAndDrawDecorations();
+  }
+
+  _pushLine(x1, y1, x2, y2, r, g, b, a) {
+    const arr = this._decorLines;
+    arr.push(x1, y1, r, g, b, a, x2, y2, r, g, b, a);
+  }
+  _pushTri(p0, p1, p2, r, g, b, a) {
+    const arr = this._decorTris;
+    arr.push(
+      p0[0], p0[1], r, g, b, a,
+      p1[0], p1[1], r, g, b, a,
+      p2[0], p2[1], r, g, b, a,
+    );
+  }
+
+  _uploadAndDrawDecorations() {
+    const device = this.device;
+    const cam = this.camera;
+    device.queue.writeBuffer(this._decorUniformBuffer, 0, new Float32Array([
+      cam.scale, cam.tx, cam.ty, 0,
+      this.W, this.H, 0, 0,
+    ]));
+
+    if (this._decorLines.length > 0) {
+      const arr = new Float32Array(this._decorLines);
+      const vertCount = this._decorLines.length / 6;
+      this._ensureDecorLineCapacity(vertCount);
+      device.queue.writeBuffer(
+        this._decorLineBuffer, 0,
+        arr.buffer, arr.byteOffset, arr.byteLength,
+      );
+      const pass = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+      });
+      pass.setPipeline(this._decorLinePipeline);
+      pass.setBindGroup(0, this._decorBindGroup);
+      pass.setVertexBuffer(0, this._decorLineBuffer);
+      pass.draw(vertCount, 1, 0, 0);
+      pass.end();
+    }
+    if (this._decorTris.length > 0) {
+      const arr = new Float32Array(this._decorTris);
+      const vertCount = this._decorTris.length / 6;
+      this._ensureDecorTriCapacity(vertCount);
+      device.queue.writeBuffer(
+        this._decorTriBuffer, 0,
+        arr.buffer, arr.byteOffset, arr.byteLength,
+      );
+      const pass = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+      });
+      pass.setPipeline(this._decorTriPipeline);
+      pass.setBindGroup(0, this._decorBindGroup);
+      pass.setVertexBuffer(0, this._decorTriBuffer);
+      pass.draw(vertCount, 1, 0, 0);
+      pass.end();
+    }
+  }
+
+  // ---------- Per-decoration helpers (1:1 with webgl2.js) ----------
+
+  _decorBigSpikes(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const accent = hexToRgb(cc.accent);
+    const outline = hexToRgb(theme.outline.color);
+    const N = 8;
+    const tipLen = s.r * 0.55;
+    const baseHalf = s.r * 0.09;
+    for (let i = 0; i < N; i++) {
+      const jitter = (frac(c.id * 0.31 + i * 0.71) - 0.5) * 0.25;
+      const theta = (i / N) * Math.PI * 2 + jitter;
+      const base = shapeVertex(s, theta, t);
+      const a = [base.x + Math.cos(theta + Math.PI / 2) * baseHalf,
+                 base.y + Math.sin(theta + Math.PI / 2) * baseHalf];
+      const b = [base.x + Math.cos(theta - Math.PI / 2) * baseHalf,
+                 base.y + Math.sin(theta - Math.PI / 2) * baseHalf];
+      const tip = [base.x + Math.cos(theta) * tipLen, base.y + Math.sin(theta) * tipLen];
+      this._pushTri(a, tip, b, accent[0], accent[1], accent[2], 1.0);
+      this._pushLine(a[0], a[1], tip[0], tip[1], outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(tip[0], tip[1], b[0], b[1], outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(b[0], b[1], a[0], a[1], outline[0], outline[1], outline[2], 1.0);
+    }
+  }
+
+  _decorSpikesPulsing(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const accent = hexToRgb(cc.accent);
+    const outline = hexToRgb(theme.outline.color);
+    const N = 10;
+    const baseHalf = s.r * 0.09;
+    for (let i = 0; i < N; i++) {
+      const jitter = (frac(c.id * 0.31 + i * 0.71) - 0.5) * 0.18;
+      const theta = (i / N) * Math.PI * 2 + jitter;
+      const tipLen = s.r * (0.45 + 0.18 * Math.sin(t * 2.5 + i * 0.7 + (c.wobbleSeed || 0)));
+      const base = shapeVertex(s, theta, t);
+      const a = [base.x + Math.cos(theta + Math.PI / 2) * baseHalf,
+                 base.y + Math.sin(theta + Math.PI / 2) * baseHalf];
+      const b = [base.x + Math.cos(theta - Math.PI / 2) * baseHalf,
+                 base.y + Math.sin(theta - Math.PI / 2) * baseHalf];
+      const tip = [base.x + Math.cos(theta) * tipLen, base.y + Math.sin(theta) * tipLen];
+      this._pushTri(a, tip, b, accent[0], accent[1], accent[2], 1.0);
+      this._pushLine(a[0], a[1], tip[0], tip[1], outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(tip[0], tip[1], b[0], b[1], outline[0], outline[1], outline[2], 1.0);
+    }
+  }
+
+  _decorTendrils(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToRgb(cc.cytoBot);
+    const N = 13;
+    const SEG = 12;
+    for (let i = 0; i < N; i++) {
+      const baseAng = (i / N) * Math.PI * 2 + c.phase;
+      const base = shapeVertex(s, baseAng, t);
+      const len = s.r * (1.1 + 0.4 * frac(c.id * 0.13 + i * 0.7));
+      const sway = 0.4 * Math.sin(t * 0.9 + i * 1.3 + c.wobbleSeed);
+      const tipAng = baseAng + sway * 0.4;
+      const tipX = base.x + Math.cos(tipAng) * len;
+      const tipY = base.y + Math.sin(tipAng) * len;
+      const ctrlAng = baseAng + sway;
+      const ctrlR = len * 0.6;
+      const cpX = base.x + Math.cos(ctrlAng) * ctrlR;
+      const cpY = base.y + Math.sin(ctrlAng) * ctrlR;
+      let prevX = base.x, prevY = base.y;
+      for (let k = 1; k <= SEG; k++) {
+        const u = k / SEG;
+        const iu = 1 - u;
+        const x = iu * iu * base.x + 2 * iu * u * cpX + u * u * tipX;
+        const y = iu * iu * base.y + 2 * iu * u * cpY + u * u * tipY;
+        this._pushLine(prevX, prevY, x, y, col[0], col[1], col[2], 1.0);
+        prevX = x; prevY = y;
+      }
+    }
+  }
+
+  _decorTentacles(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToRgb(cc.cytoBot);
+    const N = 6;
+    const SEG = 12;
+    for (let i = 0; i < N; i++) {
+      const baseAng = (i / N) * Math.PI * 2 + c.phase;
+      const base = shapeVertex(s, baseAng, t);
+      const len = s.r * (1.0 + 0.5 * frac(c.id * 0.13 + i * 0.7));
+      const sway = 0.7 * Math.sin(t * 1.6 + i * 1.3 + c.wobbleSeed);
+      const curl = 0.6 * Math.sin(t * 1.1 + i * 0.5);
+      const midAng = baseAng + sway;
+      const midX = base.x + Math.cos(midAng) * len * 0.6;
+      const midY = base.y + Math.sin(midAng) * len * 0.6;
+      const tipAng = baseAng + sway + curl;
+      const tipX = base.x + Math.cos(tipAng) * len;
+      const tipY = base.y + Math.sin(tipAng) * len;
+      let prevX = base.x, prevY = base.y;
+      for (let k = 1; k <= SEG; k++) {
+        const u = k / SEG;
+        const iu = 1 - u;
+        const x = iu * iu * base.x + 2 * iu * u * midX + u * u * tipX;
+        const y = iu * iu * base.y + 2 * iu * u * midY + u * u * tipY;
+        this._pushLine(prevX, prevY, x, y, col[0], col[1], col[2], 1.0);
+        prevX = x; prevY = y;
+      }
+    }
+  }
+
+  _decorFlagellum(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToRgb(cc.accent);
+    const ang = (c.orientation || 0) + Math.PI;
+    const startV = shapeVertex(s, ang, t);
+    const dirX = Math.cos(ang), dirY = Math.sin(ang);
+    const perpX = -dirY, perpY = dirX;
+    const length = s.r * 1.6;
+    const N = 24;
+    let prevX = startV.x, prevY = startV.y;
+    for (let i = 1; i <= N; i++) {
+      const u = i / N;
+      const along = length * u;
+      const wave = Math.sin(u * Math.PI * 3 - t * 6) * (s.r * 0.18) * u;
+      const x = startV.x + dirX * along + perpX * wave;
+      const y = startV.y + dirY * along + perpY * wave;
+      this._pushLine(prevX, prevY, x, y, col[0], col[1], col[2], 1.0);
+      prevX = x; prevY = y;
+    }
+  }
+
+  _decorDrips(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const fill = hexToRgb(cc.cytoBot);
+    const outline = hexToRgb(theme.outline.color);
+    const N = 5;
+    for (let i = 0; i < N; i++) {
+      const dirAng = Math.PI * 0.5 - 0.40 + (i / (N - 1)) * 0.80;
+      const base = shapeVertex(s, dirAng, t);
+      const drop = s.r * 0.22 + s.r * 0.06 * Math.sin(t * 1.8 + i);
+      const wL = [base.x - s.r * 0.06, base.y];
+      const wR = [base.x + s.r * 0.06, base.y];
+      const tip = [base.x, base.y + drop * 1.2];
+      const ctrl = [base.x, base.y + drop];
+      this._pushTri(wL, ctrl, wR, fill[0], fill[1], fill[2], 1.0);
+      this._pushTri(wL, tip, ctrl, fill[0], fill[1], fill[2], 1.0);
+      this._pushTri(ctrl, tip, wR, fill[0], fill[1], fill[2], 1.0);
+      this._pushLine(wL[0], wL[1], tip[0], tip[1], outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(tip[0], tip[1], wR[0], wR[1], outline[0], outline[1], outline[2], 1.0);
+      const bobY = tip[1] + s.r * 0.10 + s.r * 0.05 * Math.sin(t * 2.2 + i * 0.7);
+      const cx = base.x, cy = bobY, dr = s.r * 0.07;
+      const SEG = 12;
+      for (let k = 0; k < SEG; k++) {
+        const a0 = (k / SEG) * Math.PI * 2;
+        const a1 = ((k + 1) / SEG) * Math.PI * 2;
+        const p0 = [cx + Math.cos(a0) * dr, cy + Math.sin(a0) * dr];
+        const p1 = [cx + Math.cos(a1) * dr, cy + Math.sin(a1) * dr];
+        this._pushTri([cx, cy], p0, p1, fill[0], fill[1], fill[2], 1.0);
+      }
+    }
+  }
+
+  _decorLegs(s, theme, t) {
+    const outline = hexToRgb(theme.outline.color);
+    const N = 10;
+    for (let i = 0; i < N; i++) {
+      const theta = (i / N) * Math.PI * 2;
+      const wiggle = 0.25 * Math.sin(t * 6 + i * 0.8);
+      const base = shapeVertex(s, theta, t);
+      const dir = theta + wiggle;
+      const len = s.r * 0.4;
+      const kneeX = base.x + Math.cos(dir) * len * 0.55;
+      const kneeY = base.y + Math.sin(dir) * len * 0.55;
+      const tipX = base.x + Math.cos(dir + 0.3 * Math.sin(t * 5 + i)) * len;
+      const tipY = base.y + Math.sin(dir + 0.3 * Math.sin(t * 5 + i)) * len;
+      this._pushLine(base.x, base.y, kneeX, kneeY, outline[0], outline[1], outline[2], 1.0);
+      this._pushLine(kneeX, kneeY, tipX, tipY, outline[0], outline[1], outline[2], 1.0);
+    }
+  }
+
+  _decorFuzz(s, theme, t) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToRgb(cc.accent);
+    const N = 22;
+    for (let i = 0; i < N; i++) {
+      const theta = (i / N) * Math.PI * 2;
+      const base = shapeVertex(s, theta, t);
+      const len = s.r * (0.18 + 0.10 * Math.sin(t * 1.2 + i * 0.7));
+      const tipX = base.x + Math.cos(theta) * len;
+      const tipY = base.y + Math.sin(theta) * len;
+      this._pushLine(base.x, base.y, tipX, tipY, col[0], col[1], col[2], 0.85);
+    }
+  }
+
+  _decorY(s, theme, t, count) {
+    const c = s.cell;
+    const cc = cellColors(c);
+    const col = hexToRgb(cc.accent);
+    const stem = s.r * 0.22;
+    const arms = s.r * 0.13;
+    const armSpread = Math.PI * 0.25;
+    for (let i = 0; i < count; i++) {
+      const theta = (i / count) * Math.PI * 2 + c.phase;
+      const base = shapeVertex(s, theta, t);
+      const tipX = base.x + Math.cos(theta) * stem;
+      const tipY = base.y + Math.sin(theta) * stem;
+      this._pushLine(base.x, base.y, tipX, tipY, col[0], col[1], col[2], 1.0);
+      const lAng = theta + armSpread;
+      const rAng = theta - armSpread;
+      this._pushLine(tipX, tipY,
+        tipX + Math.cos(lAng) * arms, tipY + Math.sin(lAng) * arms,
+        col[0], col[1], col[2], 1.0);
+      this._pushLine(tipX, tipY,
+        tipX + Math.cos(rAng) * arms, tipY + Math.sin(rAng) * arms,
+        col[0], col[1], col[2], 1.0);
+    }
+  }
+
   /** Short identifier for the FPS overlay's renderer suffix. */
   get info() { return 'webgpu'; }
 
@@ -1913,6 +2357,9 @@ export class WebGPURenderer extends RendererBase {
     tryDestroy(this._particleInstanceBuffer);
     tryDestroy(this._faceUniformBuffer);
     tryDestroy(this._faceInstanceBuffer);
+    tryDestroy(this._decorUniformBuffer);
+    tryDestroy(this._decorLineBuffer);
+    tryDestroy(this._decorTriBuffer);
     this._metaDestroyPool();
     this._instanceBuffer = null;
     this._cornerBuffer = null;
@@ -1925,6 +2372,9 @@ export class WebGPURenderer extends RendererBase {
     this._particleInstanceBuffer = null;
     this._faceUniformBuffer = null;
     this._faceInstanceBuffer = null;
+    this._decorUniformBuffer = null;
+    this._decorLineBuffer = null;
+    this._decorTriBuffer = null;
     this._diskPipeline = null;
     this._diskBindGroup = null;
     this._metaPolyPipeline = null;
@@ -1939,6 +2389,9 @@ export class WebGPURenderer extends RendererBase {
     this._particleBindGroup = null;
     this._facePipeline = null;
     this._faceBindGroup = null;
+    this._decorLinePipeline = null;
+    this._decorTriPipeline = null;
+    this._decorBindGroup = null;
     if (this.device) {
       try { this.device.destroy(); } catch {}
       this.device = null;
