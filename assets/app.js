@@ -426,6 +426,13 @@ bindCheckbox('showFPS', 'showFPS', (on) => {
   const el = document.getElementById('fps');
   if (el) el.classList.toggle('on', !!on);
 });
+function applyBuildInfoVis(on) {
+  const el = document.getElementById('build');
+  if (el) el.classList.toggle('on', !!on);
+  document.body.classList.toggle('show-build', !!on);
+}
+bindCheckbox('showBuildInfo', 'showBuildInfo', applyBuildInfoVis);
+applyBuildInfoVis(S.showBuildInfo);
 bindCheckbox('showRenderer', 'showRenderer');
 
 for (const r of settingsEl.querySelectorAll('input[name="splitMode"]')) {
