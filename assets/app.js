@@ -400,6 +400,7 @@ bindRange('autoSplitSeconds', 'autoSplitSeconds', 'autoVal', v => v.toFixed(0) +
 bindRange('bgFlowSpeed', 'bgFlowSpeed', 'bgVal', v => v.toFixed(2) + '×');
 bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
 bindRange('membraneIntensity', 'membraneIntensity', 'membraneVal', v => v.toFixed(2));
+bindRange('cellBorderThickness', 'cellBorderThickness', 'cellBorderVal', v => v.toFixed(1) + '×');
 bindRange('cellSizeMul', 'cellSizeMul', 'cellSizeVal', v => v.toFixed(2) + '×');
 bindRange('friction', 'friction', 'frictionVal', v => v.toFixed(2));
 bindRange('bounce', 'bounce', 'bounceVal', v => v.toFixed(2));

@@ -61,7 +61,7 @@ struct U {
   cameraVp: vec4<f32>,
   // (vh, time, wobbleAmp, membraneIntensity)
   misc: vec4<f32>,
-  // highlight rgb (alpha unused; padded to 16 bytes)
+  // (highlightR, highlightG, highlightB, borderThickness)
   highlight: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> u: U;
@@ -199,9 +199,12 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     cyto = mix(cyto, in.cytoBot * 0.42, vec3<f32>(holeT * 0.85));
   }
 
-  // Bold membrane band straddling the body edge.
-  let outlineMask = smoothstep(-0.06, -0.01, sdf)
-                  * (1.0 - smoothstep(0.0, 0.015, sdf))
+  // Bold membrane band straddling the body edge. Width scales with
+  // u.highlight.w (= S.cellBorderThickness) so the slider can take the
+  // rim from a slim Canvas2D-parity look up to a bold cartoon outline.
+  let bt = max(u.highlight.w, 0.001);
+  let outlineMask = smoothstep(-0.06 * bt, -0.01 * bt, sdf)
+                  * (1.0 - smoothstep(0.0, 0.015 * bt, sdf))
                   * membraneIntensity;
 
   // Nucleus shape — driven by per-cell nucKind. uvN is in body-radius units.
@@ -239,7 +242,9 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
   var col = cyto;
   col = mix(col, nucColor, vec3<f32>(nucleusMask));
-  col = mix(col, in.cytoBot * 0.80, vec3<f32>(clamp(outlineMask, 0.0, 1.0)));
+  // Border colour: 0.55 × cytoBot — darker than the previous 0.80 so a
+  // bolder rim reads with more contrast against the body fill.
+  col = mix(col, in.cytoBot * 0.55, vec3<f32>(clamp(outlineMask, 0.0, 1.0)));
 
   // Tap flash — c.flash decays in Sim.update(); fade across 200 ms.
   let flashA = clamp(in.outline.a / 0.2, 0.0, 1.0) * 0.6;
@@ -1644,7 +1649,8 @@ export class WebGPURenderer extends RendererBase {
       u[6] = S.wobbleAmp || 0;
       u[7] = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
       const hl = hexToRgb(currentHighlightColor());
-      u[8] = hl[0]; u[9] = hl[1]; u[10] = hl[2]; u[11] = 0;
+      u[8] = hl[0]; u[9] = hl[1]; u[10] = hl[2];
+      u[11] = (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0;
       device.queue.writeBuffer(this._uniformBuffer, 0, u.buffer, u.byteOffset, u.byteLength);
 
       const pass = this._frameEncoder.beginRenderPass({

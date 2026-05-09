@@ -76,6 +76,7 @@ uniform float u_time;       // seconds
 uniform float u_wobbleAmp;  // S.wobbleAmp
 uniform vec3 u_highlight;   // S.highlightColor as rgb
 uniform float u_membraneIntensity; // S.membraneIntensity 0..1
+uniform float u_borderThickness;   // S.cellBorderThickness multiplier (~0.5..5)
 out vec4 outColor;
 
 // v_kind packs:
@@ -158,10 +159,13 @@ void main() {
   }
 
   // Bold membrane band straddling the body edge, in the cell's own deep
-  // colour (a darkened cytoBot). Slider gates the alpha for parity with
-  // the Canvas2D pass.
-  float outlineMask = smoothstep(-0.06, -0.01, sdf)
-                    * (1.0 - smoothstep(0.0, 0.015, sdf))
+  // colour (a darkened cytoBot). Width scales with u_borderThickness so
+  // the slider can take it from the slim Canvas2D-parity look up to a
+  // bold cartoon outline. u_membraneIntensity gates alpha (Canvas2D
+  // parity).
+  float bt = max(u_borderThickness, 0.001);
+  float outlineMask = smoothstep(-0.06 * bt, -0.01 * bt, sdf)
+                    * (1.0 - smoothstep(0.0, 0.015 * bt, sdf))
                     * u_membraneIntensity;
 
   // Nucleus shape — driven by per-cell nucKind.
@@ -198,7 +202,9 @@ void main() {
 
   vec3 col = cyto;
   col = mix(col, nucColor, nucleusMask);
-  col = mix(col, v_cytoBot * 0.80, clamp(outlineMask, 0.0, 1.0));
+  // Border colour: 0.55 × cytoBot — darker than the previous 0.80 so a
+  // bolder rim reads with more contrast against the body fill.
+  col = mix(col, v_cytoBot * 0.55, clamp(outlineMask, 0.0, 1.0));
 
   // Tap flash overlay — c.flash decays in Sim.update(); fade out across 200 ms.
   float flashA = clamp(v_outline.a / 0.2, 0.0, 1.0) * 0.6;
@@ -960,6 +966,7 @@ export class WebGL2Renderer extends RendererBase {
     this._diskU.wobbleAmp = gl.getUniformLocation(this._diskProg, 'u_wobbleAmp');
     this._diskU.highlight = gl.getUniformLocation(this._diskProg, 'u_highlight');
     this._diskU.membraneIntensity = gl.getUniformLocation(this._diskProg, 'u_membraneIntensity');
+    this._diskU.borderThickness = gl.getUniformLocation(this._diskProg, 'u_borderThickness');
 
     // Static unit-square corners (two triangles).
     const corners = new Float32Array([
@@ -1459,6 +1466,8 @@ export class WebGL2Renderer extends RendererBase {
       gl.uniform3fv(this._diskU.highlight, hexToVec3(currentHighlightColor()));
       gl.uniform1f(this._diskU.membraneIntensity,
         (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
+      gl.uniform1f(this._diskU.borderThickness,
+        (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0);
       gl.bindVertexArray(this._diskVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, singletons.length);
       gl.bindVertexArray(null);

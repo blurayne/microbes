@@ -41,6 +41,7 @@ export const DEFAULTS = {
   allowBadGuys: true,
   cellSizeMul: 1.0,
   membraneIntensity: 0.55,
+  cellBorderThickness: 3.0,    // multiplier on the disk-shader outline band; webgl2 / webgpu only
   background: 'petriDish',
   renderScale: 1.0,
   upscaleMode: 'blur',
@@ -87,6 +88,10 @@ export function loadSettings() {
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
     const validMetaOutlineModes = ['edge', 'sdf', 'polygon'];
     if (!validMetaOutlineModes.includes(parsed.metaOutlineMode)) parsed.metaOutlineMode = DEFAULTS.metaOutlineMode;
+    if (typeof parsed.cellBorderThickness !== 'number' || !Number.isFinite(parsed.cellBorderThickness)) {
+      parsed.cellBorderThickness = DEFAULTS.cellBorderThickness;
+    }
+    parsed.cellBorderThickness = Math.max(0.5, Math.min(5.0, parsed.cellBorderThickness));
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Migrate legacy `highlightColor` field to the new `useHighlight` toggle.
