@@ -21,9 +21,10 @@
     <h3>Adaptiver Codex und 3-Akt-Struktur</h3>
     <p style="color: var(--ink-dim); font-size: 14px; margin-bottom: 12px;">Das Spiel lehrt sich selbst — adaptive Immunität als Tutorial-Mechanik.</p>
     <ul>
+      <li><strong>Lebende Zellen statt Türme</strong>Platzierte Zellen jagen, driften, sterben autonom (siehe §11)</li>
+      <li><strong>Pre-Level &amp; In-Level Briefing</strong>Gegner-Roster + Konter, jederzeit aufrufbar (siehe §12)</li>
       <li><strong>Adaptiver Codex</strong>Spieler entdeckt Schwächen durch Kontakt — biologisch korrekt!</li>
       <li><strong>Live-Indicator über Pathogenen</strong>Kleines Icon zeigt aktuelle Schwäche-Kategorie</li>
-      <li><strong>Pre-Wave Briefing</strong>Bekannte Pathogene mit Konter, unbekannte als "?"</li>
       <li><strong>3-Akt-Struktur</strong>18 Levels in drei Akten — Tutorial, Komplikation, Krise</li>
       <li><strong>5 Bosse statt 1</strong>2 Mini-Bosse · 2 Major-Bosse · 1 Finale</li>
       <li><strong>Schwierigkeitskurve</strong>Klare Progression: lernen → kombinieren → meistern</li>
@@ -44,6 +45,7 @@
       <li><a href="#ch09"><span class="num">09</span><span class="title">Game Feel & Phasen</span></a></li>
       <li><a href="#ch10"><span class="num">10</span><span class="title">Schadens-Matrix</span></a></li>
       <li><a href="#ch11"><span class="num">11</span><span class="title">Physik & Magnetismus</span></a></li>
+      <li><a href="#ch12"><span class="num">12</span><span class="title">Briefing (NEU)</span></a></li>
     </ul>
   </div>
 
