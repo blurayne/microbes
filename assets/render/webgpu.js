@@ -5,13 +5,12 @@
 // internal WebGPU backend (reachable via the "Pixi (WebGPU)" dropdown
 // option).
 //
-// Phase 2: instanced SDF disks. We now port webgl2.js's VERT_DISK +
-// FRAG_DISK to WGSL and draw every cell as an instanced quad with the
-// fragment shader doing the same body-shape SDF (round / lobed /
-// rippled / oblong / pseudopod / star), nucleus shape, membrane band,
-// flash overlay, selection ring + wash. Decorations, cartoon faces,
-// dashed-line target marker, particles, debug overlay are still
-// deferred — they layer on top in follow-up commits.
+// Coverage: instanced SDF disks (round / lobed / rippled / oblong /
+// pseudopod / star) with per-type nucleus, membrane, selection ring,
+// flash overlay; per-pair metaSplit metaball merge with three
+// configurable RT-sizing strategies (S.metaRtMode). Decorations,
+// cartoon faces, dashed-line target marker, particles, and the debug
+// overlay are still deferred — they layer on top in follow-up commits.
 //
 // Async note: WebGPU's adapter + device requests are async, but the
 // IRenderer interface's init() is sync. Mirroring the PixiRenderer

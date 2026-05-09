@@ -660,6 +660,14 @@ export class PixiRenderer extends RendererBase {
   // then display via a Sprite tinted with the cell's cytoBot. The
   // splittingLayer sits above worldLayer so the merged blob covers
   // any bleed from the singleton pass under it.
+  //
+  // S.metaRtMode is honoured by the webgl2 / webgpu renderers but not
+  // here — Pixi keeps its own pool of full-canvas RenderTextures (one
+  // per active pair, equivalent to 'fullCanvas') because the pair
+  // pipeline runs through Pixi's own filter chain on a screen-space
+  // Sprite. Refactoring to per-pair bbox would require shifting the
+  // pairContainer transform per pair and resizing the Sprite, which
+  // is outside the scope of the metaSplit feature work.
   _renderSplittingPairs(splittingByCellId, time) {
     const PIXI = this.PIXI;
     const cam = this.camera;
