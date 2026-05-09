@@ -60,6 +60,8 @@ struct U {
   misc: vec4<f32>,
   // (highlightR, highlightG, highlightB, borderThickness)
   highlight: vec4<f32>,
+  // (rotation-radians, _, _, _) — applied in vs_main between scale + translate
+  cameraRot: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> u: U;
 
@@ -93,12 +95,20 @@ fn vs_main(in: VsIn) -> VsOut {
   let ty = u.cameraVp.z;
   let vw = u.cameraVp.w;
   let vh = u.misc.x;
+  let rot = u.cameraRot.x;
 
   // 1.70× r — covers wobbly body extents (up to ~1.30) plus the
   // selection ring (which extends to 1.30 × bodyR).
   let quadR = in.inst.z * 1.70;
   let worldPos = in.inst.xy + in.corner * quadR;
-  let screenPos = worldPos * scale + vec2<f32>(tx, ty);
+  // Camera transform: scale, then rotate by rot, then translate.
+  // Reduces to "worldPos * scale + (tx, ty)" when rot == 0.
+  let scaledPos = worldPos * scale;
+  let cR = cos(rot);
+  let sR = sin(rot);
+  let screenPos = vec2<f32>(cR * scaledPos.x - sR * scaledPos.y,
+                            sR * scaledPos.x + cR * scaledPos.y)
+                + vec2<f32>(tx, ty);
   var clipPos = (screenPos / vec2<f32>(vw, vh)) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
 
@@ -422,7 +432,13 @@ struct VsOut {
   let camScale = u.cam.x;
   let camT = u.cam.yz;
   let vp = u.vp_dash.xy;
-  let screenPos = pos * camScale + camT;
+  // Camera transform: scale, rotate by cam.w, then translate.
+  // Reduces to "pos * camScale + camT" when rotation == 0.
+  let pScaled = pos * camScale;
+  let cR = cos(u.cam.w);
+  let sR = sin(u.cam.w);
+  let screenPos = vec2<f32>(cR * pScaled.x - sR * pScaled.y,
+                            sR * pScaled.x + cR * pScaled.y) + camT;
   var clip = (screenPos / vp) * 2.0 - 1.0;
   clip.y = -clip.y;
   var out: VsOut;
@@ -467,7 +483,13 @@ struct VsOut {
   let mWorld = u.vp_pos.zw;
   let r = u.cfg.x;
   let worldPos = mWorld + corner * r;
-  let screenPos = worldPos * camScale + camT;
+  // Camera transform: scale, rotate by cam.w, then translate.
+  // Reduces to "worldPos * camScale + camT" when rotation == 0.
+  let wScaled = worldPos * camScale;
+  let cR = cos(u.cam.w);
+  let sR = sin(u.cam.w);
+  let screenPos = vec2<f32>(cR * wScaled.x - sR * wScaled.y,
+                            sR * wScaled.x + cR * wScaled.y) + camT;
   var clip = (screenPos / vp) * 2.0 - 1.0;
   clip.y = -clip.y;
   var out: VsOut;
@@ -576,7 +598,12 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
 
   // World-space pixel.
   let screenPx = uv * viewport;
-  let worldPx = (screenPx - vec2<f32>(camTx, camTy)) / max(camScale, 0.0001);
+  // Inverse camera transform (screen → world): un-translate, un-rotate, un-scale.
+  let dCam = screenPx - vec2<f32>(camTx, camTy);
+  let cRBg = cos(u.cam.w);
+  let sRBg = sin(u.cam.w);
+  let worldPx = vec2<f32>(cRBg * dCam.x + sRBg * dCam.y,
+                          -sRBg * dCam.x + cRBg * dCam.y) / max(camScale, 0.0001);
 
   // Petri-dish concentric rings — 1px thin at every 32 world units.
   if (kind == 2) {
@@ -728,7 +755,13 @@ struct VsOut {
   let vp = u.vp.xy;
   let r = inst.z;
   let worldPos = inst.xy + corner * r;
-  let screenPos = worldPos * camScale + camT;
+  // Camera transform: scale, rotate by cam.w, then translate.
+  // Reduces to "worldPos * camScale + camT" when rotation == 0.
+  let wScaled = worldPos * camScale;
+  let cR = cos(u.cam.w);
+  let sR = sin(u.cam.w);
+  let screenPos = vec2<f32>(cR * wScaled.x - sR * wScaled.y,
+                            sR * wScaled.x + cR * wScaled.y) + camT;
   var clip = (screenPos / vp) * 2.0 - 1.0;
   clip.y = -clip.y;
   var out: VsOut;
@@ -770,7 +803,13 @@ struct VsOut {
   let camScale = u.cam.x;
   let camT = u.cam.yz;
   let vp = u.vp.xy;
-  let screenPos = pos * camScale + camT;
+  // Camera transform: scale, rotate by cam.w, then translate.
+  // Reduces to "pos * camScale + camT" when rotation == 0.
+  let pScaled = pos * camScale;
+  let cR = cos(u.cam.w);
+  let sR = sin(u.cam.w);
+  let screenPos = vec2<f32>(cR * pScaled.x - sR * pScaled.y,
+                            sR * pScaled.x + cR * pScaled.y) + camT;
   var clip = (screenPos / vp) * 2.0 - 1.0;
   clip.y = -clip.y;
   var out: VsOut;
@@ -823,7 +862,13 @@ struct VsOut {
   let vp = u.vp_time.xy;
   let r = inst.z;
   let worldPos = inst.xy + corner * r;
-  let screenPos = worldPos * camScale + camT;
+  // Camera transform: scale, rotate by cam.w, then translate.
+  // Reduces to "worldPos * camScale + camT" when rotation == 0.
+  let wScaled = worldPos * camScale;
+  let cR = cos(u.cam.w);
+  let sR = sin(u.cam.w);
+  let screenPos = vec2<f32>(cR * wScaled.x - sR * wScaled.y,
+                            sR * wScaled.x + cR * wScaled.y) + camT;
   var clip = (screenPos / vp) * 2.0 - 1.0;
   clip.y = -clip.y;
   var out: VsOut;
@@ -1072,7 +1117,7 @@ export class WebGPURenderer extends RendererBase {
     this._diskPipeline = null;
     this._diskBindGroup = null;
     this._uniformBuffer = null;
-    this._uniformData = new Float32Array(12); // (cameraVp, misc, highlight) — 48 bytes
+    this._uniformData = new Float32Array(16); // (cameraVp, misc, highlight, cameraRot) — 64 bytes
     this._cornerBuffer = null;
     this._instanceBuffer = null;
     this._instanceCapacity = 0;
@@ -1834,11 +1879,11 @@ export class WebGPURenderer extends RendererBase {
     data[1] = bg.vignette || 0;
     data[2] = bg.gridStep || 48;
     data[3] = t;
-    // cam
+    // cam (.w = rotation-radians)
     data[4] = this.camera.scale;
     data[5] = this.camera.tx;
     data[6] = this.camera.ty;
-    data[7] = 0;
+    data[7] = this.camera.rotation || 0;
     // vp + spotCount + rbcOn
     const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
     data[8] = this.W;
@@ -1973,7 +2018,7 @@ export class WebGPURenderer extends RendererBase {
         data.buffer, data.byteOffset, singletons.length * INSTANCE_STRIDE,
       );
 
-      // Pack uniform buffer: cameraVp, misc, highlight.
+      // Pack uniform buffer: cameraVp, misc, highlight, cameraRot.
       const u = this._uniformData;
       const cam = this.camera;
       u[0] = cam.scale; u[1] = cam.tx; u[2] = cam.ty; u[3] = this.W;
@@ -1984,6 +2029,8 @@ export class WebGPURenderer extends RendererBase {
       const hl = hexToRgb(currentHighlightColor());
       u[8] = hl[0]; u[9] = hl[1]; u[10] = hl[2];
       u[11] = (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0;
+      u[12] = cam.rotation || 0;
+      // u[13..15] padding
       device.queue.writeBuffer(this._uniformBuffer, 0, u.buffer, u.byteOffset, u.byteLength);
 
       const pass = this._frameEncoder.beginRenderPass({
@@ -2253,7 +2300,7 @@ export class WebGPURenderer extends RendererBase {
         this._ensureDashCapacity(vertCount);
         device.queue.writeBuffer(this._dashVertexBuffer, 0, arr.buffer, arr.byteOffset, arr.byteLength);
         device.queue.writeBuffer(this._dashUniformBuffer, 0, new Float32Array([
-          camScale, cam.tx, cam.ty, 0,
+          camScale, cam.tx, cam.ty, cam.rotation || 0,
           this.W, this.H, -now * 0.04, fade,
         ]));
         const pass = this._frameEncoder.beginRenderPass({
@@ -2272,7 +2319,7 @@ export class WebGPURenderer extends RendererBase {
     const innerWorld = 4 / camScale;
     const quadR = ringWorld + 6 / camScale;
     device.queue.writeBuffer(this._markerUniformBuffer, 0, new Float32Array([
-      camScale, cam.tx, cam.ty, 0,
+      camScale, cam.tx, cam.ty, cam.rotation || 0,
       this.W, this.H, m.x, m.y,
       quadR, age, innerWorld / quadR, ringWorld / quadR,
       (3 / camScale) / quadR, 0, 0, 0,
@@ -2320,7 +2367,7 @@ export class WebGPURenderer extends RendererBase {
     );
     const cam = this.camera;
     device.queue.writeBuffer(this._particleUniformBuffer, 0, new Float32Array([
-      cam.scale, cam.tx, cam.ty, 0,
+      cam.scale, cam.tx, cam.ty, cam.rotation || 0,
       this.W, this.H, 0, 0,
     ]));
     const pass = this._frameEncoder.beginRenderPass({
@@ -2410,7 +2457,7 @@ export class WebGPURenderer extends RendererBase {
     );
     const cam = this.camera;
     device.queue.writeBuffer(this._faceUniformBuffer, 0, new Float32Array([
-      cam.scale, cam.tx, cam.ty, 0,
+      cam.scale, cam.tx, cam.ty, cam.rotation || 0,
       this.W, this.H, time, 0,
     ]));
     const pass = this._frameEncoder.beginRenderPass({
@@ -2538,7 +2585,7 @@ export class WebGPURenderer extends RendererBase {
     const device = this.device;
     const cam = this.camera;
     device.queue.writeBuffer(this._decorUniformBuffer, 0, new Float32Array([
-      cam.scale, cam.tx, cam.ty, 0,
+      cam.scale, cam.tx, cam.ty, cam.rotation || 0,
       this.W, this.H, 0, 0,
     ]));
 

@@ -10,14 +10,13 @@ file in sync.
 
 ## Open
 
-- [ ] **Rotation gesture + 2× zoom-out** — [`.claude/plan/01-rotation-and-zoom.md`](./.claude/plan/01-rotation-and-zoom.md)
 - [ ] **Virus 3D shader experiment** — [`.claude/plan/02-virus-shader-experiment.md`](./.claude/plan/02-virus-shader-experiment.md)
 - [ ] **Free Game implementation** — [`.claude/plan/03-free-game-implementation.md`](./.claude/plan/03-free-game-implementation.md)
 - [ ] **Reactor background (Gray-Scott)** — [`.claude/plan/04-reactor-bg.md`](./.claude/plan/04-reactor-bg.md)
 
 ## Done
 
-_(items move here when shipped, with the merging PR # noted)_
+- [x] **Rotation gesture + 2× zoom-out** — [`.claude/plan/01-rotation-and-zoom.md`](./.claude/plan/01-rotation-and-zoom.md) (#35)
 
 ## Process
 
