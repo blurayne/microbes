@@ -260,7 +260,8 @@ const FRAG_BG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 
-uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid, 4 lung, 5 aurora, 6 underwater, 7 lava
+uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid, 4 lung, 5 aurora, 6 underwater, 7 lava, 8 reactor
+uniform sampler2D u_reactorTex;  // bound when u_kind == 8 (Gray-Scott RT)
 uniform vec3 u_base;
 uniform vec3 u_top;
 uniform vec3 u_bot;
@@ -435,6 +436,23 @@ void main() {
     }
   }
 
+  // ---- Reactor: Gray-Scott reaction-diffusion display (kind 8) ----
+  // Reads the front ping-pong RT (set up by drawBackground before this
+  // pass). The RT stores (A * 0.05, B, 0, 1); calculate_concentrations
+  // is the inverse mapping. Acid-green palette ramped on B; subtle dark
+  // tint where A ≈ 1 stays untouched. Step + seed shaders run in their
+  // own off-screen passes — see _reactorStep / _reactorSeed.
+  if (u_kind == 8) {
+    vec4 rxColor = texture(u_reactorTex, v_uv);
+    vec2 rxConc = rxColor.rg / vec2(0.05, 1.0);
+    float bN = clamp(rxConc.y * 1.6, 0.0, 1.0);
+    vec3 dark = vec3(0.02, 0.06, 0.04);
+    vec3 mid  = vec3(0.10, 0.40, 0.20);
+    vec3 hot  = vec3(0.49, 1.00, 0.54);   // panel accent #7eff8a
+    col = mix(mix(dark, mid, smoothstep(0.0, 0.45, bN)),
+              hot, smoothstep(0.45, 0.92, bN));
+  }
+
   // Vignette: darken the corners.
   if (u_vignette > 0.0) {
     float v = length(v_uv - 0.5) * 1.4;
@@ -461,6 +479,73 @@ void main() {
 //                   warmup.
 //   'sharedMax'   — single shared RT, sized to the largest active pair
 //                   this frame. Middle ground.
+// ---- Reactor (Gray-Scott) shaders ---------------------------------
+// Two off-screen RGBA8 textures (`_reactorRtA` + `_reactorRtB`) ping-
+// pong each visible frame. Encoding: the texel stores
+// `(A * 0.05, B, 0, 1)` so both concentrations fit cleanly in 0..1.
+// Step shader runs N iterations per visible frame; seed shader writes
+// fresh B-discs every ~10 s so the pattern keeps regrowing.
+const FRAG_REACTOR_STEP = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_texture;
+uniform vec2 u_resolution;
+out vec4 outColor;
+
+vec2 readConc(vec2 uv)        { return texture(u_texture, uv).rg / vec2(0.05, 1.0); }
+vec4 packConc(vec2 c)         { return vec4(c * vec2(0.05, 1.0), 0.0, 1.0); }
+
+vec2 lapConc(vec2 uv) {
+  float du = 1.0 / u_resolution.x;
+  float dv = 1.0 / u_resolution.y;
+  vec2 lap = -readConc(uv);
+  lap += 0.20 * readConc(uv + vec2(-du, 0.0));
+  lap += 0.20 * readConc(uv + vec2( du, 0.0));
+  lap += 0.20 * readConc(uv + vec2(0.0, -dv));
+  lap += 0.20 * readConc(uv + vec2(0.0,  dv));
+  lap += 0.05 * readConc(uv + vec2(-du, -dv));
+  lap += 0.05 * readConc(uv + vec2( du, -dv));
+  lap += 0.05 * readConc(uv + vec2( du,  dv));
+  lap += 0.05 * readConc(uv + vec2(-du,  dv));
+  return lap;
+}
+
+void main() {
+  float D_A = 0.8;
+  float D_B = 0.4;
+  float feed = 0.06 * v_uv.x;
+  float kill = 0.035 + 0.03 * v_uv.x + (0.022 - 0.015 * v_uv.x) * v_uv.y;
+  vec2 c   = readConc(v_uv);
+  vec2 lap = lapConc(v_uv);
+  float dA = D_A * lap.x - c.x * c.y * c.y + feed * (1.0 - c.x);
+  float dB = D_B * lap.y + c.x * c.y * c.y - (kill + feed) * c.y;
+  c += vec2(dA, dB);
+  outColor = packConc(c);
+}`;
+
+// Seed shader — copies the front RT and stamps up to 8 fresh B-discs
+// at uniform-random UV positions. Discs raise B to 0.9 inside their
+// radius without touching A (so the existing pattern keeps living).
+const REACTOR_MAX_SEEDS = 8;
+const FRAG_REACTOR_SEED = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_texture;
+uniform int u_seedCount;
+uniform vec3 u_seeds[${REACTOR_MAX_SEEDS}];   // (cx, cy, r) in UV
+out vec4 outColor;
+
+void main() {
+  vec4 src = texture(u_texture, v_uv);
+  vec2 c = src.rg / vec2(0.05, 1.0);
+  for (int i = 0; i < ${REACTOR_MAX_SEEDS}; i++) {
+    if (i >= u_seedCount) break;
+    vec3 seed = u_seeds[i];
+    if (length(v_uv - seed.xy) < seed.z) c.y = max(c.y, 0.9);
+  }
+  outColor = vec4(c * vec2(0.05, 1.0), 0.0, 1.0);
+}`;
+
 const VERT_META_POLY = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_pos;   // physical px from top-left of the RT
@@ -1164,6 +1249,12 @@ export class WebGL2Renderer extends RendererBase {
     this._bgU.spots = bu('u_spots');
     this._bgU.spotCols = bu('u_spotCols');
     this._bgU.rbc = bu('u_rbc');
+    this._bgU.reactorTex = bu('u_reactorTex');
+
+    // Reactor (Gray-Scott) — programs compile lazily on first use,
+    // not at boot: most sessions never select the theme. See
+    // _reactorEnsure() for the FBO/program allocation.
+    this._reactorProgsReady = false;
 
     this._bgVao = gl.createVertexArray();
 
@@ -1459,6 +1550,138 @@ export class WebGL2Renderer extends RendererBase {
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
   }
 
+  // ---- Reactor (Gray-Scott) helpers --------------------------------
+  // The two RTs ping-pong: index 0 = front (display source), 1 = back
+  // (write target for the next step). After each step we swap.
+  // Sized to half the canvas (capped at 256×256) so a typical frame
+  // does ~64k pixel updates per step — ~5 steps * 64k = 320k texel
+  // ops per visible frame, well within budget.
+
+  _reactorEnsureProgs() {
+    if (this._reactorProgsReady) return;
+    const gl = this.gl;
+    this._reactorStepProg = link(gl, VERT_FULLSCREEN, FRAG_REACTOR_STEP);
+    this._reactorStepU = {
+      texture:    gl.getUniformLocation(this._reactorStepProg, 'u_texture'),
+      resolution: gl.getUniformLocation(this._reactorStepProg, 'u_resolution'),
+    };
+    this._reactorSeedProg = link(gl, VERT_FULLSCREEN, FRAG_REACTOR_SEED);
+    this._reactorSeedU = {
+      texture:   gl.getUniformLocation(this._reactorSeedProg, 'u_texture'),
+      seedCount: gl.getUniformLocation(this._reactorSeedProg, 'u_seedCount'),
+      seeds:     gl.getUniformLocation(this._reactorSeedProg, 'u_seeds'),
+    };
+    this._reactorRtA = null;
+    this._reactorRtB = null;
+    this._reactorFront = 0;     // 0 = A is the display source, 1 = B
+    this._reactorRtSize = { w: 0, h: 0 };
+    this._reactorLastSeedMs = -Infinity;   // -∞ → seed on the very first frame
+    this._reactorSeedBuf = new Float32Array(REACTOR_MAX_SEEDS * 3);
+    this._reactorProgsReady = true;
+  }
+
+  _reactorMakeRt(w, h) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    // NEAREST: the laplacian samples 9 specific texels — bilinear
+    // blending would smear concentrations across cells and ruin the
+    // numerical stability of the Gray-Scott step.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    // Initial fill: pack(A=1, B=0) → (0.05, 0.0, 0, 1). The Gray-Scott
+    // equilibrium with no B present is uniform A; this is the
+    // pristine state from which seed discs grow Turing patterns.
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0.05, 0.0, 0.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    return { fbo, tex };
+  }
+
+  _reactorEnsureRts() {
+    const gl = this.gl;
+    const targetW = Math.max(64, Math.min(256, Math.floor(this.W * 0.5)));
+    const targetH = Math.max(64, Math.min(256, Math.floor(this.H * 0.5)));
+    if (this._reactorRtA && this._reactorRtSize.w === targetW && this._reactorRtSize.h === targetH) return;
+    if (this._reactorRtA) {
+      gl.deleteFramebuffer(this._reactorRtA.fbo); gl.deleteTexture(this._reactorRtA.tex);
+    }
+    if (this._reactorRtB) {
+      gl.deleteFramebuffer(this._reactorRtB.fbo); gl.deleteTexture(this._reactorRtB.tex);
+    }
+    this._reactorRtA = this._reactorMakeRt(targetW, targetH);
+    this._reactorRtB = this._reactorMakeRt(targetW, targetH);
+    this._reactorRtSize = { w: targetW, h: targetH };
+    this._reactorFront = 0;
+    this._reactorLastSeedMs = -Infinity;
+  }
+
+  _reactorRt(idx) { return idx === 0 ? this._reactorRtA : this._reactorRtB; }
+
+  _reactorSeed() {
+    const gl = this.gl;
+    const front = this._reactorRt(this._reactorFront);
+    const back  = this._reactorRt(1 - this._reactorFront);
+    const count = 5 + Math.floor(Math.random() * 4);   // 5..8 discs
+    for (let i = 0; i < count; i++) {
+      this._reactorSeedBuf[i * 3]     = Math.random();
+      this._reactorSeedBuf[i * 3 + 1] = Math.random();
+      // Disc radius in UV space — small enough that seeds don't drown
+      // the whole RT in B; ~3% of the texture in radius works well.
+      this._reactorSeedBuf[i * 3 + 2] = 0.025 + Math.random() * 0.015;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, back.fbo);
+    gl.viewport(0, 0, this._reactorRtSize.w, this._reactorRtSize.h);
+    gl.useProgram(this._reactorSeedProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, front.tex);
+    gl.uniform1i(this._reactorSeedU.texture, 0);
+    gl.uniform1i(this._reactorSeedU.seedCount, count);
+    gl.uniform3fv(this._reactorSeedU.seeds, this._reactorSeedBuf);
+    gl.bindVertexArray(this._bgVao);
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.enable(gl.BLEND);
+    this._reactorFront = 1 - this._reactorFront;
+  }
+
+  _reactorStep(iters) {
+    const gl = this.gl;
+    gl.useProgram(this._reactorStepProg);
+    gl.uniform2f(this._reactorStepU.resolution, this._reactorRtSize.w, this._reactorRtSize.h);
+    gl.uniform1i(this._reactorStepU.texture, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindVertexArray(this._bgVao);
+    gl.disable(gl.BLEND);
+    gl.viewport(0, 0, this._reactorRtSize.w, this._reactorRtSize.h);
+    for (let i = 0; i < iters; i++) {
+      const front = this._reactorRt(this._reactorFront);
+      const back  = this._reactorRt(1 - this._reactorFront);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, back.fbo);
+      gl.bindTexture(gl.TEXTURE_2D, front.tex);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      this._reactorFront = 1 - this._reactorFront;
+    }
+    gl.enable(gl.BLEND);
+  }
+
+  _reactorDestroy() {
+    const gl = this.gl;
+    if (this._reactorRtA) { gl.deleteFramebuffer(this._reactorRtA.fbo); gl.deleteTexture(this._reactorRtA.tex); this._reactorRtA = null; }
+    if (this._reactorRtB) { gl.deleteFramebuffer(this._reactorRtB.fbo); gl.deleteTexture(this._reactorRtB.tex); this._reactorRtB = null; }
+    if (this._reactorStepProg) { gl.deleteProgram(this._reactorStepProg); this._reactorStepProg = null; }
+    if (this._reactorSeedProg) { gl.deleteProgram(this._reactorSeedProg); this._reactorSeedProg = null; }
+    this._reactorProgsReady = false;
+  }
+
   drawBackground(timeMs) {
     const gl = this.gl;
     const bg = currentBackground();
@@ -1472,7 +1695,29 @@ export class WebGL2Renderer extends RendererBase {
     else if (bg.kind === 'aurora') kind = 5;
     else if (bg.kind === 'underwater') kind = 6;
     else if (bg.kind === 'lava') kind = 7;
+    else if (bg.kind === 'reactor') kind = 8;
     // 'flat' / 'navy-ghost' / unknown all fall through to flat.
+
+    // Reactor (Gray-Scott) — run N step iterations + maybe seed before
+    // the display pass, so the FRAG_BG kind=8 branch can sample the
+    // up-to-date front RT. Programs + RTs are allocated lazily here
+    // (most sessions never enter this theme).
+    if (kind === 8) {
+      this._reactorEnsureProgs();
+      this._reactorEnsureRts();
+      if (timeMs - this._reactorLastSeedMs > 10000) {
+        this._reactorSeed();
+        this._reactorLastSeedMs = timeMs;
+      }
+      this._reactorStep(5);
+      // Restore the main framebuffer + viewport for the display pass.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.W, this.H);
+    } else if (this._reactorRtA) {
+      // Theme switched away from reactor — release the RTs so we
+      // don't carry the GPU memory across the rest of the session.
+      this._reactorDestroy();
+    }
 
     // Compute drifting-spot positions in screen UV (matches Canvas2D).
     const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
@@ -1510,6 +1755,11 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform4fv(this._bgU.spots, this._spotsBuf);
     gl.uniform3fv(this._bgU.spotCols, this._spotColsBuf);
     gl.uniform1i(this._bgU.rbc, bg.rbcSilhouettes ? 1 : 0);
+    if (kind === 8) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._reactorRt(this._reactorFront).tex);
+      gl.uniform1i(this._bgU.reactorTex, 0);
+    }
 
     gl.bindVertexArray(this._bgVao);
     gl.disable(gl.BLEND);
@@ -2392,6 +2642,7 @@ export class WebGL2Renderer extends RendererBase {
     if (this._metaPolyVbo) gl.deleteBuffer(this._metaPolyVbo);
     if (this._metaPolyVao) gl.deleteVertexArray(this._metaPolyVao);
     this._metaDestroyPool();
+    this._reactorDestroy();
     this.gl = null;
   }
 }
