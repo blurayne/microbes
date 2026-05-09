@@ -1722,7 +1722,8 @@ export class WebGL2Renderer extends RendererBase {
       if (c.state === 'SPLITTING') {
         const env = Math.sin(c.splitProgress * Math.PI);
         data[j + 14] = env * 0.12;
-        data[j + 15] = 1 - 0.8 * env;
+        // Linear face fade: 0.5 at split start → 1.0 at split end.
+        data[j + 15] = 0.5 + 0.5 * c.splitProgress;
       } else {
         data[j + 14] = 0;
         data[j + 15] = 1;

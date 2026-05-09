@@ -86,7 +86,11 @@ export function getShapes(cells, t, camera, W, H) {
   for (const c of cells) {
     if (c.state === 'SPLITTING') {
       const p = c.splitProgress;
-      const half = c.r * (0.05 + p * 1.15);
+      // Half-centre offset ramps to 1.05·r at p=1 — exactly matching
+      // finishSplit's sep (sim.js: cell.r * 1.05) so the new cells
+      // appear at the same spot the visual halves had at the moment
+      // of transition. Fixes the "split-end jump".
+      const half = c.r * (0.05 + p * 1.0);
       const a = c.splitAngle;
       const dx = Math.cos(a) * half;
       const dy = Math.sin(a) * half;
