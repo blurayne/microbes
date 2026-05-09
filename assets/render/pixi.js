@@ -35,6 +35,22 @@ import { RendererBase } from './renderer.js';
 const PIXI_URL = new URL('../vendor/pixi.min.mjs', import.meta.url).href;
 
 let _pixiPromise = null;
+// Point-in-polygon ray-cast test. `verts` is a flat (x, y) Float64Array
+// of N vertices; tests whether (px, py) is inside the closed polygon.
+// Used by 'edge' / 'polygon' metaSplit outline modes.
+function pointInPoly(px, py, verts) {
+  const n = verts.length / 2;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i, i++) {
+    const ix = verts[i * 2], iy = verts[i * 2 + 1];
+    const jx = verts[j * 2], jy = verts[j * 2 + 1];
+    if (((iy > py) !== (jy > py)) && (px < (jx - ix) * (py - iy) / (jy - iy + 1e-12) + ix)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 function loadPixi() {
   if (!_pixiPromise) {
     _pixiPromise = import(/* @vite-ignore */ PIXI_URL);
@@ -64,6 +80,7 @@ export class PixiRenderer extends RendererBase {
     this.particlesGfx = null;
     this.facesGfx = null;
     this.facesBlurGfx = null;
+    this.metaOutlineGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
 
@@ -189,9 +206,16 @@ export class PixiRenderer extends RendererBase {
     this.pairContainer.addChild(this.pairPolyGfx);
     this.pairContainer.filters = [this.pairBlur, this.pairThreshold];
 
+    // Outline strokes for the metaball blob ('sdf' / 'edge' / 'polygon'
+    // modes). Rendered in screen-pixel space directly above splittingLayer
+    // so the rim is visible over the fused blob. Emitted from drawCells
+    // in screen coords (world * cam.scale + cam.tx).
+    this.metaOutlineGfx = new PIXI.Graphics();
+
     app.stage.addChild(this.bgLayer);
     app.stage.addChild(this.worldLayer);
     app.stage.addChild(this.splittingLayer);
+    app.stage.addChild(this.metaOutlineGfx);
   }
 
   // Map alpha through K*a - K/2 (clamps in the framebuffer to a hard
@@ -464,9 +488,81 @@ export class PixiRenderer extends RendererBase {
     // animation is its own thing.
     this._drawNucleiPass(time);
 
+    // metaSplit outline strokes for each pair (above the metaball blob).
+    // 'sdf' strokes both halves; 'polygon' / 'edge' stroke the union.
+    this._drawMetaSplitOutlines(splittingByCellId, time);
+
     // Cartoon-face overlay (eyes + mouth). Always clear so toggling
     // S.cartoon off mid-run drops the faces immediately.
     this._drawFacesPass(shapes, time);
+  }
+
+  _drawMetaSplitOutlines(splittingByCellId, time) {
+    const og = this.metaOutlineGfx;
+    if (!og) return;
+    og.clear();
+    if (!splittingByCellId || splittingByCellId.size === 0) return;
+    const mode = S.metaOutlineMode;
+    const useUnion = (mode === 'edge' || mode === 'polygon');
+    const useSdf   = (mode === 'sdf');
+    if (!useUnion && !useSdf) return;
+    const cam = this.camera;
+    const membraneAlpha = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
+    const strokeWidth = Math.max(2, (S.outlinePx || 5) * 0.85);
+    // 'edge' mode applies a soft Pixi BlurFilter to the whole layer for
+    // the duration of the call to approximate the metaball silhouette.
+    if (mode === 'edge') {
+      if (!this._metaOutlineBlur) this._metaOutlineBlur = new PIXI.BlurFilter({ strength: 1.5, quality: 3 });
+      og.filters = [this._metaOutlineBlur];
+    } else {
+      og.filters = [];
+    }
+    for (const halves of splittingByCellId.values()) {
+      const polys = halves.map((s) => {
+        const verts = new Float64Array(WOBBLE_VERTS * 2);
+        for (let i = 0; i < WOBBLE_VERTS; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], time);
+          // World -> screen px (this layer is screen-space, not under worldLayer).
+          verts[i * 2]     = v.x * cam.scale + cam.tx;
+          verts[i * 2 + 1] = v.y * cam.scale + cam.ty;
+        }
+        return verts;
+      });
+      const cytoBot = cellColors(halves[0].cell).cytoBot || '#d36699';
+      for (let hi = 0; hi < halves.length; hi++) {
+        const verts = polys[hi];
+        const partner = (useUnion && polys.length === 2) ? polys[1 - hi] : null;
+        // Build a polyline. Skipped segments break the path; emit each
+        // contiguous run as its own poly() so the stroke stays clean.
+        let runStart = -1;
+        for (let i = 0; i < WOBBLE_VERTS; i++) {
+          const a = i * 2;
+          const b = ((i + 1) % WOBBLE_VERTS) * 2;
+          const skip = partner
+            && pointInPoly((verts[a] + verts[b]) * 0.5, (verts[a + 1] + verts[b + 1]) * 0.5, partner);
+          if (skip) {
+            if (runStart >= 0) {
+              this._strokePixiRun(og, verts, runStart, i, cytoBot, strokeWidth, membraneAlpha);
+              runStart = -1;
+            }
+            continue;
+          }
+          if (runStart < 0) runStart = i;
+        }
+        if (runStart >= 0) {
+          this._strokePixiRun(og, verts, runStart, WOBBLE_VERTS, cytoBot, strokeWidth, membraneAlpha);
+        }
+      }
+    }
+  }
+
+  _strokePixiRun(og, verts, fromIdx, toIdx, color, width, alpha) {
+    const pts = [];
+    for (let k = fromIdx; k < toIdx; k++) {
+      pts.push(verts[k * 2], verts[k * 2 + 1]);
+    }
+    pts.push(verts[(toIdx % WOBBLE_VERTS) * 2], verts[(toIdx % WOBBLE_VERTS) * 2 + 1]);
+    og.poly(pts, false).stroke({ color, width, alpha, alignment: 0.5 });
   }
 
   // Per-kind nucleus rendering, ported from canvas2D's _drawNucleus.
@@ -953,6 +1049,7 @@ export class PixiRenderer extends RendererBase {
     this.particlesGfx = null;
     this.facesGfx = null;
     this.facesBlurGfx = null;
+    this.metaOutlineGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
     this.splittingLayer = null;

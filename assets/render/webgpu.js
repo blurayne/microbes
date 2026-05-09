@@ -331,12 +331,14 @@ struct TintU {
   src_origin: vec4<f32>,
   // (canvasSize.xy, midPx.xy)
   canvas_mid: vec4<f32>,
-  // (gr, K, _, _)
+  // (gr, K, outlineMode, outlineWidth)
   gr_k: vec4<f32>,
   // (cytoTop.rgb, _)
   cytoTop: vec4<f32>,
   // (cytoBot.rgb, _)
   cytoBot: vec4<f32>,
+  // (outlineColor.rgb, _)
+  outlineCol: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> u: TintU;
 @group(0) @binding(1) var samp: sampler;
@@ -356,6 +358,8 @@ struct TintU {
   let midPx = u.canvas_mid.zw;
   let gr = u.gr_k.x;
   let K = u.gr_k.y;
+  let outlineMode = i32(u.gr_k.z + 0.5);
+  let outlineWidth = u.gr_k.w;
   // pos is canvas-top-left framebuffer coords. Convert to RT-local uv.
   let canvasPxTL = pos.xy;
   let rtLocalTL = canvasPxTL - rtOrigin;
@@ -374,8 +378,18 @@ struct TintU {
     alphaMul = 1.0 - (t - 0.55) / 0.45;
   }
   let thresholded = clamp(K * m.a - K * 0.5, 0.0, 1.0);
-  let a = thresholded * alphaMul;
-  return vec4<f32>(col, a);
+  let bodyA = thresholded * alphaMul;
+
+  // Edge-mode rim: thin band along the blurred-mask 0.5 contour. sdf
+  // and polygon modes draw rims via the decoration line pipeline so
+  // this contributes 0.
+  var outlineA = 0.0;
+  if (outlineMode == 0) {
+    outlineA = 1.0 - smoothstep(0.0, max(outlineWidth, 0.001), abs(m.a - 0.5));
+  }
+  let finalRGB = mix(col, u.outlineCol.rgb, outlineA);
+  let finalA = max(bodyA, outlineA);
+  return vec4<f32>(finalRGB, finalA);
 }
 `;
 
@@ -760,6 +774,23 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
 `;
 
 // ---------- Helpers ----------
+
+// Point-in-polygon ray-cast test. `verts` is a flat (x, y) Float64Array
+// of N vertices; tests whether (px, py) is inside the closed polygon.
+// Used by 'polygon' metaSplit outline mode to skip segments whose
+// midpoint falls inside the partner half (approximate union).
+function pointInPoly(px, py, verts) {
+  const n = verts.length / 2;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i, i++) {
+    const ix = verts[i * 2], iy = verts[i * 2 + 1];
+    const jx = verts[j * 2], jy = verts[j * 2 + 1];
+    if (((iy > py) !== (jy > py)) && (px < (jx - ix) * (py - iy) / (jy - iy + 1e-12) + ix)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
 
 function hexToRgb(hex) {
   const h = (hex || '#000').replace('#', '');
@@ -1414,7 +1445,8 @@ export class WebGPURenderer extends RendererBase {
       size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     const tintU = device.createBuffer({
-      size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      // 6 vec4: src_origin + canvas_mid + gr_k + cytoTop + cytoBot + outlineCol = 96 bytes.
+      size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     const polyBg = device.createBindGroup({
       layout: this._metaPolyPipeline.getBindGroupLayout(0),
@@ -1755,11 +1787,18 @@ export class WebGPURenderer extends RendererBase {
         0, 1.0 / rt.h,
         blurPx, 0, 0, 0,
       ]));
+      // Outline mode: 0 = trace blob edge in this shader; 1 = sdf
+      // (per-half line strokes), 2 = polygon (union strokes). For 1/2
+      // the in-shader rim is suppressed; the line strokes happen via
+      // the decoration line pipeline elsewhere.
+      const outlineModeIdx = (S.metaOutlineMode === 'sdf') ? 1
+        : (S.metaOutlineMode === 'polygon') ? 2 : 0;
       device.queue.writeBuffer(rt.tintU, 0, new Float32Array([
         rt.w, rt.h, rtOriginX, rtOriginY,
         fbW, fbH, mx, my,
-        gr, fld.contrast, 0, 0,
+        gr, fld.contrast, outlineModeIdx, 0.06,
         cytoTop[0], cytoTop[1], cytoTop[2], 0,
+        cytoBot[0], cytoBot[1], cytoBot[2], 0,
         cytoBot[0], cytoBot[1], cytoBot[2], 0,
       ]));
 
@@ -2072,8 +2111,63 @@ export class WebGPURenderer extends RendererBase {
         case 'yReceptorsMany':    this._decorY(s, theme, time, 14); break;
       }
     }
+    // metaSplit outline modes 'sdf' / 'polygon' emit polygon strokes
+    // via this same line pipeline. 'edge' is handled inside the tint
+    // shader so emit nothing here.
+    if (S.metaSplit && (S.metaOutlineMode === 'sdf' || S.metaOutlineMode === 'polygon')) {
+      this._emitMetaSplitOutlines(shapes, time);
+    }
     if (this._decorLines.length === 0 && this._decorTris.length === 0) return;
     this._uploadAndDrawDecorations();
+  }
+
+  // Pair up SPLITTING shapes by cell.id, emit each half's wobble
+  // polygon as 32 line segments (cytoBot colour). For 'polygon' mode,
+  // skip segments whose midpoint falls inside the partner polygon —
+  // approximate union of the two halves.
+  _emitMetaSplitOutlines(shapes, time) {
+    const N = WOBBLE_VERTS;
+    const pairs = new Map();
+    for (const s of shapes) {
+      const c = s.cell;
+      if (c.state !== 'SPLITTING') continue;
+      let bucket = pairs.get(c.id);
+      if (!bucket) { bucket = []; pairs.set(c.id, bucket); }
+      bucket.push(s);
+    }
+    if (pairs.size === 0) return;
+    const skipUnion = (S.metaOutlineMode === 'polygon');
+    for (const halves of pairs.values()) {
+      const polys = halves.map((s) => {
+        const verts = new Float64Array(N * 2);
+        for (let i = 0; i < N; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], time);
+          verts[i * 2]     = v.x;
+          verts[i * 2 + 1] = v.y;
+        }
+        return verts;
+      });
+      for (let hi = 0; hi < halves.length; hi++) {
+        const c = halves[hi].cell;
+        const cc = cellColors(c);
+        const col = hexToRgb(cc.cytoBot);
+        const verts = polys[hi];
+        const partner = (skipUnion && polys.length === 2) ? polys[1 - hi] : null;
+        for (let i = 0; i < N; i++) {
+          const a = i * 2;
+          const b = ((i + 1) % N) * 2;
+          if (partner) {
+            const mx = (verts[a] + verts[b]) * 0.5;
+            const my = (verts[a + 1] + verts[b + 1]) * 0.5;
+            if (pointInPoly(mx, my, partner)) continue;
+          }
+          this._pushLine(
+            verts[a], verts[a + 1], verts[b], verts[b + 1],
+            col[0], col[1], col[2], 1.0,
+          );
+        }
+      }
+    }
   }
 
   _pushLine(x1, y1, x2, y2, r, g, b, a) {

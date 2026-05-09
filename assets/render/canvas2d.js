@@ -567,16 +567,42 @@ export class Canvas2DRenderer extends RendererBase {
     const cam = this.camera;
     const a = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
     if (a <= 0 || shapes.length === 0) return;
+    const N = WOBBLE_VERTS;
+    // metaSplit outline modes:
+    //   'sdf'     — stroke each half polygon (existing per-cell behavior).
+    //   'polygon' — stroke union polygon (skip segments inside partner).
+    //   'edge'    — same as 'polygon' but with a 1 px screen blur for a
+    //               soft rim that approximates the metaball silhouette.
+    // Without S.metaSplit the metaball pass isn't running, so each half
+    // gets its own stroke regardless of mode.
+    const mergeOutline = !!S.metaSplit
+      && (S.metaOutlineMode === 'edge' || S.metaOutlineMode === 'polygon');
     this.withCameraCtx(() => {
       ctx.save();
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.globalAlpha = a;
-      // Bold membrane in each cell's own deep cytoBot colour — accentuates
-      // the cell's identity instead of the single shared theme outline.
       ctx.lineWidth = Math.max(2, S.outlinePx * 0.85) / cam.scale;
-      const N = WOBBLE_VERTS;
-      for (const s of shapes) {
+
+      // Group SPLITTING shapes by cell.id when we'll merge them; the
+      // remaining shapes use the original per-shape stroke loop.
+      const splitPairs = mergeOutline ? new Map() : null;
+      const standalone = mergeOutline ? [] : shapes;
+      if (mergeOutline) {
+        for (const s of shapes) {
+          if (s.cell.state === 'SPLITTING') {
+            let bucket = splitPairs.get(s.cell.id);
+            if (!bucket) { bucket = []; splitPairs.set(s.cell.id, bucket); }
+            bucket.push(s);
+          } else {
+            standalone.push(s);
+          }
+        }
+      }
+
+      // Per-shape outline (NORMAL cells, plus all shapes when in 'sdf' /
+      // metaSplit-off).
+      for (const s of standalone) {
         ctx.strokeStyle = cellColors(s.cell).cytoBot;
         ctx.beginPath();
         for (let i = 0; i <= N; i++) {
@@ -586,6 +612,44 @@ export class Canvas2DRenderer extends RendererBase {
         }
         ctx.closePath();
         ctx.stroke();
+      }
+
+      // Union outline for SPLITTING pairs.
+      if (mergeOutline && splitPairs.size > 0) {
+        const softEdge = (S.metaOutlineMode === 'edge');
+        // ctx.filter is in screen px (ignores canvas transform). 1.5 px
+        // blur reads as a soft rim that approximates the metaball
+        // silhouette without sampling the actual blur+threshold output.
+        if (softEdge) ctx.filter = `blur(${(1.5).toFixed(2)}px)`;
+        for (const halves of splitPairs.values()) {
+          const polys = halves.map((s) => {
+            const verts = new Float64Array(N * 2);
+            for (let i = 0; i < N; i++) {
+              const v = shapeVertex(s, THETA_TABLE[i], t);
+              verts[i * 2]     = v.x;
+              verts[i * 2 + 1] = v.y;
+            }
+            return verts;
+          });
+          ctx.strokeStyle = cellColors(halves[0].cell).cytoBot;
+          for (let hi = 0; hi < halves.length; hi++) {
+            const verts = polys[hi];
+            const partner = (polys.length === 2) ? polys[1 - hi] : null;
+            ctx.beginPath();
+            let pathOpen = false;
+            for (let i = 0; i < N; i++) {
+              const ax = verts[i * 2],     ay = verts[i * 2 + 1];
+              const bx = verts[((i + 1) % N) * 2], by = verts[((i + 1) % N) * 2 + 1];
+              const skip = partner
+                && pointInPoly((ax + bx) * 0.5, (ay + by) * 0.5, partner);
+              if (skip) { pathOpen = false; continue; }
+              if (!pathOpen) { ctx.moveTo(ax, ay); pathOpen = true; }
+              ctx.lineTo(bx, by);
+            }
+            ctx.stroke();
+          }
+        }
+        if (softEdge) ctx.filter = 'none';
       }
       ctx.restore();
     });
@@ -1391,6 +1455,23 @@ export function renderCellPreview(canvasEl, typeKey) {
   c2.stroke(path);
   drawPreviewNucleus(c2, fakeCell, s.x, s.y, s.r * NUCLEUS_RATIO, theme);
   drawPreviewDecorations(c2, s, theme, t);
+}
+
+// Point-in-polygon ray-cast test. `verts` is a flat (x, y) Float64Array
+// of N vertices; tests whether (px, py) is inside the closed polygon.
+// Used by 'edge' / 'polygon' metaSplit outline modes to skip segments
+// whose midpoint falls inside the partner half (approximate union).
+function pointInPoly(px, py, verts) {
+  const n = verts.length / 2;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i, i++) {
+    const ix = verts[i * 2], iy = verts[i * 2 + 1];
+    const jx = verts[j * 2], jy = verts[j * 2 + 1];
+    if (((iy > py) !== (jy > py)) && (px < (jx - ix) * (py - iy) / (jy - iy + 1e-12) + ix)) {
+      inside = !inside;
+    }
+  }
+  return inside;
 }
 
 function drawPreviewNucleus(c2, cell, x, y, r, theme) {

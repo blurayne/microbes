@@ -412,6 +412,9 @@ uniform float u_gr;             // gradient radius in physical px
 uniform float u_K;              // threshold contrast (field.contrast)
 uniform vec3 u_cytoTop;
 uniform vec3 u_cytoBot;
+uniform int u_outlineMode;      // 0 = edge (rim from blurred mask), else no rim here (sdf/polygon use a separate line pass)
+uniform vec3 u_outlineColor;    // rim colour for edge mode
+uniform float u_outlineWidth;   // half-width of the rim band in normalised mask-alpha units (~0.06)
 out vec4 outColor;
 void main() {
   // gl_FragCoord is canvas-window coords (bottom-left). Translate to
@@ -434,8 +437,18 @@ void main() {
     alphaMul = 1.0 - (t - 0.55) / 0.45;
   }
   float thresholded = clamp(u_K * m.a - u_K * 0.5, 0.0, 1.0);
-  float a = thresholded * alphaMul;
-  outColor = vec4(col, a);
+  float bodyA = thresholded * alphaMul;
+
+  // Edge-mode rim: thin band along the blurred-mask 0.5 contour, which
+  // tracks the metaball silhouette exactly. sdf / polygon modes draw
+  // their rims via the decoration line pipeline so this contributes 0.
+  float outlineA = 0.0;
+  if (u_outlineMode == 0) {
+    outlineA = 1.0 - smoothstep(0.0, max(u_outlineWidth, 0.001), abs(m.a - 0.5));
+  }
+  vec3 finalRGB = mix(col, u_outlineColor, outlineA);
+  float finalA = max(bodyA, outlineA);
+  outColor = vec4(finalRGB, finalA);
 }`;
 
 const INSTANCE_FLOATS = 21; // see _diskVao layout in init()
@@ -789,6 +802,23 @@ void main() {
   if (a <= 0.0) discard;
   outColor = vec4(col, a);
 }`;
+
+// Point-in-polygon ray-cast test. `verts` is a flat (x, y) Float64Array
+// of N vertices; tests whether (px, py) is inside the closed polygon.
+// Used by 'polygon' metaSplit outline mode to skip segments whose
+// midpoint falls inside the partner half (approximate union).
+function pointInPoly(px, py, verts) {
+  const n = verts.length / 2;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i, i++) {
+    const ix = verts[i * 2], iy = verts[i * 2 + 1];
+    const jx = verts[j * 2], jy = verts[j * 2 + 1];
+    if (((iy > py) !== (jy > py)) && (px < (jx - ix) * (py - iy) / (jy - iy + 1e-12) + ix)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
 
 function hexToVec3(hex) {
   let h = (hex || '#000').replace('#', '');
@@ -1163,6 +1193,9 @@ export class WebGL2Renderer extends RendererBase {
       K: gl.getUniformLocation(this._metaTintProg, 'u_K'),
       cytoTop: gl.getUniformLocation(this._metaTintProg, 'u_cytoTop'),
       cytoBot: gl.getUniformLocation(this._metaTintProg, 'u_cytoBot'),
+      outlineMode: gl.getUniformLocation(this._metaTintProg, 'u_outlineMode'),
+      outlineColor: gl.getUniformLocation(this._metaTintProg, 'u_outlineColor'),
+      outlineWidth: gl.getUniformLocation(this._metaTintProg, 'u_outlineWidth'),
     };
 
     this._metaPolyVbo = gl.createBuffer();
@@ -1592,6 +1625,15 @@ export class WebGL2Renderer extends RendererBase {
       gl.uniform1f(this._metaTintU.K, fld.contrast);
       gl.uniform3fv(this._metaTintU.cytoTop, hexToVec3(cc.cytoTop));
       gl.uniform3fv(this._metaTintU.cytoBot, hexToVec3(cc.cytoBot));
+      // Outline mode: 0 = trace blob edge in this shader; 1/2 (sdf/
+      // polygon) emit lines via the decoration pipeline so we suppress
+      // the in-shader rim. Width is in normalised mask-alpha units;
+      // ~0.06 reads as a clean ~1-2 px rim at default zoom.
+      const outlineModeIdx = (S.metaOutlineMode === 'sdf') ? 1
+        : (S.metaOutlineMode === 'polygon') ? 2 : 0;
+      gl.uniform1i(this._metaTintU.outlineMode, outlineModeIdx);
+      gl.uniform3fv(this._metaTintU.outlineColor, hexToVec3(cc.cytoBot));
+      gl.uniform1f(this._metaTintU.outlineWidth, 0.06);
       gl.bindTexture(gl.TEXTURE_2D, rt.texA);
       gl.uniform1i(this._metaTintU.src, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -1708,8 +1750,66 @@ export class WebGL2Renderer extends RendererBase {
         case 'yReceptorsMany':    this._decorY(s, theme, time, 14); break;
       }
     }
+    // metaSplit outline modes 'sdf' / 'polygon' emit polygon strokes
+    // via this same line pipeline. 'edge' is handled inside the tint
+    // shader so emit nothing here.
+    if (S.metaSplit && (S.metaOutlineMode === 'sdf' || S.metaOutlineMode === 'polygon')) {
+      this._emitMetaSplitOutlines(shapes, time);
+    }
     if (this._decorLines.length === 0 && this._decorTris.length === 0) return;
     this._uploadAndDrawDecorations();
+  }
+
+  // Pair up SPLITTING shapes by cell.id, emit each half's wobble
+  // polygon as 32 line segments (cytoBot colour). For 'polygon' mode,
+  // skip segments whose midpoint falls inside the partner polygon —
+  // approximate union of the two halves (sub-ms even with several
+  // pairs: 32 edges × 64 segment midpoints = 2048 ray-cast ops).
+  _emitMetaSplitOutlines(shapes, time) {
+    const N = WOBBLE_VERTS;
+    const pairs = new Map();
+    for (const s of shapes) {
+      const c = s.cell;
+      if (c.state !== 'SPLITTING') continue;
+      let bucket = pairs.get(c.id);
+      if (!bucket) { bucket = []; pairs.set(c.id, bucket); }
+      bucket.push(s);
+    }
+    if (pairs.size === 0) return;
+    const skipUnion = (S.metaOutlineMode === 'polygon');
+    for (const halves of pairs.values()) {
+      // Pre-compute each half's polygon verts (we need both for the
+      // point-in-polygon test in 'polygon' mode).
+      const polys = halves.map((s) => {
+        const verts = new Float64Array(N * 2);
+        for (let i = 0; i < N; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], time);
+          verts[i * 2]     = v.x;
+          verts[i * 2 + 1] = v.y;
+        }
+        return verts;
+      });
+      for (let hi = 0; hi < halves.length; hi++) {
+        const c = halves[hi].cell;
+        const cc = cellColors(c);
+        const col = hexToVec3(cc.cytoBot);
+        const verts = polys[hi];
+        const partner = (skipUnion && polys.length === 2) ? polys[1 - hi] : null;
+        for (let i = 0; i < N; i++) {
+          const a = i * 2;
+          const b = ((i + 1) % N) * 2;
+          if (partner) {
+            const mx = (verts[a] + verts[b]) * 0.5;
+            const my = (verts[a + 1] + verts[b + 1]) * 0.5;
+            if (pointInPoly(mx, my, partner)) continue;
+          }
+          this._pushLine(
+            verts[a], verts[a + 1], verts[b], verts[b + 1],
+            col[0], col[1], col[2], 1.0,
+          );
+        }
+      }
+    }
   }
 
   _pushLine(x1, y1, x2, y2, r, g, b, a) {
