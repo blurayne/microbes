@@ -72,7 +72,19 @@ export class PixiRenderer extends RendererBase {
     this.pairThreshold = null;
     this.pairContainer = null;      // off-stage Container with [blur, threshold] filters
     this.pairPolyGfx = null;        // Graphics inside pairContainer (cleared per pair)
-    this._pairPool = [];            // [{ rt, sprite }] reused across frames
+    // Pair pool entries: { rt, tex, sprite, rtW, rtH }. tex is a Texture
+    // wrapping rt.source with a mutable frame so the sprite can display
+    // a bbox-sized sub-rect of an over-allocated RT (used by bbox /
+    // sharedMax modes). 'fullCanvas' mode keeps frame = full RT.
+    this._pairPool = [];
+    // Resolved S.metaRtMode for the currently-built pool. Switch wipes
+    // the pool because RT sizes / sprite frames differ per mode.
+    this._metaResolvedMode = null;
+    // 'sharedMax' mode: monotonically-grown shared RT dimensions. Pool
+    // entries all live at this size; bumping it triggers RT resize on
+    // the next acquire.
+    this._metaSharedMaxW = 0;
+    this._metaSharedMaxH = 0;
 
     // Wobble-polygon vertex buffers, reused across frames. Pixi v8's
     // Polygon stores `this.points = inputArray` by reference (no copy),
@@ -191,41 +203,61 @@ export class PixiRenderer extends RendererBase {
     this.canvas.style.height = H + 'px';
     this.app.renderer.resize(W, H);
 
-    // Recreate every pair RT at the new canvas size and repoint its
-    // sprite. Pool entries are reused across frames; only on resize
-    // do we throw away the old textures.
-    const PIXI = this.PIXI;
-    if (PIXI && this._pairPool.length) {
-      const wPx = Math.max(2, Math.floor(W));
-      const hPx = Math.max(2, Math.floor(H));
-      for (const entry of this._pairPool) {
-        if (entry.rt) { try { entry.rt.destroy(true); } catch {} }
-        entry.rt = PIXI.RenderTexture.create({ width: wPx, height: hPx, resolution: 1 });
-        entry.sprite.texture = entry.rt;
-        entry.sprite.width = W;
-        entry.sprite.height = H;
-      }
-    }
+    // Wipe the pool — RT sizes depend on canvas / mode, simplest to
+    // rebuild lazily on the next splitting frame.
+    this._destroyMetaPool();
+    this._metaResolvedMode = null;
+    this._metaSharedMaxW = 0;
+    this._metaSharedMaxH = 0;
   }
 
-  // Lazy-grow the (RT, Sprite) pool used by metaSplit. Each entry
-  // owns a full-canvas RenderTexture and a screen-space Sprite added
-  // to splittingLayer. Sprites stay on the stage and are made
-  // visible/invisible per frame.
-  _getOrCreatePairEntry(idx) {
-    if (idx < this._pairPool.length) return this._pairPool[idx];
+  // Acquire a pool entry sized for the current S.metaRtMode. Allocates
+  // on first hit; resizes the existing RT if the requested size grew.
+  // Returns { rt, tex, sprite, rtW, rtH }; `tex.frame` is the visible
+  // sub-rect (the polygon footprint), which the caller updates per
+  // pair so the sprite displays only the bbox region.
+  _acquireMetaPairEntry(idx, rtW, rtH) {
     const PIXI = this.PIXI;
-    const W = Math.max(2, Math.floor(this.W));
-    const H = Math.max(2, Math.floor(this.H));
-    const rt = PIXI.RenderTexture.create({ width: W, height: H, resolution: 1 });
-    const sprite = new PIXI.Sprite(rt);
-    sprite.width = this.W;
-    sprite.height = this.H;
-    sprite.visible = false;
-    this.splittingLayer.addChild(sprite);
-    const entry = { rt, sprite };
-    this._pairPool.push(entry);
+    let entry = this._pairPool[idx];
+    if (!entry) {
+      const rt = PIXI.RenderTexture.create({ width: rtW, height: rtH, resolution: 1 });
+      const tex = new PIXI.Texture({
+        source: rt.source,
+        frame: new PIXI.Rectangle(0, 0, rtW, rtH),
+      });
+      const sprite = new PIXI.Sprite(tex);
+      sprite.visible = false;
+      this.splittingLayer.addChild(sprite);
+      entry = { rt, tex, sprite, rtW, rtH };
+      this._pairPool[idx] = entry;
+      return entry;
+    }
+    if (entry.rtW !== rtW || entry.rtH !== rtH) {
+      entry.rt.resize(rtW, rtH);
+      entry.rtW = rtW;
+      entry.rtH = rtH;
+      // Keep the texture's frame within the new bounds; the per-pair
+      // dispatch will reset frame to the actual visible region anyway.
+      entry.tex.frame.width = Math.min(entry.tex.frame.width, rtW);
+      entry.tex.frame.height = Math.min(entry.tex.frame.height, rtH);
+      entry.tex.updateUvs();
+    }
     return entry;
+  }
+
+  _destroyMetaPool() {
+    for (const entry of this._pairPool) {
+      if (!entry) continue;
+      if (entry.sprite) {
+        try { entry.sprite.removeFromParent(); } catch {}
+        // texture: false — the wrapping Texture is owned by the entry
+        // and destroyed below.
+        try { entry.sprite.destroy({ children: false, texture: false }); } catch {}
+      }
+      if (entry.tex) { try { entry.tex.destroy(false); } catch {} }
+      if (entry.rt)  { try { entry.rt.destroy(true); }  catch {} }
+    }
+    this._pairPool = [];
   }
 
   beginFrame(/* timeMs, dt */) { /* render happens in endFrame */ }
@@ -661,36 +693,49 @@ export class PixiRenderer extends RendererBase {
   // splittingLayer sits above worldLayer so the merged blob covers
   // any bleed from the singleton pass under it.
   //
-  // S.metaRtMode is honoured by the webgl2 / webgpu renderers but not
-  // here — Pixi keeps its own pool of full-canvas RenderTextures (one
-  // per active pair, equivalent to 'fullCanvas') because the pair
-  // pipeline runs through Pixi's own filter chain on a screen-space
-  // Sprite. Refactoring to per-pair bbox would require shifting the
-  // pairContainer transform per pair and resizing the Sprite, which
-  // is outside the scope of the metaSplit feature work.
+  // RT-sizing follows S.metaRtMode (matches webgl2 / webgpu):
+  //   'bbox'        — per-pair RT sized to bbox + blur padding,
+  //                   rounded up to a 64-px grid for pool reuse.
+  //   'fullCanvas'  — RT covers the canvas (Pixi's original strategy).
+  //   'sharedMax'   — all pool entries share a single size: the
+  //                   monotonically-grown max bbox seen so far.
+  // For bbox / sharedMax modes the pairContainer is shifted by
+  // -bboxOrigin so the polygon lands at (0,0) in the RT, and the
+  // sprite's texture frame is set to the bbox sub-rect of the RT so
+  // it displays only the rendered region at canvas (bboxX, bboxY).
   _renderSplittingPairs(splittingByCellId, time) {
     const PIXI = this.PIXI;
     const cam = this.camera;
     const renderer = this.app.renderer;
 
-    // pairContainer carries the camera transform so polygons in
-    // world space map to screen pixels in the RT (which is screen-
-    // sized at resolution 1).
-    this.pairContainer.position.set(cam.tx, cam.ty);
-    this.pairContainer.scale.set(cam.scale);
+    // Resolve mode; rebuild the pool when it changes (RT sizes /
+    // sprite frames differ per mode).
+    const mode = (S.metaRtMode === 'fullCanvas' || S.metaRtMode === 'sharedMax')
+      ? S.metaRtMode : 'bbox';
+    if (mode !== this._metaResolvedMode) {
+      this._destroyMetaPool();
+      this._metaResolvedMode = mode;
+      this._metaSharedMaxW = 0;
+      this._metaSharedMaxH = 0;
+    }
 
-    let idx = 0;
+    // First pass: build polygons + bboxes for every pair. Stash them
+    // so the render pass can size RTs in a single sweep (sharedMax
+    // needs to know all bboxes upfront).
+    const entries = [];
+    let frameMaxW = 0;
+    let frameMaxH = 0;
     for (const [, pair] of splittingByCellId) {
       const c = pair[0].cell;
       const cType = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
       const fld = cType.field || { blur: 6, contrast: 20 };
       const cc = cellColors(c);
 
-      // Polygons for both halves, in world space. Each half writes
-      // into its own pool slot — the two halves coexist in
-      // pairPolyGfx until renderer.render() flushes them, so they
-      // need distinct backing arrays (Pixi stores them by reference).
-      this.pairPolyGfx.clear();
+      // Pre-pool polygon buffers for both halves (two halves coexist
+      // in pairPolyGfx until renderer.render() flushes, so they need
+      // distinct backing arrays — Pixi stores them by reference).
+      const polys = [];
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (let halfIdx = 0; halfIdx < pair.length; halfIdx++) {
         const s = pair[halfIdx];
         let pts = this._pairHalfPtsPool[halfIdx];
@@ -700,26 +745,95 @@ export class PixiRenderer extends RendererBase {
         }
         for (let i = 0; i < WOBBLE_VERTS; i++) {
           const v = shapeVertex(s, THETA_TABLE[i], time);
-          pts[i * 2] = v.x;
+          const x = v.x * cam.scale + cam.tx;
+          const y = v.y * cam.scale + cam.ty;
+          if (x < minX) minX = x; if (x > maxX) maxX = x;
+          if (y < minY) minY = y; if (y > maxY) maxY = y;
+          pts[i * 2]     = v.x;
           pts[i * 2 + 1] = v.y;
         }
-        this.pairPolyGfx.poly(pts).fill(0xffffff);
+        polys.push(pts);
       }
 
-      // Configure per-type field params on the shared filter chain.
-      // Cached so consecutive pairs of the same cell type don't
-      // re-upload identical uniforms / rebuild the threshold matrix.
-      const fieldKey = c.type + '|' + fld.blur + '|' + fld.contrast;
+      const padPx = fld.blur * 3 + 4;
+      const bboxX = Math.max(0, Math.floor(minX - padPx));
+      const bboxY = Math.max(0, Math.floor(minY - padPx));
+      const bboxRight = Math.min(this.W, Math.ceil(maxX + padPx));
+      const bboxBottom = Math.min(this.H, Math.ceil(maxY + padPx));
+      const bboxW = Math.max(2, bboxRight - bboxX);
+      const bboxH = Math.max(2, bboxBottom - bboxY);
+      if (bboxW > frameMaxW) frameMaxW = bboxW;
+      if (bboxH > frameMaxH) frameMaxH = bboxH;
+      entries.push({ pair, c, cType, fld, cc, polys, bboxX, bboxY, bboxW, bboxH });
+    }
+
+    if (mode === 'sharedMax') {
+      this._metaSharedMaxW = Math.max(this._metaSharedMaxW, frameMaxW);
+      this._metaSharedMaxH = Math.max(this._metaSharedMaxH, frameMaxH);
+    }
+
+    // Second pass: render each pair into a sized RT.
+    const W = Math.max(2, Math.floor(this.W));
+    const H = Math.max(2, Math.floor(this.H));
+    for (let idx = 0; idx < entries.length; idx++) {
+      const e = entries[idx];
+
+      let rtW, rtH;
+      if (mode === 'fullCanvas') {
+        rtW = W; rtH = H;
+      } else if (mode === 'sharedMax') {
+        rtW = this._metaSharedMaxW; rtH = this._metaSharedMaxH;
+      } else { // bbox
+        const grid = 64;
+        rtW = Math.max(grid, Math.ceil(e.bboxW / grid) * grid);
+        rtH = Math.max(grid, Math.ceil(e.bboxH / grid) * grid);
+      }
+
+      const entry = this._acquireMetaPairEntry(idx, rtW, rtH);
+
+      // Polygon transform + sprite frame depend on mode.
+      if (mode === 'fullCanvas') {
+        this.pairContainer.position.set(cam.tx, cam.ty);
+        // Frame covers the whole RT (canvas-sized).
+        if (entry.tex.frame.x !== 0 || entry.tex.frame.y !== 0
+            || entry.tex.frame.width !== rtW || entry.tex.frame.height !== rtH) {
+          entry.tex.frame.x = 0;
+          entry.tex.frame.y = 0;
+          entry.tex.frame.width = rtW;
+          entry.tex.frame.height = rtH;
+          entry.tex.updateUvs();
+        }
+        entry.sprite.position.set(0, 0);
+      } else {
+        this.pairContainer.position.set(cam.tx - e.bboxX, cam.ty - e.bboxY);
+        // Frame covers just the bbox sub-rect in the (oversized) RT.
+        if (entry.tex.frame.x !== 0 || entry.tex.frame.y !== 0
+            || entry.tex.frame.width !== e.bboxW || entry.tex.frame.height !== e.bboxH) {
+          entry.tex.frame.x = 0;
+          entry.tex.frame.y = 0;
+          entry.tex.frame.width = e.bboxW;
+          entry.tex.frame.height = e.bboxH;
+          entry.tex.updateUvs();
+        }
+        entry.sprite.position.set(e.bboxX, e.bboxY);
+      }
+      this.pairContainer.scale.set(cam.scale);
+
+      this.pairPolyGfx.clear();
+      for (const pts of e.polys) this.pairPolyGfx.poly(pts).fill(0xffffff);
+
+      // Configure per-type field params; cached so consecutive pairs
+      // of the same cell type don't rebuild the threshold matrix.
+      const fieldKey = e.c.type + '|' + e.fld.blur + '|' + e.fld.contrast;
       if (fieldKey !== this._lastPairFieldKey) {
-        this.pairBlur.strength = fld.blur;
-        this._setPairThreshold(fld.contrast);
+        this.pairBlur.strength = e.fld.blur;
+        this._setPairThreshold(e.fld.contrast);
         this._lastPairFieldKey = fieldKey;
       }
 
-      const entry = this._getOrCreatePairEntry(idx++);
       renderer.render({ container: this.pairContainer, target: entry.rt, clear: true });
 
-      entry.sprite.tint = cc.cytoBot || '#d36699';
+      entry.sprite.tint = e.cc.cytoBot || '#d36699';
       entry.sprite.alpha = 1;
       entry.sprite.visible = true;
     }
@@ -779,10 +893,7 @@ export class PixiRenderer extends RendererBase {
 
   destroy() {
     this._destroyed = true;
-    for (const entry of this._pairPool) {
-      if (entry.rt) { try { entry.rt.destroy(true); } catch {} }
-    }
-    this._pairPool = [];
+    this._destroyMetaPool();
     if (this.app) {
       try { this.app.destroy({ removeView: false }, { children: true, texture: true }); }
       catch (e) { console.warn('[microbes] PixiRenderer destroy:', e && e.message); }

@@ -25,7 +25,7 @@ export const DEFAULTS = {
   splitOnTap: false,
   randomSplit: false,
   metaSplit: true,          // metaball merge between the two halves while SPLITTING
-  metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass in the webgl2 / webgpu renderers. Pixi has its own internal RT strategy (effectively 'fullCanvas') and ignores this knob.
+  metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu / pixi alike.
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
@@ -1106,7 +1106,7 @@ export const PATHOGEN_GROUPS = [
 ];
 
 // ---------- Constants ----------
-export const SPLIT_DURATION = 0.9;
+export const SPLIT_DURATION = 1.8;
 export const BOND_DURATION = 2.0;
 export const CELL_RADIUS = 52;
 export const NUCLEUS_RATIO = 0.30;
