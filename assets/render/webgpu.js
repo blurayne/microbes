@@ -594,6 +594,7 @@ struct VsOut {
   @location(2) cfg1: vec4<f32>,      // (pupilR, lookX, lookY, mouthW)
   @location(3) cfg2: vec4<f32>,      // (blink, mouthY, phase, blur)
   @location(4) mouthCol: vec3<f32>,
+  @location(5) alphaMul: f32,        // SPLITTING fade: 1 → 0.2 at peak → 1
 };
 
 @vertex fn vs_main(
@@ -601,7 +602,7 @@ struct VsOut {
   @location(1) inst: vec4<f32>,        // (worldX, worldY, r, mouthKind)
   @location(2) eyes: vec4<f32>,        // (eyesCount, eyeR, eyeY, pupilR)
   @location(3) look: vec4<f32>,        // (lookX, lookY, mouthW, blink)
-  @location(4) mouth: vec4<f32>,       // (mouthY, phase, blur, _)
+  @location(4) mouth: vec4<f32>,       // (mouthY, phase, blur, alphaMul)
   @location(5) mouthCol: vec3<f32>,
 ) -> VsOut {
   let camScale = u.cam.x;
@@ -619,6 +620,7 @@ struct VsOut {
   out.cfg1 = vec4<f32>(eyes.w, look.x, look.y, look.z);
   out.cfg2 = vec4<f32>(look.w, mouth.x, mouth.y, mouth.z);
   out.mouthCol = mouthCol;
+  out.alphaMul = mouth.w;
   return out;
 }
 
@@ -768,8 +770,11 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
     a = max(a, tA);
   }
 
-  if (a <= 0.0) { discard; }
-  return vec4<f32>(col, a);
+  // SPLITTING fade — alphaMul drops to ~0.2 at p=0.5 then returns
+  // to 1 at split end. Always 1 outside SPLITTING.
+  let finalA = a * in.alphaMul;
+  if (finalA <= 0.0) { discard; }
+  return vec4<f32>(col, finalA);
 }
 `;
 
@@ -2040,13 +2045,19 @@ export class WebGPURenderer extends RendererBase {
       data[j + 11] = blink;
       data[j + 12] = 0.18;                // mouthY
       data[j + 13] = c.phase || 0;
-      // Blur during SPLITTING (sine envelope over splitProgress, peaks
-      // mid-split). Body-radius units; widens every smoothstep edge in
-      // the face shader. Cap below 0.10 so eyes/pupils don't dissolve.
-      data[j + 14] = (c.state === 'SPLITTING')
-        ? Math.sin(c.splitProgress * Math.PI) * 0.08
-        : 0;
-      data[j + 15] = 0;
+      // SPLITTING envelope (sine, peaks mid-split, zero at endpoints):
+      //   blur (slot 14): widens every smoothstep edge in fs_main.
+      //                   0.12 in body-radius units at peak — eyes
+      //                   soften noticeably without dissolving.
+      //   alphaMul (slot 15): fades the final face alpha. 1 → 0.2 → 1.
+      if (c.state === 'SPLITTING') {
+        const env = Math.sin(c.splitProgress * Math.PI);
+        data[j + 14] = env * 0.12;
+        data[j + 15] = 1 - 0.8 * env;
+      } else {
+        data[j + 14] = 0;
+        data[j + 15] = 1;
+      }
       data[j + 16] = mcRgb[0];
       data[j + 17] = mcRgb[1];
       data[j + 18] = mcRgb[2];

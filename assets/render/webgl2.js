@@ -604,7 +604,7 @@ layout(location=0) in vec2 a_corner;
 layout(location=1) in vec4 a_inst;     // (x, y, r, mouthKind)
 layout(location=2) in vec4 a_face1;    // (eyesCount, eyeR, eyeY, pupilR)
 layout(location=3) in vec4 a_face2;    // (lookX, lookY, mouthW, blink)
-layout(location=4) in vec4 a_face3;    // (mouthY, phase, _, _)
+layout(location=4) in vec4 a_face3;    // (mouthY, phase, blur, alphaMul)
 layout(location=5) in vec3 a_mouthCol; // RGB for mouth fill / stroke
 
 uniform vec3 u_camera;
@@ -639,7 +639,7 @@ in vec2 v_uv;
 in vec4 v_inst;       // (.., .., .., mouthKind)
 in vec4 v_face1;      // (eyesCount, eyeR, eyeY, pupilR)
 in vec4 v_face2;      // (lookX, lookY, mouthW, blink)
-in vec4 v_face3;      // (mouthY, phase, blur, _)
+in vec4 v_face3;      // (mouthY, phase, blur, alphaMul)
 in vec3 v_mouthCol;
 uniform float u_time;
 out vec4 outColor;
@@ -799,8 +799,12 @@ void main() {
     a = max(a, tA);
   }
 
-  if (a <= 0.0) discard;
-  outColor = vec4(col, a);
+  // SPLITTING fade — alphaMul drops to ~0.2 at p=0.5 then returns
+  // to 1 at split end. Always 1 outside SPLITTING.
+  float alphaMul = v_face3.w;
+  float finalA = a * alphaMul;
+  if (finalA <= 0.0) discard;
+  outColor = vec4(col, finalA);
 }`;
 
 // Point-in-polygon ray-cast test. `verts` is a flat (x, y) Float64Array
@@ -1701,13 +1705,19 @@ export class WebGL2Renderer extends RendererBase {
       data[j + 11] = blink;
       data[j + 12] = 0.18;           // mouthY
       data[j + 13] = c.phase || 0;
-      // Blur during SPLITTING (sine envelope over splitProgress, peaks
-      // mid-split). Body-radius units; widens every smoothstep edge in
-      // the face shader. Cap below 0.10 so eyes/pupils don't dissolve.
-      data[j + 14] = (c.state === 'SPLITTING')
-        ? Math.sin(c.splitProgress * Math.PI) * 0.08
-        : 0;
-      data[j + 15] = 0;
+      // SPLITTING envelope (sine, peaks mid-split, zero at endpoints):
+      //   blur (slot 14): widens every smoothstep edge in FRAG_FACE.
+      //                   0.12 in body-radius units at peak — eyes
+      //                   soften noticeably without dissolving.
+      //   alphaMul (slot 15): fades the final face alpha. 1 → 0.2 → 1.
+      if (c.state === 'SPLITTING') {
+        const env = Math.sin(c.splitProgress * Math.PI);
+        data[j + 14] = env * 0.12;
+        data[j + 15] = 1 - 0.8 * env;
+      } else {
+        data[j + 14] = 0;
+        data[j + 15] = 1;
+      }
       data[j + 16] = mcRgb[0];
       data[j + 17] = mcRgb[1];
       data[j + 18] = mcRgb[2];

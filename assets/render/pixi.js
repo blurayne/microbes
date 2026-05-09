@@ -174,7 +174,7 @@ export class PixiRenderer extends RendererBase {
     // bucket. Sine envelope (sin(p·π) · maxBlur) over splitProgress.
     // 4 buckets at 1.5/3.0/4.5/6.0 px = visually smooth with bounded
     // filter cost.
-    this.faceBlurStrengths = [1.5, 3.0, 4.5, 6.0];
+    this.faceBlurStrengths = [2.0, 4.0, 6.0, 9.0];
     this.facesBlurGfx = this.faceBlurStrengths.map((strength) => {
       const g = new PIXI.Graphics();
       g.filters = [new PIXI.BlurFilter({ strength, quality: 3 })];
@@ -557,12 +557,18 @@ export class PixiRenderer extends RendererBase {
   }
 
   _strokePixiRun(og, verts, fromIdx, toIdx, color, width, alpha) {
-    const pts = [];
-    for (let k = fromIdx; k < toIdx; k++) {
-      pts.push(verts[k * 2], verts[k * 2 + 1]);
+    // Open polyline via moveTo / lineTo. Pixi v8's .poly() always
+    // closes the path, which would draw a chord across each skipped
+    // run in 'polygon' mode (the union outline). The first 1-arg
+    // call also avoids the v8 .poly(pts, closed) signature error
+    // that froze the renderer on every splitting frame.
+    const last = toIdx % WOBBLE_VERTS;
+    og.moveTo(verts[fromIdx * 2], verts[fromIdx * 2 + 1]);
+    for (let k = fromIdx + 1; k < toIdx; k++) {
+      og.lineTo(verts[k * 2], verts[k * 2 + 1]);
     }
-    pts.push(verts[(toIdx % WOBBLE_VERTS) * 2], verts[(toIdx % WOBBLE_VERTS) * 2 + 1]);
-    og.poly(pts, false).stroke({ color, width, alpha, alignment: 0.5 });
+    og.lineTo(verts[last * 2], verts[last * 2 + 1]);
+    og.stroke({ color, width, alpha, alignment: 0.5 });
   }
 
   // Per-kind nucleus rendering, ported from canvas2D's _drawNucleus.
@@ -680,10 +686,15 @@ export class PixiRenderer extends RendererBase {
       if (!cfg.eyes && cfg.mouth === 'none') continue;
       // Dispatch per-cell into the right blur bucket. Sine envelope
       // over splitProgress; quantize to nearest available bucket so we
-      // don't allocate a Graphics per face.
+      // don't allocate a Graphics per face. Same envelope drives an
+      // alpha fade — face dips to 20% opacity at p=0.5, returns to
+      // 100% at split endpoints.
       let g = gNorm;
+      let faceAlpha = 1;
       if (c.state === 'SPLITTING') {
-        const want = Math.sin(c.splitProgress * Math.PI) * maxBlurPx;
+        const env = Math.sin(c.splitProgress * Math.PI);
+        faceAlpha = 1 - 0.8 * env;
+        const want = env * maxBlurPx;
         if (want > 0.5) {
           let bestIdx = 0, bestErr = Infinity;
           for (let i = 0; i < blurStrengths.length; i++) {
@@ -730,20 +741,21 @@ export class PixiRenderer extends RendererBase {
             // squint with a low-aspect fill using the same ellipse path
             // canvas2d uses. v8 exposes `ellipse(x, y, rx, ry)` directly.
             g.ellipse(ex, eyeY, eyeR, eyeR * 0.12)
-              .fill('#ffffff')
-              .stroke({ color: outline, width: lw });
+              .fill({ color: '#ffffff', alpha: faceAlpha })
+              .stroke({ color: outline, width: lw, alpha: faceAlpha });
           } else {
             g.circle(ex, eyeY, eyeR)
-              .fill('#ffffff')
-              .stroke({ color: outline, width: lw });
-            g.circle(ex + pdx, eyeY + pdy, pupilR).fill('#101218');
+              .fill({ color: '#ffffff', alpha: faceAlpha })
+              .stroke({ color: outline, width: lw, alpha: faceAlpha });
+            g.circle(ex + pdx, eyeY + pdy, pupilR)
+              .fill({ color: '#101218', alpha: faceAlpha });
             // Pupil highlight (white glint, slightly inset toward
             // the upper-left). Matches canvas2d's catchlight.
             g.circle(
               ex + pdx - pupilR * 0.35,
               eyeY + pdy - pupilR * 0.35,
               pupilR * 0.30,
-            ).fill({ color: '#ffffff', alpha: 0.85 });
+            ).fill({ color: '#ffffff', alpha: 0.85 * faceAlpha });
           }
         }
       }
@@ -760,10 +772,10 @@ export class PixiRenderer extends RendererBase {
           // Upper-arc smile spanning ~0.12π → 0.88π around (cx, mY-mW*0.3).
           // Pixi's `arc(cx, cy, r, start, end)` matches canvas2d's signature.
           this._strokeArc(g, cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI,
-            mouthColor, mlw);
+            mouthColor, mlw, faceAlpha);
         } else if (cfg.mouth === 'frown') {
           this._strokeArc(g, cx, mY + mW * 0.6, mW, 1.12 * Math.PI, 1.88 * Math.PI,
-            mouthColor, mlw);
+            mouthColor, mlw, faceAlpha);
         } else if (cfg.mouth === 'snarl') {
           // 5-segment zig-zag line; segments alternate y by mW*0.18.
           const N = 5;
@@ -776,36 +788,36 @@ export class PixiRenderer extends RendererBase {
           // segments individually via moveTo/lineTo.
           g.moveTo(pts[0], pts[1]);
           for (let i = 1; i <= N; i++) g.lineTo(pts[i * 2], pts[i * 2 + 1]);
-          g.stroke({ color: mouthColor, width: mlw });
+          g.stroke({ color: mouthColor, width: mlw, alpha: faceAlpha });
         } else if (cfg.mouth === 'fangs') {
           // Maw: a horizontal ellipse filled with the mouth colour, plus
           // two white triangle fangs hanging from the upper edge.
-          g.ellipse(cx, mY, mW, mW * 0.45).fill(mouthColor);
+          g.ellipse(cx, mY, mW, mW * 0.45).fill({ color: mouthColor, alpha: faceAlpha });
           g.poly([
             cx - mW * 0.55, mY - mW * 0.20,
             cx - mW * 0.40, mY + mW * 0.45,
             cx - mW * 0.25, mY - mW * 0.20,
-          ]).fill('#ffffff');
+          ]).fill({ color: '#ffffff', alpha: faceAlpha });
           g.poly([
             cx + mW * 0.25, mY - mW * 0.20,
             cx + mW * 0.40, mY + mW * 0.45,
             cx + mW * 0.55, mY - mW * 0.20,
-          ]).fill('#ffffff');
+          ]).fill({ color: '#ffffff', alpha: faceAlpha });
         } else if (cfg.mouth === 'tongue') {
-          g.ellipse(cx, mY, mW, mW * 0.40).fill(mouthColor);
+          g.ellipse(cx, mY, mW, mW * 0.40).fill({ color: mouthColor, alpha: faceAlpha });
           const wag = Math.sin(t * 5 + (c.phase || 0)) * mW * 0.18;
           g.ellipse(cx + wag, mY + mW * 0.30, mW * 0.32, mW * 0.22)
-            .fill('#ff8aa0');
+            .fill({ color: '#ff8aa0', alpha: faceAlpha });
         } else if (cfg.mouth === 'drool') {
           // Same upper arc as smile, then an animated falling drip in
           // a soft green that fades as it falls.
           this._strokeArc(g, cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI,
-            mouthColor, mlw);
+            mouthColor, mlw, faceAlpha);
           const dripPhase = ((t * 0.6 + (c.phase || 0)) % 1 + 1) % 1;
           const dripY = mY + mW * 0.25 + dripPhase * mW * 0.8;
           const dripA = 1 - dripPhase;
           g.ellipse(cx + mW * 0.25, dripY, mW * 0.10, mW * 0.16)
-            .fill({ color: '#78dc82', alpha: dripA });
+            .fill({ color: '#78dc82', alpha: dripA * faceAlpha });
         }
       }
     }
@@ -821,11 +833,11 @@ export class PixiRenderer extends RendererBase {
   // contains every prior arc plus implicit connecting lines. Calling
   // `moveTo()` first invokes `startPoly()`, which ends the previous
   // poly and starts a fresh one anchored at the arc's start point.
-  _strokeArc(g, x, y, r, startRad, endRad, color, width) {
+  _strokeArc(g, x, y, r, startRad, endRad, color, width, alpha = 1) {
     const sx = x + Math.cos(startRad) * r;
     const sy = y + Math.sin(startRad) * r;
     g.moveTo(sx, sy);
-    g.arc(x, y, r, startRad, endRad).stroke({ color, width });
+    g.arc(x, y, r, startRad, endRad).stroke({ color, width, alpha });
   }
 
   // metaSplit: render each splitting pair through the off-stage
