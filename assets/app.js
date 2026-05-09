@@ -168,8 +168,13 @@ document.addEventListener('pointermove', (ev) => {
     const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
     const factor = dist / sim.pinch.startDist;
     const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, sim.pinch.startScale * factor));
-    const newRotation = sim.pinch.startRotation
-      + (Math.atan2(dy, dx) - sim.pinch.startAngle);
+    // Two-finger rotation is opt-in — off by default. When disabled the
+    // camera's rotation stays pinned to the gesture's start value (which
+    // is also the pre-gesture rotation, since the toggle is global), so
+    // the pinch becomes a pure scale+pan.
+    const newRotation = S.pinchRotation
+      ? sim.pinch.startRotation + (Math.atan2(dy, dx) - sim.pinch.startAngle)
+      : sim.pinch.startRotation;
     // Rotation-aware re-anchor: keep the world point that was under the
     // pinch midpoint at gesture start under the current pinch midpoint
     // as scale + rotation change. (When rotation collapses to 0 this
@@ -456,6 +461,14 @@ if (modeKillBtn)   modeKillBtn.addEventListener('click',   () => {
 // splitOnTap: settings checkbox removed late 2026; the HUD "Split"
 // mode button at modeSplit still toggles S.splitOnTap via setSplitOnTap.
 applyModeUi();
+bindCheckbox('pinchRotation', 'pinchRotation', (on) => {
+  // Disabling the gesture mid-session shouldn't strand the camera in
+  // a rotated state — snap back to upright and end any in-flight pinch.
+  if (!on) {
+    sim.camera.rotation = 0;
+    sim.pinch = null;
+  }
+});
 bindCheckbox('randomSplit', 'randomSplit');
 bindCheckbox('metaSplit', 'metaSplit');
 const metaRtModeSel = document.getElementById('metaRtMode');

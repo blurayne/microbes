@@ -27,6 +27,7 @@ export const DEFAULTS = {
   metaSplit: true,          // metaball merge between the two halves while SPLITTING
   metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu alike.
   metaOutlineMode: 'edge',  // 'edge' | 'sdf' | 'polygon' — outline style for the merged blob during SPLITTING. 'edge': trace blurred-mask threshold (1 shared rim). 'sdf': stroke each half polygon (2 rims). 'polygon': polygon-union rim, sharp/no-blur.
+  pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
@@ -136,6 +137,7 @@ export const LOCALES = {
     physics: 'Physics', look: 'Look',
     performance: 'Performance', language: 'Language',
     allow_pathogens: 'Allow pathogens',
+    pinch_rotation: 'Two-finger rotation',
     random_split: 'Random splitting', meta_split: 'Metaball split',
     meta_rt_mode: 'Metaball RT mode',
     meta_rt_bbox: 'Per-pair bbox (default)',
@@ -220,6 +222,7 @@ export const LOCALES = {
     physics: 'Physik', look: 'Aussehen',
     performance: 'Leistung', language: 'Sprache',
     allow_pathogens: 'Krankheitserreger erlauben',
+    pinch_rotation: 'Zwei-Finger-Drehung',
     random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
@@ -300,6 +303,7 @@ export const LOCALES = {
     physics: 'Física', look: 'Estilo',
     performance: 'Rendimiento', language: 'Idioma',
     allow_pathogens: 'Permitir patógenos',
+    pinch_rotation: 'Rotación con dos dedos',
     random_split: 'División aleatoria', meta_split: 'División metaball',
     auto_split: 'Auto-división (s)',
     friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
@@ -381,6 +385,7 @@ export const LOCALES = {
     physics: 'Physik', look: 'Ausschaung',
     performance: 'Leistung', language: 'Sproch',
     allow_pathogens: 'Bazilln daloum',
+    pinch_rotation: 'Mit zwoa Finga drahn',
     random_split: 'Zoifällige Teilung', meta_split: 'Metaball-Doaln',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
@@ -461,6 +466,7 @@ export const LOCALES = {
     physics: 'Physica', look: 'Aspectus',
     performance: 'Celeritas', language: 'Lingua',
     allow_pathogens: 'Pathogenes admittere',
+    pinch_rotation: 'Rotatio bidigitalis',
     random_split: 'Divisio casualis', meta_split: 'Divisio metaballi',
     auto_split: 'Auto-divisio (s)',
     friction: 'Frictio', bounce: 'Resilientia', throw_strength: 'Vis jactus',
