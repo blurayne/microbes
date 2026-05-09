@@ -254,7 +254,7 @@ const FRAG_BG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 
-uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid
+uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid, 4 lung, 5 aurora, 6 underwater, 7 lava
 uniform vec3 u_base;
 uniform vec3 u_top;
 uniform vec3 u_bot;
@@ -271,6 +271,26 @@ uniform vec3 u_spotCols[${MAX_SPOTS}];
 uniform int u_rbc;                        // 0=off, 1=draw drifting RBC silhouettes
 
 out vec4 outColor;
+
+// ---------- Helper noise for procedural bgs (kinds 4-7) ----------
+float bgHash(vec2 p) {
+  p = fract(p * vec2(123.34, 345.45));
+  p += dot(p, p + 34.345);
+  return fract(p.x * p.y);
+}
+float bgNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(bgHash(i),                  bgHash(i + vec2(1.0, 0.0)), u.x),
+             mix(bgHash(i + vec2(0.0, 1.0)), bgHash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float bgFbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 3; i++) { v += a * bgNoise(p); p *= 2.0; a *= 0.5; }
+  return v;
+}
 
 void main() {
   // Base.
@@ -302,6 +322,74 @@ void main() {
     float lineY = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.y);
     float line = max(lineX, lineY);
     col = mix(col, u_gridColor, line * 0.30);
+  }
+
+  // ---- Lung: alveolar foam (kind 4) ----
+  // Tile worldPx into ~80 unit cells; each tile holds a soft circular
+  // bubble with a slightly randomised radius (per-tile hash). Subtle
+  // breath pulse from sin(u_time).
+  if (u_kind == 4) {
+    vec2 p = worldPx * 0.012;
+    float pulse = 0.5 + 0.5 * sin(u_time * 0.6);
+    vec2 cell = floor(p);
+    vec2 cellUv = fract(p) - 0.5;
+    float jitter = bgHash(cell);
+    float r = 0.30 + 0.08 * jitter + 0.04 * pulse;
+    float d = length(cellUv);
+    float bubble = 1.0 - smoothstep(r * 0.85, r, d);
+    float rim = smoothstep(r * 0.80, r * 0.90, d) * (1.0 - smoothstep(r * 0.90, r, d));
+    vec3 tissue   = vec3(0.45, 0.18, 0.22);
+    vec3 alveolus = vec3(0.85, 0.55, 0.62);
+    col = mix(col, mix(tissue, alveolus, bubble), 0.60);
+    col = mix(col, vec3(0.18, 0.06, 0.10), rim * 0.55);
+  }
+
+  // ---- Aurora borealis: vertical ribbons of green/violet (kind 5) ----
+  // Ribbon density driven by domain-warped fbm; brightness peaks in
+  // a horizontal band (the "sky strip"). Hue oscillates between
+  // green and violet over time.
+  if (u_kind == 5) {
+    vec2 sky = vec2(worldPx.x * 0.0015, worldPx.y * 0.001 - u_time * 0.05);
+    float warp = bgFbm(vec2(sky.x, u_time * 0.08));
+    float ribbon = 0.5 + 0.5 * sin(sky.y * 6.2831 + warp * 6.2831);
+    ribbon = pow(ribbon, 4.0);
+    float bandH = exp(-pow((sky.y - 0.5) * 1.5, 2.0));
+    vec3 green  = vec3(0.24, 0.95, 0.52);
+    vec3 violet = vec3(0.55, 0.35, 0.95);
+    vec3 hue = mix(green, violet, 0.5 + 0.5 * sin(warp * 3.14159 + u_time * 0.2));
+    col = mix(col, hue, ribbon * bandH * 0.85);
+  }
+
+  // ---- Underwater: caustic interference (kind 6) ----
+  // Two interleaved sine systems modulated by each other; raised to a
+  // high power to spike the bright caustic ridges.
+  if (u_kind == 6) {
+    vec2 p = worldPx * 0.04;
+    float w1 = sin(p.x + u_time * 0.6 + sin(p.y * 0.75));
+    float w2 = sin(p.y * 0.95 + u_time * 0.85 + sin(p.x * 0.85));
+    float c = pow(max(0.0, (w1 + w2) * 0.5 + 0.5), 6.0);
+    vec3 deep   = vec3(0.04, 0.16, 0.30);
+    vec3 bright = vec3(0.60, 0.95, 1.00);
+    col = mix(col, deep, 0.70);
+    col = mix(col, bright, c * 0.55);
+  }
+
+  // ---- Lava / fire: boiling 3-octave fbm (kind 7) ----
+  // Domain warp (fbm-of-fbm) for organic motion; rising drift via the
+  // -u_time*1.2 offset on Y. Hot gradient: black → deep red → orange
+  // → near-white-yellow.
+  if (u_kind == 7) {
+    vec2 p = worldPx * 0.005;
+    p.y -= u_time * 1.2;
+    float n = bgFbm(p + bgFbm(p * 0.5 + u_time * 0.05));
+    vec3 black   = vec3(0.05, 0.01, 0.00);
+    vec3 deepRed = vec3(0.50, 0.03, 0.01);
+    vec3 orange  = vec3(1.00, 0.45, 0.05);
+    vec3 yellow  = vec3(1.00, 0.92, 0.50);
+    vec3 hot = mix(black, deepRed, smoothstep(0.20, 0.45, n));
+    hot     = mix(hot,   orange,  smoothstep(0.45, 0.70, n));
+    hot     = mix(hot,   yellow,  smoothstep(0.70, 0.95, n));
+    col = mix(col, hot, 0.85);
   }
 
   // Drifting light spots — additive, screen-space coords. Each spot
@@ -1342,6 +1430,10 @@ export class WebGL2Renderer extends RendererBase {
     if (bg.kind === 'gradient') kind = 1;
     else if (bg.kind === 'agar') kind = 2;
     else if (bg.kind === 'cybergrid') kind = 3;
+    else if (bg.kind === 'lung') kind = 4;
+    else if (bg.kind === 'aurora') kind = 5;
+    else if (bg.kind === 'underwater') kind = 6;
+    else if (bg.kind === 'lava') kind = 7;
     // 'flat' / 'navy-ghost' / unknown all fall through to flat.
 
     // Compute drifting-spot positions in screen UV (matches Canvas2D).

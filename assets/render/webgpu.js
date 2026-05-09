@@ -535,6 +535,27 @@ struct VsOut {
   return out;
 }
 
+// ---------- Helper noise for procedural bgs (kinds 4-7) ----------
+fn bgHash(p_in: vec2<f32>) -> f32 {
+  var p = fract(p_in * vec2<f32>(123.34, 345.45));
+  p = p + vec2<f32>(dot(p, p + vec2<f32>(34.345, 34.345)));
+  return fract(p.x * p.y);
+}
+fn bgNoise(p: vec2<f32>) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let u = f * f * (vec2<f32>(3.0, 3.0) - 2.0 * f);
+  return mix(mix(bgHash(i),                        bgHash(i + vec2<f32>(1.0, 0.0)), u.x),
+             mix(bgHash(i + vec2<f32>(0.0, 1.0)),  bgHash(i + vec2<f32>(1.0, 1.0)), u.x), u.y);
+}
+fn bgFbm(p_in: vec2<f32>) -> f32 {
+  var v: f32 = 0.0;
+  var a: f32 = 0.5;
+  var p = p_in;
+  for (var i: i32 = 0; i < 3; i = i + 1) { v = v + a * bgNoise(p); p = p * 2.0; a = a * 0.5; }
+  return v;
+}
+
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let uv = in.uv;
   let kind = i32(u.misc.x + 0.5);
@@ -577,6 +598,63 @@ struct VsOut {
     let lineY = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.y);
     let line = max(lineX, lineY);
     col = mix(col, u.gridColor.rgb, line * 0.30);
+  }
+
+  // ---- Lung: alveolar foam (kind 4) ----
+  if (kind == 4) {
+    let p = worldPx * 0.012;
+    let pulse = 0.5 + 0.5 * sin(time * 0.6);
+    let cell = floor(p);
+    let cellUv = fract(p) - vec2<f32>(0.5, 0.5);
+    let jitter = bgHash(cell);
+    let r = 0.30 + 0.08 * jitter + 0.04 * pulse;
+    let d = length(cellUv);
+    let bubble = 1.0 - smoothstep(r * 0.85, r, d);
+    let rim = smoothstep(r * 0.80, r * 0.90, d) * (1.0 - smoothstep(r * 0.90, r, d));
+    let tissue   = vec3<f32>(0.45, 0.18, 0.22);
+    let alveolus = vec3<f32>(0.85, 0.55, 0.62);
+    col = mix(col, mix(tissue, alveolus, bubble), 0.60);
+    col = mix(col, vec3<f32>(0.18, 0.06, 0.10), rim * 0.55);
+  }
+
+  // ---- Aurora borealis: vertical green/violet ribbons (kind 5) ----
+  if (kind == 5) {
+    let sky = vec2<f32>(worldPx.x * 0.0015, worldPx.y * 0.001 - time * 0.05);
+    let warp = bgFbm(vec2<f32>(sky.x, time * 0.08));
+    var ribbon = 0.5 + 0.5 * sin(sky.y * 6.2831 + warp * 6.2831);
+    ribbon = pow(ribbon, 4.0);
+    let bandH = exp(-pow((sky.y - 0.5) * 1.5, 2.0));
+    let green  = vec3<f32>(0.24, 0.95, 0.52);
+    let violet = vec3<f32>(0.55, 0.35, 0.95);
+    let hue = mix(green, violet, 0.5 + 0.5 * sin(warp * 3.14159 + time * 0.2));
+    col = mix(col, hue, ribbon * bandH * 0.85);
+  }
+
+  // ---- Underwater: caustic interference (kind 6) ----
+  if (kind == 6) {
+    let p = worldPx * 0.04;
+    let w1 = sin(p.x + time * 0.6 + sin(p.y * 0.75));
+    let w2 = sin(p.y * 0.95 + time * 0.85 + sin(p.x * 0.85));
+    let c = pow(max(0.0, (w1 + w2) * 0.5 + 0.5), 6.0);
+    let deep   = vec3<f32>(0.04, 0.16, 0.30);
+    let bright = vec3<f32>(0.60, 0.95, 1.00);
+    col = mix(col, deep, 0.70);
+    col = mix(col, bright, c * 0.55);
+  }
+
+  // ---- Lava / fire: boiling fbm (kind 7) ----
+  if (kind == 7) {
+    var p = worldPx * 0.005;
+    p.y = p.y - time * 1.2;
+    let n = bgFbm(p + vec2<f32>(bgFbm(p * 0.5 + vec2<f32>(time * 0.05, time * 0.05))));
+    let black   = vec3<f32>(0.05, 0.01, 0.00);
+    let deepRed = vec3<f32>(0.50, 0.03, 0.01);
+    let orange  = vec3<f32>(1.00, 0.45, 0.05);
+    let yellow  = vec3<f32>(1.00, 0.92, 0.50);
+    var hot = mix(black, deepRed, smoothstep(0.20, 0.45, n));
+    hot     = mix(hot,   orange,  smoothstep(0.45, 0.70, n));
+    hot     = mix(hot,   yellow,  smoothstep(0.70, 0.95, n));
+    col = mix(col, hot, 0.85);
   }
 
   // Drifting light spots — additive, screen UV. Colours pre-multiplied.
@@ -1745,6 +1823,10 @@ export class WebGPURenderer extends RendererBase {
     if (bg.kind === 'gradient') kind = 1;
     else if (bg.kind === 'agar') kind = 2;
     else if (bg.kind === 'cybergrid') kind = 3;
+    else if (bg.kind === 'lung') kind = 4;
+    else if (bg.kind === 'aurora') kind = 5;
+    else if (bg.kind === 'underwater') kind = 6;
+    else if (bg.kind === 'lava') kind = 7;
 
     const data = this._bgUniformData;
     // misc
