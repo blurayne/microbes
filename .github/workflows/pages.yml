@@ -43,6 +43,7 @@ jobs:
           window.__BUILD__ = {
             sha: '${{ github.sha }}',
             run: ${{ github.run_number }},
+            branch: '${{ github.ref_name }}',
             dateUtc: '${DATE_UTC}'
           };
           EOF

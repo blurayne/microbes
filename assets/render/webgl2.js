@@ -1512,6 +1512,9 @@ export class WebGL2Renderer extends RendererBase {
 
   endFrame() { /* default framebuffer is auto-swapped by the browser */ }
 
+  /** Short identifier for the FPS overlay's renderer suffix. */
+  get info() { return 'webgl2'; }
+
   destroy() {
     const gl = this.gl;
     if (!gl) return;

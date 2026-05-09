@@ -13,6 +13,8 @@ import { Sim } from './core/sim.js';
 import { getShapes } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
+import { WebGPURenderer } from './render/webgpu.js';
+import { PixiRenderer } from './render/pixi.js';
 
 // ---------- DOM ----------
 const canvas = document.getElementById('stage');
@@ -20,21 +22,76 @@ const canvas = document.getElementById('stage');
 // ---------- Sim + renderer ----------
 const sim = new Sim();
 
-function makeRenderer() {
-  if (S.renderer === 'webgl2') {
-    try {
-      return new WebGL2Renderer(canvas, sim);
-    } catch (e) {
-      console.warn('[microbes] WebGL2 unavailable, falling back to Canvas2D:', e && e.message);
-      S.renderer = 'canvas2d';
-      saveSettings();
-    }
-  }
-  return new Canvas2DRenderer(canvas, sim);
+async function tryPixi(preference) {
+  const r = new PixiRenderer(canvas, sim, { preference });
+  await r.initAsync();
+  return r;
 }
 
-let renderer = makeRenderer();
-renderer.init();
+async function tryWebGPU() {
+  const r = new WebGPURenderer(canvas, sim);
+  await r.initAsync();
+  return r;
+}
+
+async function makeRenderer() {
+  const k = S.renderer;
+  // Runtime-only fallback: if a renderer fails to initialise we drop
+  // back to Canvas2D for THIS load only — `S.renderer` is left as the
+  // user picked it so the dropdown keeps showing their choice and the
+  // next reload retries. Each path logs its outcome for DevTools.
+  if (k === 'pixi' || k === 'pixi-webgpu' || k === 'pixi-webgl2') {
+    try {
+      let r;
+      if (k === 'pixi') {
+        try {
+          r = await tryPixi('webgpu');
+          console.info('[microbes] PixiRenderer ready (auto → webgpu)');
+        } catch (eGpu) {
+          console.info('[microbes] PixiRenderer auto: webgpu failed (' + (eGpu && eGpu.message) + '), trying webgl');
+          r = await tryPixi('webgl');
+          console.info('[microbes] PixiRenderer ready (auto → webgl)');
+        }
+      } else if (k === 'pixi-webgpu') {
+        r = await tryPixi('webgpu');
+        console.info('[microbes] PixiRenderer ready (forced webgpu)');
+      } else {
+        r = await tryPixi('webgl');
+        console.info('[microbes] PixiRenderer ready (forced webgl)');
+      }
+      return r;
+    } catch (e) {
+      console.warn('[microbes] PixiJS unavailable, falling back to Canvas2D for this load (S.renderer kept as "' + k + '"):', e && (e.stack || e.message));
+    }
+  }
+  if (k === 'webgpu') {
+    try {
+      const r = await tryWebGPU();
+      console.info('[microbes] WebGPURenderer ready');
+      return r;
+    } catch (e) {
+      console.warn('[microbes] WebGPU unavailable, falling back to Canvas2D for this load:', e && e.message);
+    }
+  }
+  if (k === 'webgl2') {
+    try {
+      const r = new WebGL2Renderer(canvas, sim);
+      r.init();
+      console.info('[microbes] WebGL2Renderer ready');
+      return r;
+    } catch (e) {
+      console.warn('[microbes] WebGL2 unavailable, falling back to Canvas2D for this load:', e && e.message);
+    }
+  }
+  const r = new Canvas2DRenderer(canvas, sim);
+  r.init();
+  console.info('[microbes] Canvas2DRenderer ready (S.renderer="' + k + '")');
+  return r;
+}
+
+// Renderer construction is async (PixiJS needs `await app.init()`).
+// Boot finishes via the bottom-of-file `bootRenderer` async block.
+let renderer = null;
 
 // ---------- Resize ----------
 let dpr = 1;
@@ -195,6 +252,8 @@ function endPointer(ev) {
         sim.drag.cell.vx = (b.x - a.x) / dt * S.throwStrength;
         sim.drag.cell.vy = (b.y - a.y) / dt * S.throwStrength;
         sim.drag.cell.target = null;
+      } else if (sim.killMode) {
+        sim.killCell(sim.drag.cell);
       } else if (S.splitOnTap) {
         sim.beginSplit(sim.drag.cell);
       } else {
@@ -379,27 +438,58 @@ function bindCheckbox(id, key, onChange) {
 
 const modeTargetBtn = document.getElementById('modeTarget');
 const modeSplitBtn  = document.getElementById('modeSplit');
+const modeKillBtn   = document.getElementById('modeKill');
 function applyModeUi() {
-  if (modeTargetBtn) modeTargetBtn.classList.toggle('active', !S.splitOnTap);
-  if (modeSplitBtn)  modeSplitBtn.classList.toggle('active',  !!S.splitOnTap);
+  const kill = !!sim.killMode;
+  if (modeKillBtn)   modeKillBtn.classList.toggle('active',   kill);
+  if (modeTargetBtn) modeTargetBtn.classList.toggle('active', !kill && !S.splitOnTap);
+  if (modeSplitBtn)  modeSplitBtn.classList.toggle('active',  !kill &&  !!S.splitOnTap);
 }
 function setSplitOnTap(on) {
   S.splitOnTap = !!on;
+  sim.killMode = false;
   saveSettings();
   applyModeUi();
   const cb = document.getElementById('splitOnTap');
   if (cb) cb.checked = S.splitOnTap;
 }
-if (modeTargetBtn) modeTargetBtn.addEventListener('click', () => setSplitOnTap(false));
+function setKillMode(on) {
+  sim.killMode = !!on;
+  applyModeUi();
+}
+if (modeTargetBtn) modeTargetBtn.addEventListener('click', () => {
+  // Pressing target while already in target mode is a "clear selection"
+  // gesture: drops any selected cells and the active target marker.
+  if (!sim.killMode && !S.splitOnTap) {
+    sim.selectedCells.clear();
+    sim.targetMarker = null;
+    return;
+  }
+  setKillMode(false);
+  setSplitOnTap(false);
+});
 if (modeSplitBtn)  modeSplitBtn.addEventListener('click',  () => setSplitOnTap(true));
+if (modeKillBtn)   modeKillBtn.addEventListener('click',   () => {
+  // Toggle: pressing kill while already active drops back to target mode.
+  setKillMode(!sim.killMode);
+});
 bindCheckbox('splitOnTap', 'splitOnTap', applyModeUi);
 applyModeUi();
 bindCheckbox('randomSplit', 'randomSplit');
+bindCheckbox('metaSplit', 'metaSplit');
 bindCheckbox('cartoon', 'cartoon');
 bindCheckbox('showFPS', 'showFPS', (on) => {
   const el = document.getElementById('fps');
   if (el) el.classList.toggle('on', !!on);
 });
+function applyBuildInfoVis(on) {
+  const el = document.getElementById('build');
+  if (el) el.classList.toggle('on', !!on);
+  document.body.classList.toggle('show-build', !!on);
+}
+bindCheckbox('showBuildInfo', 'showBuildInfo', applyBuildInfoVis);
+applyBuildInfoVis(S.showBuildInfo);
+bindCheckbox('showRenderer', 'showRenderer');
 
 for (const r of settingsEl.querySelectorAll('input[name="splitMode"]')) {
   r.checked = (r.value === S.splitMode);
@@ -497,24 +587,32 @@ if (upscaleEl) {
     applyUpscaleMode();
   });
 }
-bindCheckbox('scanlines', 'scanlines', applyScanlines);
+bindCheckbox('scanlinesToggle', 'scanlines', applyScanlines);
 
 // Renderer engine — fundamental change, easiest to handle by reloading.
 const rendererSel = document.getElementById('rendererEngine');
 if (rendererSel) {
-  // If WebGL2 is unavailable, mark the option (and refuse to pick it).
+  // Probe WebGL2 + WebGPU support; mark unavailable options as
+  // (unsupported) so the dropdown can't strand the user on a broken
+  // backend.
   const probe = document.createElement('canvas');
   const webglSupported = !!probe.getContext('webgl2');
+  const webgpuSupported = typeof navigator !== 'undefined' && !!navigator.gpu;
   if (!webglSupported) {
     const opt = rendererSel.querySelector('option[value="webgl2"]');
-    if (opt) {
-      opt.disabled = true;
-      opt.textContent += ' (unsupported)';
-    }
+    if (opt) { opt.disabled = true; opt.textContent += ' (unsupported)'; }
+  }
+  if (!webgpuSupported) {
+    const opt = rendererSel.querySelector('option[value="webgpu"]');
+    if (opt) { opt.disabled = true; opt.textContent += ' (unsupported)'; }
   }
   rendererSel.value = S.renderer;
   rendererSel.addEventListener('change', () => {
-    const kind = (rendererSel.value === 'webgl2' && webglSupported) ? 'webgl2' : 'canvas2d';
+    let kind = rendererSel.value;
+    const valid = ['canvas2d', 'webgl2', 'webgpu', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    if (!valid.includes(kind)) kind = 'canvas2d';
+    if (kind === 'webgl2' && !webglSupported) kind = 'canvas2d';
+    if (kind === 'webgpu' && !webgpuSupported) kind = 'canvas2d';
     if (kind === S.renderer) return;
     S.renderer = kind;
     saveSettings();
@@ -663,7 +761,7 @@ if (resetBtn) resetBtn.addEventListener('click', () => sim.resetSim());
 function renderBuildStamp() {
   const el = document.getElementById('build');
   if (!el) return;
-  const b = window.__BUILD__ || { sha: 'dev', run: 0, dateUtc: null };
+  const b = window.__BUILD__ || { sha: 'dev', run: 0, dateUtc: null, branch: null };
   const sha = (b.sha || 'dev').slice(0, 7);
   let when = '';
   if (b.dateUtc) {
@@ -676,7 +774,12 @@ function renderBuildStamp() {
       when = `${mm}-${dd} ${hh}:${mi}`;
     }
   }
-  el.textContent = when ? `${sha} · ${when}` : sha;
+  const parts = [];
+  if (b.branch) parts.push(b.branch);
+  parts.push(sha);
+  if (b.run > 0) parts.push(`#${b.run}`);
+  if (when) parts.push(when);
+  el.textContent = parts.join(' · ');
 }
 renderBuildStamp();
 
@@ -694,7 +797,11 @@ function updateFPS(dt, ts) {
   for (const v of fpsBuf) sum += v;
   const avg = sum / fpsBuf.length;
   const fps = avg > 0 ? Math.round(1 / avg) : 0;
-  fpsEl.textContent = T('fps_line', { fps, n: sim.cells.length });
+  let line = T('fps_line', { fps, n: sim.cells.length });
+  if (S.showRenderer && renderer && typeof renderer.info === 'string') {
+    line += ` (${renderer.info})`;
+  }
+  fpsEl.textContent = line;
 }
 
 function frame(ts) {
@@ -709,7 +816,12 @@ function frame(ts) {
 
   renderer.beginFrame(ts, dt);
   renderer.drawBackground(ts);
-  if (shapes.length) renderer.drawCells(shapes, t, ts);
+  // Always call drawCells / drawParticles so the renderer can clear
+  // its own state. Both handle empty input cleanly (early-return after
+  // the initial clear) — gating here would leave stale Graphics in
+  // Pixi mode when the user kills every cell, which reads as a freeze.
+  renderer.drawCells(shapes, t, ts);
+  renderer.drawParticles(sim.particles, t, ts);
   renderer.drawSelection(shapes, t);
   if (S.showDebugField) renderer.drawDebug(shapes);
   renderer.endFrame();
@@ -720,7 +832,12 @@ function frame(ts) {
 }
 
 // ---------- Boot ----------
-resize();
-window.addEventListener('resize', resize);
-sim.resetSim();
-requestAnimationFrame(frame);
+// Renderer init is async (PixiJS). We await it before the first
+// resize() / frame() so those calls always see a live renderer.
+(async () => {
+  renderer = await makeRenderer();
+  resize();
+  window.addEventListener('resize', resize);
+  sim.resetSim();
+  requestAnimationFrame(frame);
+})();

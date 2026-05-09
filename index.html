@@ -48,6 +48,7 @@
         <h3 data-i18n="splitting">Splitting</h3>
         <label><input type="checkbox" id="splitOnTap" /> <span data-i18n="split_on_tap">Split on tap</span></label>
         <label><input type="checkbox" id="randomSplit" /> <span data-i18n="random_split">Random splitting</span></label>
+        <label><input type="checkbox" id="metaSplit" /> <span data-i18n="meta_split">Metaball split</span></label>
       </section>
 
       <section>
@@ -115,6 +116,8 @@
         <label><input type="checkbox" id="useHighlight" /> <span data-i18n="use_highlight">Use highlight colour</span></label>
         <label><input type="checkbox" id="cartoon" /> <span data-i18n="cartoon_mode">Cartoon mode (faces)</span></label>
         <label><input type="checkbox" id="showFPS" /> <span data-i18n="show_fps">Show FPS</span></label>
+        <label><input type="checkbox" id="showBuildInfo" /> <span data-i18n="show_build_info">Show build info</span></label>
+        <label><input type="checkbox" id="showRenderer" /> <span data-i18n="show_renderer">Show renderer</span></label>
         <label><input type="checkbox" id="showDebugField" /> <span data-i18n="show_field">Show metaball field</span></label>
       </section>
 
@@ -122,8 +125,12 @@
         <h3 data-i18n="performance">Performance</h3>
         <label><span data-i18n="renderer_engine">Renderer</span>
           <select id="rendererEngine">
-            <option value="canvas2d" data-i18n="renderer_canvas">Canvas2D (compatible)</option>
-            <option value="webgl2" data-i18n="renderer_webgl">WebGL2 (fast)</option>
+            <option value="pixi"        data-i18n="renderer_pixi_auto">Pixi (auto)</option>
+            <option value="pixi-webgpu" data-i18n="renderer_pixi_webgpu">Pixi (WebGPU)</option>
+            <option value="pixi-webgl2" data-i18n="renderer_pixi_webgl">Pixi (WebGL2)</option>
+            <option value="webgpu"      data-i18n="renderer_webgpu">WebGPU (legacy)</option>
+            <option value="webgl2"      data-i18n="renderer_webgl">WebGL2 (legacy)</option>
+            <option value="canvas2d"    data-i18n="renderer_canvas">Canvas2D</option>
           </select>
         </label>
         <label><span data-i18n="render_scale">Render scale</span>
@@ -140,7 +147,7 @@
             <option value="pixel" data-i18n="upscale_pixel">Pixel (crisp)</option>
           </select>
         </label>
-        <label><input type="checkbox" id="scanlines" /> <span data-i18n="scanlines">Scanlines (CRT)</span></label>
+        <label><input type="checkbox" id="scanlinesToggle" /> <span data-i18n="scanlines">Scanlines (CRT)</span></label>
       </section>
       </section>
 
@@ -197,6 +204,9 @@
     <button id="modeSplit" type="button" class="mode-btn"
             aria-label="Split mode" title="Tap a cell to split it"
             data-i18n-attr="aria-label=mode_split,title=mode_split_tip">✂</button>
+    <button id="modeKill" type="button" class="mode-btn"
+            aria-label="Kill mode" title="Tap a cell to make it explode"
+            data-i18n-attr="aria-label=mode_kill,title=mode_kill_tip">💥</button>
   </div>
 
   <div id="fps" aria-hidden="true"></div>

@@ -24,7 +24,10 @@ export const DEFAULTS = {
   activeTypes: ALL_CELL_KEYS.slice(),
   splitOnTap: false,
   randomSplit: false,
+  metaSplit: true,          // metaball merge between the two halves while SPLITTING
   showFPS: false,
+  showRenderer: false,      // append actual renderer info to the FPS line
+  showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
   friction: 0.80,
   bounce: 0.6,
   throwStrength: 0.35,
@@ -41,7 +44,7 @@ export const DEFAULTS = {
   upscaleMode: 'blur',
   scanlines: false,
   useHighlight: true,                       // selection ring uses theme accent when on
-  renderer: 'canvas2d',     // 'canvas2d' | 'webgl2' (added for the upcoming WebGL renderer)
+  renderer: 'pixi',         // 'canvas2d' | 'webgl2' | 'webgpu' | 'pixi' | 'pixi-webgpu' | 'pixi-webgl2'
 };
 
 const KNOWN_THEME_KEYS = [
@@ -76,7 +79,8 @@ export function loadSettings() {
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
     if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
-    if (parsed.renderer !== 'canvas2d' && parsed.renderer !== 'webgl2') parsed.renderer = DEFAULTS.renderer;
+    const validRenderers = ['canvas2d', 'webgl2', 'webgpu', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Migrate legacy `highlightColor` field to the new `useHighlight` toggle.
@@ -116,7 +120,7 @@ export const LOCALES = {
     physics: 'Physics', cell_blending: 'Cell blending', look: 'Look',
     performance: 'Performance', language: 'Language',
     allow_pathogens: 'Allow pathogens',
-    split_on_tap: 'Split on tap', random_split: 'Random splitting',
+    split_on_tap: 'Split on tap', random_split: 'Random splitting', meta_split: 'Metaball split',
     split_push: 'Push apart with momentum', split_bond: 'Bond, then drift',
     max_cells: 'Max cells', auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
@@ -124,12 +128,17 @@ export const LOCALES = {
     membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
-    cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS',
+    mode_kill: 'Kill mode', mode_kill_tip: 'Tap a cell to make it explode',
+    cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS', show_renderer: 'Show renderer', show_build_info: 'Show build info',
     show_field: 'Show metaball field', render_scale: 'Render scale',
     upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
-    renderer_canvas: 'Canvas2D (compatible)',
-    renderer_webgl: 'WebGL2 (fast)',
+    renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (legacy)',
+    renderer_webgpu: 'WebGPU (legacy)',
+    renderer_pixi_auto: 'Pixi (auto)',
+    renderer_pixi_webgpu: 'Pixi (WebGPU)',
+    renderer_pixi_webgl: 'Pixi (WebGL2)',
     reset_sim: 'Reset simulation',
     help_title: 'Cells of the immune system',
     add_cell: 'Add a cell', add_pathogen: 'Add a pathogen',
@@ -195,7 +204,7 @@ export const LOCALES = {
     physics: 'Physik', cell_blending: 'Zellüberblendung', look: 'Aussehen',
     performance: 'Leistung', language: 'Sprache',
     allow_pathogens: 'Krankheitserreger erlauben',
-    split_on_tap: 'Bei Antippen teilen', random_split: 'Zufällige Teilung',
+    split_on_tap: 'Bei Antippen teilen', random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
     split_push: 'Mit Schwung auseinander', split_bond: 'Verbinden, dann driften',
     max_cells: 'Max. Zellen', auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
@@ -203,12 +212,17 @@ export const LOCALES = {
     membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
-    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen',
+    mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zelle antippen, sie zerplatzt',
+    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen',
     show_field: 'Metaball-Feld zeigen', render_scale: 'Renderskala',
     upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
-    renderer_canvas: 'Canvas2D (kompatibel)',
-    renderer_webgl: 'WebGL2 (schnell)',
+    renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (alt)',
+    renderer_webgpu: 'WebGPU (alt)',
+    renderer_pixi_auto: 'Pixi (auto)',
+    renderer_pixi_webgpu: 'Pixi (WebGPU)',
+    renderer_pixi_webgl: 'Pixi (WebGL2)',
     reset_sim: 'Simulation zurücksetzen',
     help_title: 'Zellen des Immunsystems',
     add_cell: 'Zelle hinzufügen', add_pathogen: 'Erreger hinzufügen',
@@ -274,7 +288,7 @@ export const LOCALES = {
     physics: 'Física', cell_blending: 'Mezcla de células', look: 'Estilo',
     performance: 'Rendimiento', language: 'Idioma',
     allow_pathogens: 'Permitir patógenos',
-    split_on_tap: 'Dividir al tocar', random_split: 'División aleatoria',
+    split_on_tap: 'Dividir al tocar', random_split: 'División aleatoria', meta_split: 'División metaball',
     split_push: 'Empujar con impulso', split_bond: 'Unir, luego separar',
     max_cells: 'Células máx.', auto_split: 'Auto-división (s)',
     friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
@@ -282,12 +296,17 @@ export const LOCALES = {
     membrane: 'Membrana', cell_size: 'Tamaño de célula', use_highlight: 'Usar color de resalte',
     mode_target: 'Modo objetivo', mode_target_tip: 'Toca para seleccionar / enviar',
     mode_split: 'Modo división', mode_split_tip: 'Toca una célula para dividirla',
-    cartoon_mode: 'Modo dibujo (caras)', show_fps: 'Mostrar FPS',
+    mode_kill: 'Modo matar', mode_kill_tip: 'Toca una célula para que explote',
+    cartoon_mode: 'Modo dibujo (caras)', show_fps: 'Mostrar FPS', show_renderer: 'Mostrar renderer', show_build_info: 'Mostrar info de build',
     show_field: 'Mostrar campo metaball', render_scale: 'Escala de render',
     upscale: 'Reescalar', scanlines: 'Líneas de barrido (CRT)',
     renderer_engine: 'Motor de render',
-    renderer_canvas: 'Canvas2D (compatible)',
-    renderer_webgl: 'WebGL2 (rápido)',
+    renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (heredado)',
+    renderer_webgpu: 'WebGPU (heredado)',
+    renderer_pixi_auto: 'Pixi (auto)',
+    renderer_pixi_webgpu: 'Pixi (WebGPU)',
+    renderer_pixi_webgl: 'Pixi (WebGL2)',
     reset_sim: 'Reiniciar simulación',
     help_title: 'Células del sistema inmunitario',
     add_cell: 'Añadir célula', add_pathogen: 'Añadir patógeno',
@@ -354,7 +373,7 @@ export const LOCALES = {
     physics: 'Physik', cell_blending: 'Zoinmischung', look: 'Ausschaung',
     performance: 'Leistung', language: 'Sproch',
     allow_pathogens: 'Bazilln daloum',
-    split_on_tap: 'Beim Drauflanga teiln', random_split: 'Zoifällige Teilung',
+    split_on_tap: 'Beim Drauflanga teiln', random_split: 'Zoifällige Teilung', meta_split: 'Metaball-Doaln',
     split_push: 'Mit Schwung auseinanda', split_bond: 'Vabinda, dann driftn',
     max_cells: 'Max. Zoin', auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
@@ -362,12 +381,17 @@ export const LOCALES = {
     membrane: 'Membran', cell_size: 'Zoingrässn', use_highlight: 'Akzentfarb vawendn',
     mode_target: 'Zuimodus', mode_target_tip: 'Drauflanga: aussuacha / Zui setzn',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Drauflanga deid de Zoin teiln',
-    cartoon_mode: 'Cartoon-Modus (Gsichta)', show_fps: 'FPS oazoang',
+    mode_kill: 'Schomattmodus', mode_kill_tip: 'Drauflanga und d\'Zoin macht boom',
+    cartoon_mode: 'Cartoon-Modus (Gsichta)', show_fps: 'FPS oazoang', show_renderer: 'Render oazoang', show_build_info: 'Build-Info oazoang',
     show_field: 'Metaball-Föd zoang', render_scale: 'Renderskala',
     upscale: 'Aufskaliern', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Render',
-    renderer_canvas: 'Canvas2D (kompatibel)',
-    renderer_webgl: 'WebGL2 (schnoi)',
+    renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (oid)',
+    renderer_webgpu: 'WebGPU (oid)',
+    renderer_pixi_auto: 'Pixi (automatisch)',
+    renderer_pixi_webgpu: 'Pixi (WebGPU)',
+    renderer_pixi_webgl: 'Pixi (WebGL2)',
     reset_sim: 'Simulation z\'rucksetzn',
     help_title: 'Zoin vom Immunsystem',
     add_cell: 'Zoin dazua', add_pathogen: 'Bazi dazua',
@@ -433,7 +457,7 @@ export const LOCALES = {
     physics: 'Physica', cell_blending: 'Confusio cellularum', look: 'Aspectus',
     performance: 'Celeritas', language: 'Lingua',
     allow_pathogens: 'Pathogenes admittere',
-    split_on_tap: 'Divide tactu', random_split: 'Divisio casualis',
+    split_on_tap: 'Divide tactu', random_split: 'Divisio casualis', meta_split: 'Divisio metaballi',
     split_push: 'Pelle cum impetu', split_bond: 'Conjunge, deinde fluctuent',
     max_cells: 'Cellulae maximae', auto_split: 'Auto-divisio (s)',
     friction: 'Frictio', bounce: 'Resilientia', throw_strength: 'Vis jactus',
@@ -442,12 +466,17 @@ export const LOCALES = {
     use_highlight: 'Colore luminis utere',
     mode_target: 'Modus signi', mode_target_tip: 'Tange ut elige / mitte',
     mode_split: 'Modus divisionis', mode_split_tip: 'Tange cellulam ut dividas',
-    cartoon_mode: 'Modus picturae (vultus)', show_fps: 'Monstra FPS',
+    mode_kill: 'Modus necandi', mode_kill_tip: 'Tange cellulam ut displodatur',
+    cartoon_mode: 'Modus picturae (vultus)', show_fps: 'Monstra FPS', show_renderer: 'Monstra machinam', show_build_info: 'Monstra info constructionis',
     show_field: 'Monstra campum metaball', render_scale: 'Scala depingendi',
     upscale: 'Augmentum', scanlines: 'Lineae televisorii',
     renderer_engine: 'Machina depingendi',
-    renderer_canvas: 'Canvas2D (compatibilis)',
-    renderer_webgl: 'WebGL2 (rapidus)',
+    renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2 (vetus)',
+    renderer_webgpu: 'WebGPU (vetus)',
+    renderer_pixi_auto: 'Pixius (automatice)',
+    renderer_pixi_webgpu: 'Pixius (WebGPU)',
+    renderer_pixi_webgl: 'Pixius (WebGL2)',
     reset_sim: 'Restituere simulationem',
     help_title: 'Cellulae systematis immunitarii',
     add_cell: 'Adde cellulam', add_pathogen: 'Adde pathogenem',
@@ -564,13 +593,13 @@ export const THEMES = {
   neonBloom: {
     label: 'Neon Bloom',
     bg: { kind: 'navy-ghost', base: '#0e1840', spotColor: 'rgba(80,40,160,0.25)', spotCount: 7, vignette: 0.4 },
-    outline: { color: '#0d0420', defaultPx: 3, glow: '#ff4fbf', glowBlur: 22 },
+    outline: { color: '#0d0420', defaultPx: 3 },
     ui: { panelAccent: '#ff4fbf' },
   },
   aquaticGlow: {
     label: 'Aquatic Glow',
     bg: { kind: 'gradient', topColor: '#001a4a', botColor: '#00050f', spotColor: 'rgba(80,200,255,0.10)', spotCount: 4, vignette: 0.3 },
-    outline: { color: '#06122a', defaultPx: 3, glow: '#5ce7ff', glowBlur: 18 },
+    outline: { color: '#06122a', defaultPx: 3 },
     ui: { panelAccent: '#5ce7ff' },
   },
   crayonBox: {
@@ -588,7 +617,7 @@ export const THEMES = {
   glowStick: {
     label: 'Glow Stick',
     bg: { kind: 'flat', base: '#000000', spotColors: ['#ffea00','#ff00aa','#00ff88','#00d8ff'], spotCount: 7, vignette: 0.50 },
-    outline: { color: '#000000', defaultPx: 3, glow: '#ffffff', glowBlur: 12 },
+    outline: { color: '#000000', defaultPx: 3 },
     ui: { panelAccent: '#ffea00' },
   },
   bedtime: {
@@ -606,7 +635,7 @@ export const THEMES = {
   aurora: {
     label: 'Aurora',
     bg: { kind: 'gradient', topColor: '#03081a', botColor: '#000000', spotColors: ['#3ecf6c','#5cd6ff','#a855f7','#ff5cb8','#ffe070'], spotCount: 7, vignette: 0.40 },
-    outline: { color: '#000000', defaultPx: 3, glow: '#5cd6ff', glowBlur: 16 },
+    outline: { color: '#000000', defaultPx: 3 },
     ui: { panelAccent: '#3ecf6c' },
   },
   prism: {
@@ -624,13 +653,13 @@ export const THEMES = {
   deepSpace: {
     label: 'Deep Space',
     bg: { kind: 'flat', base: '#000005', spotColors: ['#ffffff','#a0c0ff','#ffe0a0'], spotCount: 9, vignette: 0.60 },
-    outline: { color: '#000000', defaultPx: 3, glow: '#ffffff', glowBlur: 8 },
+    outline: { color: '#000000', defaultPx: 3 },
     ui: { panelAccent: '#a0c0ff' },
   },
   volcano: {
     label: 'Volcano',
     bg: { kind: 'gradient', topColor: '#3b0a05', botColor: '#0a0202', spotColors: ['#ff5a00','#ff9933','#ffe066','#ffaa44'], spotCount: 7, vignette: 0.50 },
-    outline: { color: '#1a0606', defaultPx: 4, glow: '#ff7530', glowBlur: 14 },
+    outline: { color: '#1a0606', defaultPx: 4 },
     ui: { panelAccent: '#ff5a00' },
   },
   forestFloor: {
@@ -642,7 +671,7 @@ export const THEMES = {
   cyberGrid: {
     label: 'Cyber Grid',
     bg: { kind: 'cybergrid', base: '#000010', spotColors: ['#00ff88','#ff00aa','#00d8ff'], spotCount: 4, vignette: 0.30, gridColor: 'rgba(0,255,170,0.18)', gridStep: 48 },
-    outline: { color: '#000000', defaultPx: 3, glow: '#00ff88', glowBlur: 16 },
+    outline: { color: '#000000', defaultPx: 3 },
     ui: { panelAccent: '#00ff88' },
   },
   lymphNode: {
@@ -684,7 +713,7 @@ export const THEMES = {
   brain: {
     label: 'Brain',
     bg: { kind: 'gradient', topColor: '#2a142e', botColor: '#100612', spotColor: 'rgba(255,200,255,0.15)', spotCount: 6, vignette: 0.50, decor: 'neurons' },
-    outline: { color: '#08020a', defaultPx: 3, glow: '#e0a0ff', glowBlur: 14 },
+    outline: { color: '#08020a', defaultPx: 3 },
     ui: { panelAccent: '#e0a0ff' },
   },
   kidney: {

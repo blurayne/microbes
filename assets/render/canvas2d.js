@@ -6,7 +6,7 @@
 // and camera; the renderer reads from it but never mutates it.
 
 import {
-  S, FACE, CELL_TYPES, NUCLEUS_RATIO, WOBBLE_VERTS, THETA_TABLE, DOWNSAMPLE,
+  S, FACE, CELL_TYPES, NUCLEUS_RATIO, WOBBLE_VERTS, THETA_TABLE,
   cellColors, currentTheme, currentBackground, currentHighlightColor, hexToRgba, frac,
 } from '../core/state.js';
 import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
@@ -21,10 +21,10 @@ export class Canvas2DRenderer extends RendererBase {
   constructor(canvas, sim) {
     super(canvas, sim);
     this.ctx = canvas.getContext('2d');
-    this.off = document.createElement('canvas');
-    this.offCtx = this.off.getContext('2d');
-    this.off2 = document.createElement('canvas');
-    this.off2Ctx = this.off2.getContext('2d');
+    // Lazy-allocated scratch canvas used by the per-splitting-pair
+    // metaball renderer (S.metaSplit). Resized per pair per frame.
+    this._scratch = null;
+    this._scratchCtx = null;
     this.W = 0;
     this.H = 0;
     this.dpr = 1;
@@ -58,10 +58,6 @@ export class Canvas2DRenderer extends RendererBase {
     this.canvas.style.width = W + 'px';
     this.canvas.style.height = H + 'px';
     this.ctx.setTransform(dpr * rs, 0, 0, dpr * rs, 0, 0);
-    const ow = Math.max(2, Math.floor(W * DOWNSAMPLE * rs));
-    const oh = Math.max(2, Math.floor(H * DOWNSAMPLE * rs));
-    this.off.width = ow; this.off.height = oh;
-    this.off2.width = ow; this.off2.height = oh;
   }
 
   // The renderer reads camera/W/H from the Sim each frame.
@@ -77,6 +73,9 @@ export class Canvas2DRenderer extends RendererBase {
 
   beginFrame() { /* no-op for Canvas2D */ }
   endFrame() { /* no-op for Canvas2D */ }
+
+  /** Short identifier for the FPS overlay's renderer suffix. */
+  get info() { return 'canvas2d'; }
 
   // ---------- Background ----------
   drawBackground(ts) {
@@ -349,186 +348,218 @@ export class Canvas2DRenderer extends RendererBase {
     }
   }
 
-  // ---------- Cells (full pipeline: mask → outline → cyto → highlight → granules → decorations → membrane → nuclei → cartoon) ----------
+  // ---------- Cells: per-cell direct render (no metaball merging or
+  // black outline halo — matches the WebGL2 renderer's clean per-cell
+  // look). drawCellBodies fills the cytoplasm gradient with a sharp
+  // polygon edge, then the existing granules / decorations / membrane
+  // / nuclei / cartoon passes layer on top.
   drawCells(shapes, time, ts) {
-    this._drawMetaballMask(shapes, time);
-    this._drawMetaballToMain(shapes, time);
+    this._drawCellBodies(shapes, time);
+    const theme = currentTheme();
+    this._drawGranules(shapes, theme, time);
+    this._drawDecorations(shapes, theme, time);
+    this._drawMembrane(shapes, time, theme);
     this._drawNuclei(ts);
     this._drawCartoonFaces(shapes, time);
   }
 
-  _drawMetaballMask(shapes, t) {
-    const off = this.off, off2 = this.off2;
-    const offCtx = this.offCtx, off2Ctx = this.off2Ctx;
-    const ow = off.width, oh = off.height;
-    const W = this.W;
-    const sx = ow / W;
-    const cam = this.camera;
-    const cs = cam.scale, cTx = cam.tx, cTy = cam.ty;
+  _drawCellBodies(shapes, t) {
+    const ctx = this.ctx;
     const N = WOBBLE_VERTS;
 
-    const groups = {};
-    for (const s of shapes) (groups[s.cell.type] ||= []).push(s);
-
-    off2Ctx.setTransform(1, 0, 0, 1, 0, 0);
-    off2Ctx.globalCompositeOperation = 'copy';
-    off2Ctx.filter = 'none';
-    off2Ctx.clearRect(0, 0, off2.width, off2.height);
-    off2Ctx.globalCompositeOperation = 'source-over';
-
-    for (const [typeKey, group] of Object.entries(groups)) {
-      const field = (CELL_TYPES[typeKey] && CELL_TYPES[typeKey].field) || { blur: 6, contrast: 20 };
-      offCtx.setTransform(1, 0, 0, 1, 0, 0);
-      offCtx.globalCompositeOperation = 'source-over';
-      offCtx.filter = 'none';
-      offCtx.clearRect(0, 0, ow, oh);
-      offCtx.fillStyle = '#ffffff';
-      for (const s of group) {
-        offCtx.beginPath();
-        for (let i = 0; i <= N; i++) {
-          const v = shapeVertex(s, THETA_TABLE[i], t);
-          const px = (v.x * cs + cTx) * sx;
-          const py = (v.y * cs + cTy) * sx;
-          if (i === 0) offCtx.moveTo(px, py);
-          else offCtx.lineTo(px, py);
+    // Partition: when S.metaSplit is on, both halves of any SPLITTING
+    // cell render together as a per-pair metaball. Everything else
+    // renders as an independent shape via the per-cell path below.
+    const useMetaSplit = !!S.metaSplit;
+    const splittingByCellId = new Map();
+    const singletons = [];
+    if (useMetaSplit) {
+      for (const s of shapes) {
+        if (s.cell.state === 'SPLITTING') {
+          if (!splittingByCellId.has(s.cell.id)) splittingByCellId.set(s.cell.id, []);
+          splittingByCellId.get(s.cell.id).push(s);
+        } else {
+          singletons.push(s);
         }
-        offCtx.closePath();
-        offCtx.fill();
       }
-      offCtx.globalCompositeOperation = 'copy';
-      offCtx.filter = `blur(${field.blur}px) contrast(${field.contrast})`;
-      offCtx.drawImage(off, 0, 0);
-      offCtx.filter = 'none';
-      offCtx.globalCompositeOperation = 'source-over';
-      off2Ctx.globalCompositeOperation = 'source-over';
-      off2Ctx.drawImage(off, 0, 0);
-    }
-  }
-
-  _tintMask(color) {
-    const offCtx = this.offCtx;
-    offCtx.setTransform(1, 0, 0, 1, 0, 0);
-    offCtx.globalCompositeOperation = 'copy';
-    offCtx.filter = 'none';
-    offCtx.drawImage(this.off2, 0, 0);
-    offCtx.globalCompositeOperation = 'source-in';
-    if (typeof color === 'function') {
-      color(offCtx, this.off.width, this.off.height);
+      // Cells where only one half is in view fall back to the singleton
+      // path (no pair → no metaball merge).
+      for (const [id, pair] of splittingByCellId) {
+        if (pair.length < 2) {
+          for (const s of pair) singletons.push(s);
+          splittingByCellId.delete(id);
+        }
+      }
     } else {
-      offCtx.fillStyle = color;
-      offCtx.fillRect(0, 0, this.off.width, this.off.height);
-    }
-    offCtx.globalCompositeOperation = 'source-over';
-  }
-
-  _drawMetaballToMain(shapes, t) {
-    const ctx = this.ctx;
-    const off = this.off, off2 = this.off2;
-    const offCtx = this.offCtx;
-    const W = this.W, H = this.H;
-    const cam = this.camera;
-    const theme = currentTheme();
-    const px = S.outlinePx;
-
-    const offsets = [
-      [-px, 0], [px, 0], [0, -px], [0, px],
-      [-px, -px], [px, px], [-px, px], [px, -px],
-    ];
-    if (theme.outline.glow) {
-      this._tintMask(theme.outline.glow);
-      ctx.save();
-      ctx.shadowColor = theme.outline.glow;
-      ctx.shadowBlur = theme.outline.glowBlur || 14;
-      for (const [dx, dy] of offsets) {
-        ctx.drawImage(off, 0, 0, off.width, off.height, dx, dy, W, H);
-      }
-      ctx.restore();
-      this._tintMask(theme.outline.color);
-      ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, W, H);
-    } else {
-      this._tintMask(theme.outline.color);
-      for (const [dx, dy] of offsets) {
-        ctx.drawImage(off, 0, 0, off.width, off.height, dx, dy, W, H);
-      }
+      for (const s of shapes) singletons.push(s);
     }
 
-    const sx = off.width / W;
-    const cs = cam.scale, cTx = cam.tx, cTy = cam.ty;
-    offCtx.setTransform(1, 0, 0, 1, 0, 0);
-    offCtx.globalCompositeOperation = 'source-over';
-    offCtx.filter = 'none';
-    offCtx.clearRect(0, 0, off.width, off.height);
-    offCtx.globalCompositeOperation = S.blendMode || 'source-over';
-    for (const cell of this.sim.cells) {
-      const subs = (cell.state === 'SPLITTING')
-        ? splitVirtualCenters(cell)
-        : [{ x: cell.x, y: cell.y, r: cell.r }];
-      const cc = cellColors(cell);
-      const cType = CELL_TYPES[cell.type] || CELL_TYPES.neutrophil;
-      const hollow = !!cType.bodyHollow;
-      for (const b of subs) {
-        const cx = (b.x * cs + cTx) * sx;
-        const cy = (b.y * cs + cTy) * sx;
-        const r = b.r * 1.95 * cs * sx;
-        const g = offCtx.createRadialGradient(cx, cy - r * 0.18, 0, cx, cy, r);
-        g.addColorStop(0,    cc.cytoTop);
-        g.addColorStop(0.55, cc.cytoBot);
-        g.addColorStop(1,    cc.cytoBotTransp || hexToRgba(cc.cytoBot, 0));
-        offCtx.fillStyle = g;
-        offCtx.beginPath();
-        offCtx.arc(cx, cy, r, 0, Math.PI * 2);
-        offCtx.fill();
-        // Donut-hole effect for cells flagged bodyHollow (e.g. RBCs).
-        // Paint a smaller darker radial gradient on top, sinking the
-        // centre toward cytoBot.
+    // ---- Per-pair metaball pass (each splitting cell rendered once)
+    if (splittingByCellId.size > 0) {
+      this.withCameraCtx(() => {
+        for (const [, pair] of splittingByCellId) {
+          this._renderSplittingPair(pair[0].cell, t);
+        }
+      });
+    }
+
+    // ---- Per-cell direct-render pass (the WebGL2-style clean look)
+    this.withCameraCtx(() => {
+      for (const s of singletons) {
+        const c = s.cell;
+        const cc = cellColors(c);
+        const cType = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+        const hollow = !!cType.bodyHollow;
+
+        // Build the wobbly polygon path once and reuse it (Path2D would
+        // be cleaner, but cytoplasm-fill path differs from clip path).
+        const tracePolygon = () => {
+          ctx.beginPath();
+          for (let i = 0; i <= N; i++) {
+            const v = shapeVertex(s, THETA_TABLE[i], t);
+            if (i === 0) ctx.moveTo(v.x, v.y);
+            else ctx.lineTo(v.x, v.y);
+          }
+          ctx.closePath();
+        };
+
+        // Cytoplasm: 3-stop radial gradient over a disc slightly larger
+        // than the cell, clipped to the wobble polygon. Sharp polygon
+        // edge — no metaball blur, no merging with neighbours.
+        tracePolygon();
+        const gradR = s.r * 1.95;
+        const grad = ctx.createRadialGradient(s.x, s.y - s.r * 0.18, 0, s.x, s.y, gradR);
+        grad.addColorStop(0,    cc.cytoTop);
+        grad.addColorStop(0.55, cc.cytoBot);
+        grad.addColorStop(1,    cc.cytoBotTransp || hexToRgba(cc.cytoBot, 0));
+        ctx.fillStyle = grad;
+        ctx.fill();
+
+        // Inner overlays — donut hole (RBCs) and top-left highlight —
+        // clipped to the polygon so they don't leak past the edge.
+        ctx.save();
+        tracePolygon();
+        ctx.clip();
+
         if (hollow) {
-          const innerR = b.r * 0.55 * cs * sx;
-          const g2 = offCtx.createRadialGradient(cx, cy, 0, cx, cy, innerR);
+          const innerR = s.r * 0.55;
+          const g2 = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, innerR);
           g2.addColorStop(0, hexToRgba(cc.cytoBot, 0.78));
           g2.addColorStop(1, hexToRgba(cc.cytoBot, 0));
-          offCtx.fillStyle = g2;
-          offCtx.beginPath();
-          offCtx.arc(cx, cy, innerR, 0, Math.PI * 2);
-          offCtx.fill();
+          ctx.fillStyle = g2;
+          ctx.beginPath();
+          ctx.arc(s.x, s.y, innerR, 0, Math.PI * 2);
+          ctx.fill();
         }
-      }
-    }
-    offCtx.globalCompositeOperation = 'destination-in';
-    offCtx.drawImage(off2, 0, 0);
-    offCtx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, W, H);
 
-    offCtx.setTransform(1, 0, 0, 1, 0, 0);
-    offCtx.globalCompositeOperation = 'source-over';
-    offCtx.clearRect(0, 0, off.width, off.height);
-    for (const cell of this.sim.cells) {
-      const subs = (cell.state === 'SPLITTING')
-        ? splitVirtualCenters(cell)
-        : [{ x: cell.x, y: cell.y, r: cell.r }];
-      const cc = cellColors(cell);
-      for (const b of subs) {
-        const x = ((b.x - b.r * 0.35) * cs + cTx) * sx;
-        const y = ((b.y - b.r * 0.45) * cs + cTy) * sx;
-        const r = b.r * 0.75 * cs * sx;
-        const g = offCtx.createRadialGradient(x, y, 0, x, y, r);
-        g.addColorStop(0, cc.nucleusHi);
-        g.addColorStop(1, 'rgba(0,0,0,0)');
-        offCtx.fillStyle = g;
-        offCtx.beginPath();
-        offCtx.arc(x, y, r, 0, Math.PI * 2);
-        offCtx.fill();
+        const hx = s.x - s.r * 0.35;
+        const hy = s.y - s.r * 0.45;
+        const hr = s.r * 0.75;
+        const hgrad = ctx.createRadialGradient(hx, hy, 0, hx, hy, hr);
+        hgrad.addColorStop(0, cc.nucleusHi);
+        hgrad.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = hgrad;
+        ctx.globalAlpha = 0.55;
+        ctx.beginPath();
+        ctx.arc(hx, hy, hr, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
       }
-    }
-    offCtx.globalCompositeOperation = 'destination-in';
-    offCtx.drawImage(off2, 0, 0);
-    offCtx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 0.55;
-    ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, W, H);
-    ctx.globalAlpha = 1.0;
+    });
+  }
 
-    this._drawGranules(shapes, theme, t);
-    this._drawDecorations(shapes, theme, t);
-    this._drawMembrane(shapes, t, theme);
+  // Per-pair metaball render for a SPLITTING cell. The two halves are
+  // drawn (white) into a scratch canvas, blur+contrast carves a binary
+  // metaball mask that fuses them, then the mask is tinted with the
+  // cytoplasm gradient via source-in and blitted into the main canvas
+  // at the bbox. Membrane stroke comes later via _drawMembrane (which
+  // strokes each half polygon — visually OK because the merge is
+  // carried by the fill).
+  _renderSplittingPair(c, t) {
+    const ctx = this.ctx;
+    const cam = this.camera;
+    const cType = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+    const fld = cType.field || { blur: 6, contrast: 20 };
+    const cc = cellColors(c);
+    const N = WOBBLE_VERTS;
+    const halves = splitVirtualCenters(c);
+
+    // World-space bbox covering both wobble polygons (with a generous
+    // body multiplier) plus blur padding.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const h of halves) {
+      const buf = h.r * 1.6;
+      if (h.x - buf < minX) minX = h.x - buf;
+      if (h.y - buf < minY) minY = h.y - buf;
+      if (h.x + buf > maxX) maxX = h.x + buf;
+      if (h.y + buf > maxY) maxY = h.y + buf;
+    }
+    // 1 scratch pixel per screen pixel at current zoom keeps the blur
+    // strength matched to canvas2D's filter() spec (px-based).
+    const scratchScale = Math.max(0.5, cam.scale);
+    const padScratchPx = fld.blur * 3 + 4;
+    const padWorld = padScratchPx / scratchScale;
+    minX -= padWorld; minY -= padWorld;
+    maxX += padWorld; maxY += padWorld;
+    const sw = Math.max(8, Math.ceil((maxX - minX) * scratchScale));
+    const sh = Math.max(8, Math.ceil((maxY - minY) * scratchScale));
+
+    if (!this._scratch) {
+      this._scratch = document.createElement('canvas');
+      this._scratchCtx = this._scratch.getContext('2d');
+    }
+    this._scratch.width = sw;
+    this._scratch.height = sh;
+    const sctx = this._scratchCtx;
+
+    // World→scratch transform.
+    sctx.setTransform(scratchScale, 0, 0, scratchScale, -minX * scratchScale, -minY * scratchScale);
+
+    // 1) Both halves filled solid white onto the freshly-sized scratch.
+    sctx.fillStyle = '#ffffff';
+    for (const h of halves) {
+      const ref = { x: h.x, y: h.y, r: h.r, cell: c };
+      sctx.beginPath();
+      for (let i = 0; i <= N; i++) {
+        const v = shapeVertex(ref, THETA_TABLE[i], t);
+        if (i === 0) sctx.moveTo(v.x, v.y);
+        else sctx.lineTo(v.x, v.y);
+      }
+      sctx.closePath();
+      sctx.fill();
+    }
+
+    // 2) Apply blur+contrast in identity space (filter spec is in
+    // scratch pixels), copying scratch onto itself to carve the
+    // metaball edge.
+    sctx.save();
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.globalCompositeOperation = 'copy';
+    sctx.filter = `blur(${fld.blur}px) contrast(${fld.contrast})`;
+    sctx.drawImage(this._scratch, 0, 0);
+    sctx.filter = 'none';
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.restore();
+
+    // 3) Tint the mask with the cytoplasm gradient via source-in.
+    sctx.save();
+    sctx.globalCompositeOperation = 'source-in';
+    const mx = (halves[0].x + halves[1].x) / 2;
+    const my = (halves[0].y + halves[1].y) / 2;
+    const gr = Math.max(halves[0].r, halves[1].r) * 1.95;
+    const grad = sctx.createRadialGradient(mx, my - gr * 0.18, 0, mx, my, gr);
+    grad.addColorStop(0,    cc.cytoTop);
+    grad.addColorStop(0.55, cc.cytoBot);
+    grad.addColorStop(1,    cc.cytoBotTransp || hexToRgba(cc.cytoBot, 0));
+    sctx.fillStyle = grad;
+    sctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.restore();
+
+    // 4) Blit scratch into the main canvas at the world bbox. The
+    // surrounding withCameraCtx already applies the camera transform,
+    // so `minX / minY` are world coordinates here.
+    ctx.drawImage(this._scratch, 0, 0, sw, sh, minX, minY, maxX - minX, maxY - minY);
   }
 
   _drawMembrane(shapes, t, theme) {
@@ -568,49 +599,47 @@ export class Canvas2DRenderer extends RendererBase {
     });
     if (!anyGranules) return;
     const ctx = this.ctx;
-    const offCtx = this.offCtx;
-    const off = this.off, off2 = this.off2;
-    const W = this.W, H = this.H;
-    const cam = this.camera;
+    const N = WOBBLE_VERTS;
+    this.withCameraCtx(() => {
+      for (const s of shapes) {
+        const c = s.cell;
+        const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+        const Ng = type.granules || 0;
+        if (Ng === 0) continue;
+        const seed = c.id * 9.7 + (c.wobbleSeed || 0);
+        const isBig = c.type === 'basophil';
+        const baseSize = isBig ? 0.115 : 0.05;
+        const sizeJitter = isBig ? 0.05 : 0.04;
+        const cc = cellColors(c);
 
-    offCtx.setTransform(1, 0, 0, 1, 0, 0);
-    offCtx.globalCompositeOperation = 'source-over';
-    offCtx.filter = 'none';
-    offCtx.clearRect(0, 0, off.width, off.height);
+        // Clip to this cell's wobble polygon so granules near the rim
+        // can't leak outside (replaces the old destination-in mask).
+        ctx.save();
+        ctx.beginPath();
+        for (let i = 0; i <= N; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], t);
+          if (i === 0) ctx.moveTo(v.x, v.y);
+          else ctx.lineTo(v.x, v.y);
+        }
+        ctx.closePath();
+        ctx.clip();
 
-    const sx = off.width / W;
-    const cs = cam.scale, cTx = cam.tx, cTy = cam.ty;
-    for (const s of shapes) {
-      const c = s.cell;
-      const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
-      const N = type.granules || 0;
-      if (N === 0) continue;
-      const seed = c.id * 9.7 + (c.wobbleSeed || 0);
-      const isBig = c.type === 'basophil';
-      const baseSize = isBig ? 0.115 : 0.05;
-      const sizeJitter = isBig ? 0.05 : 0.04;
-      const cc = cellColors(c);
-      offCtx.fillStyle = cc.nucleus;
-      offCtx.globalAlpha = isBig ? 0.85 : 0.55;
-      for (let i = 0; i < N; i++) {
-        const ang = frac(seed * 1.3 + i * 0.61) * Math.PI * 2;
-        const rRel = 0.05 + 0.85 * Math.sqrt(frac(seed + i * 0.317));
-        const wob = 0.04 * Math.sin(t * 0.5 + i + seed);
-        const wx = s.x + Math.cos(ang) * s.r * (rRel + wob);
-        const wy = s.y + Math.sin(ang) * s.r * (rRel + wob);
-        const x = (wx * cs + cTx) * sx;
-        const y = (wy * cs + cTy) * sx;
-        const r = s.r * (baseSize + sizeJitter * frac(seed * 1.7 + i * 0.13)) * cs * sx;
-        offCtx.beginPath();
-        offCtx.arc(x, y, r, 0, Math.PI * 2);
-        offCtx.fill();
+        ctx.fillStyle = cc.nucleus;
+        ctx.globalAlpha = isBig ? 0.85 : 0.55;
+        for (let i = 0; i < Ng; i++) {
+          const ang = frac(seed * 1.3 + i * 0.61) * Math.PI * 2;
+          const rRel = 0.05 + 0.85 * Math.sqrt(frac(seed + i * 0.317));
+          const wob = 0.04 * Math.sin(t * 0.5 + i + seed);
+          const wx = s.x + Math.cos(ang) * s.r * (rRel + wob);
+          const wy = s.y + Math.sin(ang) * s.r * (rRel + wob);
+          const r = s.r * (baseSize + sizeJitter * frac(seed * 1.7 + i * 0.13));
+          ctx.beginPath();
+          ctx.arc(wx, wy, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
       }
-    }
-    offCtx.globalAlpha = 1;
-    offCtx.globalCompositeOperation = 'destination-in';
-    offCtx.drawImage(off2, 0, 0);
-    offCtx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(off, 0, 0, off.width, off.height, 0, 0, W, H);
+    });
   }
 
   // ---------- Decorations ----------
@@ -1026,6 +1055,23 @@ export class Canvas2DRenderer extends RendererBase {
 
         ctx.restore();
       }
+    });
+  }
+
+  // ---------- Particles (kill-mode debris) ----------
+  drawParticles(particles /* , t, ts */) {
+    if (!particles || !particles.length) return;
+    const ctx = this.ctx;
+    this.withCameraCtx(() => {
+      for (const p of particles) {
+        const a = Math.max(0, Math.min(1, p.life / p.maxLife));
+        ctx.globalAlpha = a;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
     });
   }
 

@@ -23,6 +23,15 @@ export class Sim {
     this.targetMarker = null;
     /** When non-null, next canvas tap places a cell of `addMode.type`. */
     this.addMode = null;
+    /** When true, tapping a cell pops it (overrides splitOnTap). */
+    this.killMode = false;
+    /**
+     * Free-floating particles released by killCell(). Each entry:
+     *   { x, y, vx, vy, spin, r, color, life, maxLife }
+     * Advanced + pruned in update(dt); renderers read this.particles
+     * via drawParticles().
+     */
+    this.particles = [];
 
     // Input scratch — mutated by app.js's input handlers.
     /** @type {null|{cell, dx, dy, started, downX, downY, samples }} */
@@ -150,6 +159,45 @@ export class Sim {
   }
 
   // ---------- Hit test ----------
+  /**
+   * Pop a cell as if it were a slow balloon, releasing protein/gut
+   * particles that swirl outward and fade over ~2 s. The cell itself
+   * is removed from the live pool immediately. Accepts either a cell
+   * index or a Cell instance.
+   */
+  killCell(cellOrIdx) {
+    let idx, c;
+    if (typeof cellOrIdx === 'number') {
+      idx = cellOrIdx;
+      c = this.cells[idx];
+    } else {
+      c = cellOrIdx;
+      idx = this.cells.indexOf(c);
+    }
+    if (!c || idx < 0) return;
+    const cc = c._colors || {};
+    const N = 32;
+    for (let i = 0; i < N; i++) {
+      const ang = (i / N) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+      const speed = 50 + Math.random() * 100;
+      // Two flavours of debris: protein (cytoBot) and guts (nucleus).
+      const isGut = (i % 3) === 0;
+      this.particles.push({
+        x: c.x + Math.cos(ang) * c.r * 0.30,
+        y: c.y + Math.sin(ang) * c.r * 0.30,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed,
+        spin: (Math.random() - 0.5) * 5.0,
+        r: 2 + Math.random() * (isGut ? 5 : 3),
+        color: isGut ? (cc.nucleus || '#3a1029') : (cc.cytoBot || '#d36699'),
+        life: 2.0,
+        maxLife: 2.0,
+      });
+    }
+    this.cells.splice(idx, 1);
+    this.selectedCells.delete(c);
+  }
+
   hitCell(worldX, worldY) {
     let hit = -1, hitD = Infinity;
     for (let i = 0; i < this.cells.length; i++) {
@@ -214,6 +262,26 @@ export class Sim {
 
   // ---------- Frame update ----------
   update(dt) {
+    // Particle physics: outward velocity damped by drag, plus a
+    // per-particle perpendicular spin force for the swirl effect.
+    // Particles are GC'd when life hits zero.
+    if (this.particles.length > 0) {
+      const dragK = Math.pow(0.45, dt);  // ~55% velocity loss per second
+      for (let i = this.particles.length - 1; i >= 0; i--) {
+        const p = this.particles[i];
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vx *= dragK;
+        p.vy *= dragK;
+        // Perpendicular acceleration → swirl.
+        const perpScale = p.spin * 1.8;
+        p.vx += -p.vy * perpScale * dt;
+        p.vy +=  p.vx * perpScale * dt;
+        p.life -= dt;
+        if (p.life <= 0) this.particles.splice(i, 1);
+      }
+    }
+
     const centroidGood = this.swarmCentroid('good');
     const centroidBad  = this.swarmCentroid('bad');
     this.rebuildSpatialGrid();
@@ -419,6 +487,7 @@ export class Sim {
     this.cellId = 0;
     this.selectedCells.clear();
     this.targetMarker = null;
+    this.particles.length = 0;
     const c = this.makeCell(this.W / 2, this.H / 2);
     this.cells.push(c);
   }
