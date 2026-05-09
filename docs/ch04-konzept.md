@@ -68,6 +68,49 @@
         <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› 08</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Memory aufbauen</div><div style="color: var(--ink-dim); font-size: 13px;">Memory-Zellen über Runs hinweg sammeln.</div></div>
       </div>
     </section>
+
+    <section>
+      <div class="section-head">
+        <div class="section-num">4.3</div>
+        <div>
+          <div class="section-title">Spielmodi</div>
+          <div class="section-desc">Zwei Modi mit demselben Kern — autonome Zellen, lebendes Schlachtfeld. Roster, Progression und Win/Lose-Bedingungen unterscheiden sich.</div>
+        </div>
+      </div>
+
+      <div class="grid-auto col-auto-280">
+        <div class="card card-side" style="--card-color: var(--accent);">
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); letter-spacing: 0.15em; margin-bottom: 8px;">MODUS A</div>
+          <div style="font-size: 17px; font-weight: 500; margin-bottom: 6px;">Kampagne</div>
+          <div style="color: var(--ink-dim); font-size: 13px; margin-bottom: 10px;">18 Levels in 3 Akten (siehe §6). Jedes Level mit Pre-Level-Briefing (§12).</div>
+          <ul style="color: var(--ink-dim); font-size: 12px; line-height: 1.5; padding-left: 18px;">
+            <li>Roster-Wahl: 6 von 12 Helden (§4.1)</li>
+            <li>Phase-Sperre: adaptive Zellen erst nach DC</li>
+            <li>Energy-Cost pro Spawn (15–80⚡)</li>
+            <li>Codex-Discovery aktiv (§5)</li>
+            <li>Memory-Zellen über Runs hinweg</li>
+            <li>Win/Lose-Conditions je Level (§8.1)</li>
+          </ul>
+        </div>
+        <div class="card card-side" style="--card-color: var(--accent-cool);">
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent-cool); letter-spacing: 0.15em; margin-bottom: 8px;">MODUS B</div>
+          <div style="font-size: 17px; font-weight: 500; margin-bottom: 6px;">Free Game <span class="badge badge-tier-utility">Sandbox</span></div>
+          <div style="color: var(--ink-dim); font-size: 13px; margin-bottom: 10px;">Endlos-Sandbox. Spieler spawnt jede Zelle und jedes Pathogen frei und beobachtet, wie das System reagiert.</div>
+          <ul style="color: var(--ink-dim); font-size: 12px; line-height: 1.5; padding-left: 18px;">
+            <li><strong>Spawning</strong>: alle Helden, Pathogen-Subtypen und RBC-Filler — kein Roster-Limit, keine Phase-Sperre</li>
+            <li><strong>Energy</strong>: optional aus (default) oder per Slider auf Kampagnen-Werte</li>
+            <li><strong>Progression</strong>: keine — Codex zeigt alles offen, keine Memory-Zellen</li>
+            <li><strong>Win/Lose</strong>: keine — Sim läuft endlos</li>
+            <li><strong>Briefing-Karte (§12.1–§12.4)</strong>: deaktiviert (kein Level)</li>
+            <li><strong>Status-Line (§12.5)</strong>: bleibt aktiv und zeigt Konter für die fokussierte Pathogen-Instanz</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="callout" style="margin-top: 16px;">
+        <strong>Designziel:</strong> Free Game ist <em>kein</em> separates Code-Pfad-Projekt — die Kern-Sim (§11 Physik) läuft in beiden Modi gleich. Modus-Spezifika sind <em>Restriktionen</em>, die in Free Game schlicht abgeschaltet werden. Der bereits existierende Live-Simulator <em>ist</em> de facto Free Game.
+      </div>
+    </section>
   </div>
 
   <!-- =============================================== -->
