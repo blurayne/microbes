@@ -364,7 +364,6 @@ function bindRange(id, key, valId, fmt) {
     }
   });
 }
-bindRange('maxCells', 'maxCells', 'maxCellsVal', v => v.toFixed(0));
 bindRange('autoSplitSeconds', 'autoSplitSeconds', 'autoVal', v => v.toFixed(0) + 's');
 bindRange('bgFlowSpeed', 'bgFlowSpeed', 'bgVal', v => v.toFixed(2) + '×');
 bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
@@ -375,15 +374,6 @@ bindRange('friction', 'friction', 'frictionVal', v => v.toFixed(2));
 bindRange('bounce', 'bounce', 'bounceVal', v => v.toFixed(2));
 bindRange('throwStrength', 'throwStrength', 'throwVal', v => v.toFixed(2) + '×');
 bindRange('wobbleAmp', 'wobbleAmp', 'wobbleVal', v => v.toFixed(2));
-
-const blendSel = document.getElementById('blendMode');
-if (blendSel) {
-  blendSel.value = S.blendMode || 'source-over';
-  blendSel.addEventListener('change', () => {
-    S.blendMode = blendSel.value;
-    saveSettings();
-  });
-}
 
 const useHl = document.getElementById('useHighlight');
 if (useHl) {
@@ -443,7 +433,8 @@ if (modeKillBtn)   modeKillBtn.addEventListener('click',   () => {
   // Toggle: pressing kill while already active drops back to target mode.
   setKillMode(!sim.killMode);
 });
-bindCheckbox('splitOnTap', 'splitOnTap', applyModeUi);
+// splitOnTap: settings checkbox removed late 2026; the HUD "Split"
+// mode button at modeSplit still toggles S.splitOnTap via setSplitOnTap.
 applyModeUi();
 bindCheckbox('randomSplit', 'randomSplit');
 bindCheckbox('metaSplit', 'metaSplit');
@@ -483,14 +474,8 @@ bindCheckbox('showBuildInfo', 'showBuildInfo', applyBuildInfoVis);
 applyBuildInfoVis(S.showBuildInfo);
 bindCheckbox('showRenderer', 'showRenderer');
 
-for (const r of settingsEl.querySelectorAll('input[name="splitMode"]')) {
-  r.checked = (r.value === S.splitMode);
-  r.addEventListener('change', () => {
-    if (!r.checked) return;
-    S.splitMode = r.value;
-    saveSettings();
-  });
-}
+// splitMode radios removed from settings late 2026; field still
+// honoured by sim.js (default 'bondDrift' from DEFAULTS).
 
 const dbg = document.getElementById('showDebugField');
 if (dbg) {

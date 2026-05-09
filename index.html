@@ -46,7 +46,6 @@
 
       <section>
         <h3 data-i18n="splitting">Splitting</h3>
-        <label><input type="checkbox" id="splitOnTap" /> <span data-i18n="split_on_tap">Split on tap</span></label>
         <label><input type="checkbox" id="randomSplit" /> <span data-i18n="random_split">Random splitting</span></label>
         <label><input type="checkbox" id="metaSplit" /> <span data-i18n="meta_split">Metaball split</span></label>
         <label><span data-i18n="meta_rt_mode">Metaball RT mode</span>
@@ -66,16 +65,7 @@
       </section>
 
       <section>
-        <h3 data-i18n="split_mode">Split mode</h3>
-        <label><input type="radio" name="splitMode" value="pushApart" /> <span data-i18n="split_push">Push apart with momentum</span></label>
-        <label><input type="radio" name="splitMode" value="bondDrift" /> <span data-i18n="split_bond">Bond, then drift</span></label>
-      </section>
-
-      <section>
         <h3 data-i18n="population">Population</h3>
-        <label><span data-i18n="max_cells">Max cells</span> <span id="maxCellsVal" class="val"></span>
-          <input type="range" id="maxCells" min="2" max="128" step="1" />
-        </label>
         <label><span data-i18n="auto_split">Auto-split (s)</span> <span id="autoVal" class="val"></span>
           <input type="range" id="autoSplitSeconds" min="2" max="30" step="1" />
         </label>
@@ -94,21 +84,6 @@
         </label>
       </section>
 
-      <section>
-        <h3 data-i18n="cell_blending">Cell blending</h3>
-        <select id="blendMode">
-          <option value="source-over" data-i18n="blend_none">None</option>
-          <option value="overlay" data-i18n="blend_overlay">Overlay (default)</option>
-          <option value="multiply" data-i18n="blend_multiply">Multiply</option>
-          <option value="darken" data-i18n="blend_darken">Darken</option>
-          <option value="lighter" data-i18n="blend_lighter">Add (Lighter)</option>
-          <option value="screen" data-i18n="blend_screen">Screen</option>
-          <option value="soft-light" data-i18n="blend_softlight">Soft light</option>
-          <option value="hard-light" data-i18n="blend_hardlight">Hard light</option>
-          <option value="color-burn" data-i18n="blend_burn">Color burn</option>
-          <option value="color-dodge" data-i18n="blend_dodge">Color dodge</option>
-        </select>
-      </section>
 
       <section>
         <h3 data-i18n="look">Look</h3>

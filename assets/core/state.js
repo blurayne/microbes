@@ -16,11 +16,11 @@ export const ALL_CELL_KEYS = [
 export const DEFAULTS = {
   splitMode: 'bondDrift',
   autoSplitSeconds: 10,
-  maxCells: 32,
+  maxCells: 1024,           // hard cap (UI slider removed late 2026; was 32)
   bgFlowSpeed: 0.55,
   outlinePx: 5,
   showDebugField: false,
-  theme: 'petriDish',
+  theme: 'bloodstream',
   activeTypes: ALL_CELL_KEYS.slice(),
   splitOnTap: false,
   randomSplit: false,
@@ -34,7 +34,6 @@ export const DEFAULTS = {
   bounce: 0.6,
   throwStrength: 0.35,
   wobbleAmp: 0.13,
-  blendMode: 'overlay',
   speedMul: 1.0,
   cartoon: false,
   lang: 'en',                               // 'en' | 'de' | 'es' | 'bar' | 'latin'
@@ -42,7 +41,7 @@ export const DEFAULTS = {
   cellSizeMul: 1.0,
   membraneIntensity: 0.55,
   cellBorderThickness: 3.0,    // multiplier on the disk-shader outline band; webgl2 / webgpu only
-  background: 'petriDish',
+  background: 'solid',
   renderScale: 1.0,
   upscaleMode: 'blur',
   scanlines: false,
@@ -51,12 +50,8 @@ export const DEFAULTS = {
 };
 
 const KNOWN_THEME_KEYS = [
-  'petriDish', 'bloodstream', 'neonBloom', 'aquaticGlow',
-  'crayonBox', 'cartoonNight', 'glowStick', 'bedtime',
-  'spectrum', 'aurora', 'prism', 'pride',
-  'deepSpace', 'volcano', 'forestFloor', 'cyberGrid',
-  'lymphNode', 'thymus', 'boneMarrow', 'heart',
-  'gut', 'lung', 'brain', 'kidney', 'skin', 'liver',
+  'bloodstream', 'cartoonNight', 'spectrum', 'lymphNode',
+  'lung', 'aurora', 'underwater', 'lavaFire',
 ];
 
 const VALID_RENDER_SCALES = [1, 0.5, 0.25, 0.125];
@@ -79,8 +74,16 @@ export function loadSettings() {
       parsed.activeTypes = [...DEFAULTS.activeTypes];
     }
     if (parsed.splitMode === 'fixedGrid') parsed.splitMode = 'bondDrift';
+    // Trim theme/background to the 8 + solid kept set. Existing users
+    // on a removed theme (petriDish, neonBloom, …) silently migrate
+    // to the new default on load.
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
-    if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
+    const validBackgrounds = ['solid', ...KNOWN_THEME_KEYS];
+    if (!parsed.background || !validBackgrounds.includes(parsed.background)) {
+      parsed.background = DEFAULTS.background;
+    }
+    // Removed in late 2026 along with the cell-blending UI.
+    delete parsed.blendMode;
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
     const validRenderers = ['canvas2d', 'webgl2', 'webgpu'];
     // Migrate legacy renderer values (pixi / pixi-webgpu / pixi-webgl2) to
@@ -129,17 +132,16 @@ export const LOCALES = {
   en: {
     settings_title: 'Settings',
     theme: 'Theme', background: 'Background', gameplay: 'Gameplay',
-    splitting: 'Splitting', split_mode: 'Split mode', population: 'Population',
-    physics: 'Physics', cell_blending: 'Cell blending', look: 'Look',
+    splitting: 'Splitting', population: 'Population',
+    physics: 'Physics', look: 'Look',
     performance: 'Performance', language: 'Language',
     allow_pathogens: 'Allow pathogens',
-    split_on_tap: 'Split on tap', random_split: 'Random splitting', meta_split: 'Metaball split',
+    random_split: 'Random splitting', meta_split: 'Metaball split',
     meta_rt_mode: 'Metaball RT mode',
     meta_rt_bbox: 'Per-pair bbox (default)',
     meta_rt_full: 'Full-canvas pool',
     meta_rt_shared: 'Shared (largest pair)',
-    split_push: 'Push apart with momentum', split_bond: 'Bond, then drift',
-    max_cells: 'Max cells', auto_split: 'Auto-split (s)',
+    auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
     wobble: 'Wobble', bg_flow: 'Background flow', outline_px: 'Outline px',
     membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
@@ -214,13 +216,12 @@ export const LOCALES = {
   de: {
     settings_title: 'Einstellungen',
     theme: 'Thema', background: 'Hintergrund', gameplay: 'Spiel',
-    splitting: 'Teilung', split_mode: 'Teilungsmodus', population: 'Population',
-    physics: 'Physik', cell_blending: 'Zellüberblendung', look: 'Aussehen',
+    splitting: 'Teilung', population: 'Population',
+    physics: 'Physik', look: 'Aussehen',
     performance: 'Leistung', language: 'Sprache',
     allow_pathogens: 'Krankheitserreger erlauben',
-    split_on_tap: 'Bei Antippen teilen', random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
-    split_push: 'Mit Schwung auseinander', split_bond: 'Verbinden, dann driften',
-    max_cells: 'Max. Zellen', auto_split: 'Auto-Teilung (s)',
+    random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
+    auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
     wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
     membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
@@ -295,13 +296,12 @@ export const LOCALES = {
   es: {
     settings_title: 'Ajustes',
     theme: 'Tema', background: 'Fondo', gameplay: 'Juego',
-    splitting: 'División', split_mode: 'Modo de división', population: 'Población',
-    physics: 'Física', cell_blending: 'Mezcla de células', look: 'Estilo',
+    splitting: 'División', population: 'Población',
+    physics: 'Física', look: 'Estilo',
     performance: 'Rendimiento', language: 'Idioma',
     allow_pathogens: 'Permitir patógenos',
-    split_on_tap: 'Dividir al tocar', random_split: 'División aleatoria', meta_split: 'División metaball',
-    split_push: 'Empujar con impulso', split_bond: 'Unir, luego separar',
-    max_cells: 'Células máx.', auto_split: 'Auto-división (s)',
+    random_split: 'División aleatoria', meta_split: 'División metaball',
+    auto_split: 'Auto-división (s)',
     friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
     wobble: 'Oscilación', bg_flow: 'Flujo de fondo', outline_px: 'Contorno px',
     membrane: 'Membrana', cell_size: 'Tamaño de célula', use_highlight: 'Usar color de resalte',
@@ -377,13 +377,12 @@ export const LOCALES = {
     // Bayrisch / Boarisch — translated from the German entries.
     settings_title: 'Eistellunga',
     theme: 'Thema', background: 'Hintagrund', gameplay: 'Spui',
-    splitting: 'Teilung', split_mode: 'Teilungsmodus', population: 'Population',
-    physics: 'Physik', cell_blending: 'Zoinmischung', look: 'Ausschaung',
+    splitting: 'Teilung', population: 'Population',
+    physics: 'Physik', look: 'Ausschaung',
     performance: 'Leistung', language: 'Sproch',
     allow_pathogens: 'Bazilln daloum',
-    split_on_tap: 'Beim Drauflanga teiln', random_split: 'Zoifällige Teilung', meta_split: 'Metaball-Doaln',
-    split_push: 'Mit Schwung auseinanda', split_bond: 'Vabinda, dann driftn',
-    max_cells: 'Max. Zoin', auto_split: 'Auto-Teilung (s)',
+    random_split: 'Zoifällige Teilung', meta_split: 'Metaball-Doaln',
+    auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
     wobble: 'Wackln', bg_flow: 'Hintagrundgflies', outline_px: 'Umrandung px',
     membrane: 'Membran', cell_size: 'Zoingrässn', use_highlight: 'Akzentfarb vawendn',
@@ -458,13 +457,12 @@ export const LOCALES = {
   latin: {
     settings_title: 'Configuratio',
     theme: 'Tema', background: 'Tergum', gameplay: 'Ludus',
-    splitting: 'Divisio', split_mode: 'Modus divisionis', population: 'Populatio',
-    physics: 'Physica', cell_blending: 'Confusio cellularum', look: 'Aspectus',
+    splitting: 'Divisio', population: 'Populatio',
+    physics: 'Physica', look: 'Aspectus',
     performance: 'Celeritas', language: 'Lingua',
     allow_pathogens: 'Pathogenes admittere',
-    split_on_tap: 'Divide tactu', random_split: 'Divisio casualis', meta_split: 'Divisio metaballi',
-    split_push: 'Pelle cum impetu', split_bond: 'Conjunge, deinde fluctuent',
-    max_cells: 'Cellulae maximae', auto_split: 'Auto-divisio (s)',
+    random_split: 'Divisio casualis', meta_split: 'Divisio metaballi',
+    auto_split: 'Auto-divisio (s)',
     friction: 'Frictio', bounce: 'Resilientia', throw_strength: 'Vis jactus',
     wobble: 'Tremor', bg_flow: 'Fluxus tergi', outline_px: 'Linea (px)',
     membrane: 'Membrana', cell_size: 'Magnitudo cellulae',
@@ -579,36 +577,18 @@ export function cellDesc(typeKey) {
 }
 
 // ---------- Themes ----------
+//
+// Trimmed in late 2026 from 26 entries → 8 (+ the 'solid' synthetic
+// background appended in BACKGROUNDS below). The four "physiological"
+// entries (lung / aurora / underwater / lavaFire) drive new procedural
+// shaders in webgl2.js / webgpu.js (kind values 4..7); canvas2d falls
+// back to flat / gradient base colours for those.
 export const THEMES = {
-  petriDish: {
-    label: 'Petri Dish',
-    bg: { kind: 'agar', base: '#f1e1a1', spotColor: 'rgba(170,120,40,0.10)', spotCount: 5, vignette: 0.18, ringColor: 'rgba(120,80,30,0.10)' },
-    outline: { color: '#2b1c0a', defaultPx: 5 },
-    ui: { panelAccent: '#a86a18' },
-  },
   bloodstream: {
     label: 'Bloodstream',
     bg: { kind: 'gradient', topColor: '#5b101a', botColor: '#1d0306', spotColor: 'rgba(255,90,100,0.18)', spotCount: 6, vignette: 0.45, rbcSilhouettes: true },
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#ff6b6b' },
-  },
-  neonBloom: {
-    label: 'Neon Bloom',
-    bg: { kind: 'navy-ghost', base: '#0e1840', spotColor: 'rgba(80,40,160,0.25)', spotCount: 7, vignette: 0.4 },
-    outline: { color: '#0d0420', defaultPx: 3 },
-    ui: { panelAccent: '#ff4fbf' },
-  },
-  aquaticGlow: {
-    label: 'Aquatic Glow',
-    bg: { kind: 'gradient', topColor: '#001a4a', botColor: '#00050f', spotColor: 'rgba(80,200,255,0.10)', spotCount: 4, vignette: 0.3 },
-    outline: { color: '#06122a', defaultPx: 3 },
-    ui: { panelAccent: '#5ce7ff' },
-  },
-  crayonBox: {
-    label: 'Crayon Box',
-    bg: { kind: 'flat', base: '#0a0612', spotColors: ['#ff4d4d','#ffd84d','#4d8dff','#4dd87a'], spotCount: 6, vignette: 0.25 },
-    outline: { color: '#000000', defaultPx: 5 },
-    ui: { panelAccent: '#ffd84d' },
   },
   cartoonNight: {
     label: 'Cartoon Night',
@@ -616,130 +596,46 @@ export const THEMES = {
     outline: { color: '#04081a', defaultPx: 5 },
     ui: { panelAccent: '#5fe3d2' },
   },
-  glowStick: {
-    label: 'Glow Stick',
-    bg: { kind: 'flat', base: '#000000', spotColors: ['#ffea00','#ff00aa','#00ff88','#00d8ff'], spotCount: 7, vignette: 0.50 },
-    outline: { color: '#000000', defaultPx: 3 },
-    ui: { panelAccent: '#ffea00' },
-  },
-  bedtime: {
-    label: 'Bedtime Stories',
-    bg: { kind: 'gradient', topColor: '#0e0a2c', botColor: '#1c123e', spotColors: ['#fff4c2','#ffe0a3','#cdbcff','#bff5ff'], spotCount: 8, vignette: 0.45 },
-    outline: { color: '#0c0a22', defaultPx: 3 },
-    ui: { panelAccent: '#ffe0a3' },
-  },
   spectrum: {
     label: 'Spectrum',
     bg: { kind: 'flat', base: '#000000', spotColors: ['#ff003c','#ff8a00','#ffd600','#3ecf6c','#3da6ff','#a855f7'], spotCount: 6, vignette: 0.30 },
     outline: { color: '#000000', defaultPx: 4 },
     ui: { panelAccent: '#a855f7' },
   },
-  aurora: {
-    label: 'Aurora',
-    bg: { kind: 'gradient', topColor: '#03081a', botColor: '#000000', spotColors: ['#3ecf6c','#5cd6ff','#a855f7','#ff5cb8','#ffe070'], spotCount: 7, vignette: 0.40 },
-    outline: { color: '#000000', defaultPx: 3 },
-    ui: { panelAccent: '#3ecf6c' },
-  },
-  prism: {
-    label: 'Prism',
-    bg: { kind: 'flat', base: '#04020a', spotColors: ['#ff3030','#ff8800','#ffd700','#00d068','#0088ff','#7000ff'], spotCount: 6, vignette: 0.50 },
-    outline: { color: '#000000', defaultPx: 4 },
-    ui: { panelAccent: '#ff8800' },
-  },
-  pride: {
-    label: 'Pride',
-    bg: { kind: 'gradient', topColor: '#15082a', botColor: '#04010d', spotColors: ['#e40303','#ff8c00','#ffed00','#008026','#004cff','#732982'], spotCount: 6, vignette: 0.35 },
-    outline: { color: '#000000', defaultPx: 4 },
-    ui: { panelAccent: '#ff8c00' },
-  },
-  deepSpace: {
-    label: 'Deep Space',
-    bg: { kind: 'flat', base: '#000005', spotColors: ['#ffffff','#a0c0ff','#ffe0a0'], spotCount: 9, vignette: 0.60 },
-    outline: { color: '#000000', defaultPx: 3 },
-    ui: { panelAccent: '#a0c0ff' },
-  },
-  volcano: {
-    label: 'Volcano',
-    bg: { kind: 'gradient', topColor: '#3b0a05', botColor: '#0a0202', spotColors: ['#ff5a00','#ff9933','#ffe066','#ffaa44'], spotCount: 7, vignette: 0.50 },
-    outline: { color: '#1a0606', defaultPx: 4 },
-    ui: { panelAccent: '#ff5a00' },
-  },
-  forestFloor: {
-    label: 'Forest Floor',
-    bg: { kind: 'flat', base: '#091206', spotColors: ['#a8d250','#ffd24d','#5ad27a','#cfe07f'], spotCount: 6, vignette: 0.45 },
-    outline: { color: '#04080d', defaultPx: 4 },
-    ui: { panelAccent: '#a8d250' },
-  },
-  cyberGrid: {
-    label: 'Cyber Grid',
-    bg: { kind: 'cybergrid', base: '#000010', spotColors: ['#00ff88','#ff00aa','#00d8ff'], spotCount: 4, vignette: 0.30, gridColor: 'rgba(0,255,170,0.18)', gridStep: 48 },
-    outline: { color: '#000000', defaultPx: 3 },
-    ui: { panelAccent: '#00ff88' },
-  },
   lymphNode: {
     label: 'Lymph Node',
-    bg: { kind: 'gradient', topColor: '#2a0e3a', botColor: '#0a0410', spotColor: 'rgba(160,120,200,0.15)', spotCount: 5, vignette: 0.40, decor: 'lymphocytes' },
+    bg: { kind: 'gradient', topColor: '#2a0e3a', botColor: '#0a0410', spotColor: 'rgba(160,120,200,0.15)', spotCount: 5, vignette: 0.40 },
     outline: { color: '#0a0410', defaultPx: 4 },
     ui: { panelAccent: '#bd93e2' },
   },
-  thymus: {
-    label: 'Thymus',
-    bg: { kind: 'gradient', topColor: '#401218', botColor: '#100204', spotColor: 'rgba(220,90,110,0.18)', spotCount: 6, vignette: 0.45, decor: 'lobules' },
-    outline: { color: '#0a0102', defaultPx: 4 },
-    ui: { panelAccent: '#e95870' },
-  },
-  boneMarrow: {
-    label: 'Bone Marrow',
-    bg: { kind: 'gradient', topColor: '#44290a', botColor: '#190a02', spotColor: 'rgba(255,180,90,0.18)', spotCount: 5, vignette: 0.40, decor: 'matrix' },
-    outline: { color: '#0a0501', defaultPx: 4 },
-    ui: { panelAccent: '#ffb95c' },
-  },
-  heart: {
-    label: 'Heart',
-    bg: { kind: 'gradient', topColor: '#4a0a0a', botColor: '#110202', spotColor: 'rgba(255,60,60,0.18)', spotCount: 4, vignette: 0.50, decor: 'pulse' },
-    outline: { color: '#0a0202', defaultPx: 4 },
-    ui: { panelAccent: '#ff4040' },
-  },
-  gut: {
-    label: 'Gut',
-    bg: { kind: 'gradient', topColor: '#3a1010', botColor: '#100404', spotColor: 'rgba(220,140,140,0.16)', spotCount: 5, vignette: 0.40, decor: 'villi' },
-    outline: { color: '#0a0202', defaultPx: 4 },
-    ui: { panelAccent: '#e08688' },
-  },
   lung: {
     label: 'Lung',
-    bg: { kind: 'gradient', topColor: '#082040', botColor: '#020618', spotColor: 'rgba(150,200,255,0.18)', spotCount: 5, vignette: 0.40, decor: 'alveoli' },
+    bg: { kind: 'lung', base: '#1a1118', topColor: '#3a1c2c', botColor: '#0a0610', spotCount: 0, vignette: 0.40 },
     outline: { color: '#02080f', defaultPx: 4 },
-    ui: { panelAccent: '#5cb0ff' },
+    ui: { panelAccent: '#ff9aa8' },
   },
-  brain: {
-    label: 'Brain',
-    bg: { kind: 'gradient', topColor: '#2a142e', botColor: '#100612', spotColor: 'rgba(255,200,255,0.15)', spotCount: 6, vignette: 0.50, decor: 'neurons' },
-    outline: { color: '#08020a', defaultPx: 3 },
-    ui: { panelAccent: '#e0a0ff' },
+  aurora: {
+    label: 'Aurora',
+    bg: { kind: 'aurora', base: '#03081a', topColor: '#03081a', botColor: '#000000', spotCount: 0, vignette: 0.40 },
+    outline: { color: '#000000', defaultPx: 3 },
+    ui: { panelAccent: '#3ecf6c' },
   },
-  kidney: {
-    label: 'Kidney',
-    bg: { kind: 'gradient', topColor: '#2c0e08', botColor: '#0c0402', spotColor: 'rgba(255,140,90,0.16)', spotCount: 5, vignette: 0.45, decor: 'tubules' },
-    outline: { color: '#0a0202', defaultPx: 4 },
-    ui: { panelAccent: '#ff9070' },
+  underwater: {
+    label: 'Underwater',
+    bg: { kind: 'underwater', base: '#031022', topColor: '#06243a', botColor: '#020815', spotCount: 0, vignette: 0.35 },
+    outline: { color: '#02101e', defaultPx: 3 },
+    ui: { panelAccent: '#5cd6ff' },
   },
-  skin: {
-    label: 'Skin',
-    bg: { kind: 'gradient', topColor: '#3c1c0c', botColor: '#100804', spotColor: 'rgba(255,200,160,0.18)', spotCount: 4, vignette: 0.35, decor: 'hair' },
-    outline: { color: '#0a0402', defaultPx: 4 },
-    ui: { panelAccent: '#e8a878' },
-  },
-  liver: {
-    label: 'Liver',
-    bg: { kind: 'gradient', topColor: '#2a0e0a', botColor: '#0a0202', spotColor: 'rgba(180,80,60,0.18)', spotCount: 5, vignette: 0.50, decor: 'lobules' },
-    outline: { color: '#0a0202', defaultPx: 4 },
-    ui: { panelAccent: '#c85a3c' },
+  lavaFire: {
+    label: 'Lava / Fire',
+    bg: { kind: 'lava', base: '#1a0402', topColor: '#3b0a05', botColor: '#0a0202', spotCount: 0, vignette: 0.50 },
+    outline: { color: '#1a0606', defaultPx: 4 },
+    ui: { panelAccent: '#ff5a00' },
   },
 };
 
 export function currentTheme() {
-  return THEMES[S.theme] || THEMES.petriDish;
+  return THEMES[S.theme] || THEMES.bloodstream;
 }
 
 // Effective highlight colour for selection visuals. When the user toggle is
