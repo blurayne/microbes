@@ -381,13 +381,34 @@ export class PixiRenderer extends RendererBase {
         const sizeJitter = isBig ? 0.05 : 0.04;
         const granAlpha = isBig ? 0.85 : 0.55;
         const granColor = cc.nucleus || cytoBot;
+
+        // Per-cell cache of the seed-derived constants so we skip the
+        // frac/cos/sin/sqrt work on every frame. cell.id, wobbleSeed,
+        // and cell.type don't change during a cell's lifetime; the
+        // cache is invalidated defensively if any of those mutate.
+        let gc = cell._granuleCache;
+        if (!gc || gc.seed !== seed || gc.Ng !== Ng) {
+          const cosAng = new Float32Array(Ng);
+          const sinAng = new Float32Array(Ng);
+          const rRel = new Float32Array(Ng);
+          const gFactor = new Float32Array(Ng);
+          for (let i = 0; i < Ng; i++) {
+            const ang = frac(seed * 1.3 + i * 0.61) * Math.PI * 2;
+            cosAng[i] = Math.cos(ang);
+            sinAng[i] = Math.sin(ang);
+            rRel[i] = 0.05 + 0.85 * Math.sqrt(frac(seed + i * 0.317));
+            gFactor[i] = baseSize + sizeJitter * frac(seed * 1.7 + i * 0.13);
+          }
+          gc = { seed, Ng, cosAng, sinAng, rRel, gFactor };
+          cell._granuleCache = gc;
+        }
+
         for (let i = 0; i < Ng; i++) {
-          const ang = frac(seed * 1.3 + i * 0.61) * Math.PI * 2;
-          const rRel = 0.05 + 0.85 * Math.sqrt(frac(seed + i * 0.317));
           const wob = 0.04 * Math.sin(time * 0.5 + i + seed);
-          const wx = s.x + Math.cos(ang) * s.r * (rRel + wob);
-          const wy = s.y + Math.sin(ang) * s.r * (rRel + wob);
-          const gr = s.r * (baseSize + sizeJitter * frac(seed * 1.7 + i * 0.13));
+          const rr = s.r * (gc.rRel[i] + wob);
+          const wx = s.x + gc.cosAng[i] * rr;
+          const wy = s.y + gc.sinAng[i] * rr;
+          const gr = s.r * gc.gFactor[i];
           g.circle(wx, wy, gr).fill({ color: granColor, alpha: granAlpha });
         }
       }
