@@ -33,14 +33,20 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Install npm deps
-        run: npm ci || npm install
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install MkDocs
+        run: pip install mkdocs
 
       - name: Build docs
-        # Renders the GDD markdown book in docs/ to docs/_book/.
+        # mkdocs.yml at repo root reads docs/ and writes book/.
         # The output rides along in the upload-pages-artifact below
-        # since `path: .` ships the whole working tree.
-        run: npm run build:docs
+        # since `path: .` ships the whole working tree, so the book
+        # is reachable at /microbes/book/ on the deployed site.
+        run: mkdocs build
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
