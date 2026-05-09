@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - main
-      - claude/cell-splitting-metaball-hcdrO
-      - claude/webgl-renderer
-      - claude/webgl-phase9
   workflow_dispatch:
 
 permissions:
