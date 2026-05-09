@@ -614,3 +614,124 @@
     th, td { padding: 10px 8px; font-size: 11px; }
     .diagram-card { padding: 24px 12px; }
   }
+
+/* ============================================================
+ * MkDocs default-theme overrides (screen-only)
+ *
+ * The default MkDocs theme uses Bootstrap chrome:
+ *   - <nav class="navbar fixed-top bg-primary"> — bright blue navbar
+ *   - <html data-bs-theme="light"> — forces tables black-on-white
+ *   - .navbar-collapse.bg-body-tertiary — light card on the mobile drawer
+ *
+ * We can't change those template-baked classes from a stylesheet, so
+ * we override the colours to match the dark GDD palette. Wrapped in
+ * @media screen so print.css's white-on-black rules win when printing.
+ * ============================================================ */
+
+@media screen {
+  /* Body — Bootstrap's data-bs-theme="light" sets a white bg via
+   * --bs-body-bg; force the GDD dark palette. */
+  body {
+    background-color: var(--bg) !important;
+    color: var(--ink) !important;
+  }
+
+  /* Top navbar: bg-primary (blue) → GDD dark with accent border. */
+  .navbar.bg-primary,
+  .navbar.fixed-top {
+    background-color: var(--bg) !important;
+    background-image: none !important;
+    border-bottom: 1px solid var(--line) !important;
+  }
+  .navbar-brand,
+  .navbar-brand:hover,
+  .navbar-brand:focus {
+    color: var(--accent) !important;
+  }
+  .navbar .nav-link {
+    color: var(--ink-dim) !important;
+  }
+  .navbar .nav-link:hover,
+  .navbar .nav-link.active,
+  .navbar .nav-link[aria-current="page"] {
+    color: var(--accent) !important;
+  }
+  .navbar-toggler {
+    color: var(--ink) !important;
+    border-color: var(--line) !important;
+  }
+  .navbar-toggler-icon { filter: invert(1); }
+
+  /* Mobile drawer card (the panel under the hamburger). */
+  .navbar-collapse.bg-body-tertiary,
+  .navbar .navbar-collapse {
+    background-color: var(--bg-elev) !important;
+    --bs-card-bg: var(--bg-elev) !important;
+    --bs-card-color: var(--ink) !important;
+    border: none !important;
+  }
+
+  /* Sidebar (desktop "On this page" affix). */
+  .bs-sidebar.affix,
+  .bs-sidebar {
+    background-color: transparent !important;
+  }
+  .bs-sidebar .nav > li > a {
+    color: var(--ink-dim) !important;
+  }
+  .bs-sidebar .nav > .active > a,
+  .bs-sidebar .nav > li > a:hover,
+  .bs-sidebar .nav > li > a:focus {
+    color: var(--accent) !important;
+    border-left: 3px solid var(--accent) !important;
+    background: transparent !important;
+  }
+
+  /* Tables: Bootstrap's light theme makes these black-on-white, which
+   * clashes with the dark page. Force the GDD palette while leaving
+   * the existing .matrix-table rules from earlier in this stylesheet
+   * intact (they only set spacing). */
+  table.table,
+  .table-wrap table,
+  .matrix-table {
+    --bs-table-bg: transparent;
+    --bs-table-color: var(--ink);
+    --bs-table-border-color: var(--line);
+    --bs-table-striped-bg: rgba(255, 255, 255, 0.04);
+    --bs-table-striped-color: var(--ink);
+    --bs-table-hover-bg: rgba(200, 255, 90, 0.06);
+    --bs-table-hover-color: var(--ink);
+    color: var(--ink) !important;
+    background-color: transparent !important;
+    border-color: var(--line) !important;
+  }
+  table.table > :not(caption) > * > *,
+  .table-wrap table > :not(caption) > * > *,
+  .matrix-table > :not(caption) > * > * {
+    background-color: transparent !important;
+    color: var(--ink) !important;
+    border-color: var(--line) !important;
+  }
+  table.table thead th,
+  .matrix-table thead th {
+    border-bottom: 1px solid var(--accent) !important;
+    color: var(--accent) !important;
+  }
+
+  /* MkDocs default theme wraps body content in <main class="container">
+   * with Bootstrap card chrome — keep cards on the dark surface. */
+  main .card,
+  main .card-body {
+    background-color: var(--bg-elev) !important;
+    border-color: var(--line) !important;
+    color: var(--ink) !important;
+  }
+
+  /* "Search", "Previous", "Next" links in the mobile drawer. */
+  .navbar .navbar-collapse .nav-link {
+    color: var(--ink-dim) !important;
+  }
+  .navbar .navbar-collapse .nav-link:hover {
+    color: var(--accent) !important;
+  }
+}
