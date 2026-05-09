@@ -378,6 +378,16 @@ export class Canvas2DRenderer extends RendererBase {
         if (s.cell.state === 'SPLITTING') {
           if (!splittingByCellId.has(s.cell.id)) splittingByCellId.set(s.cell.id, []);
           splittingByCellId.get(s.cell.id).push(s);
+          // Disk-pass crossfade: over the second half of SPLITTING
+          // (p > 0.5), fade in the per-half disk content (nucleus,
+          // top-light, donut, decorations) so when finishSplit fires
+          // and the metaball pass stops, the disk pass is already at
+          // full opacity. Eliminates the visible pop at the SPLITTING
+          // → NORMAL transition.
+          if (s.cell.splitProgress > 0.5) {
+            s.diskAlpha = (s.cell.splitProgress - 0.5) * 2;
+            singletons.push(s);
+          }
         } else {
           singletons.push(s);
         }
@@ -410,6 +420,15 @@ export class Canvas2DRenderer extends RendererBase {
         const cc = cellColors(c);
         const cType = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
         const hollow = !!cType.bodyHollow;
+        // SPLITTING halves with p > 0.5 ride this loop with a fade-in
+        // alpha (s.diskAlpha set in the partition step above) so the
+        // disk-pass content reaches full opacity by the moment
+        // finishSplit fires and the metaball pass stops.
+        const fadingDisk = (s.diskAlpha !== undefined && s.diskAlpha < 1);
+        if (fadingDisk) {
+          ctx.save();
+          ctx.globalAlpha = s.diskAlpha;
+        }
 
         // Build the wobbly polygon path once and reuse it (Path2D would
         // be cleaner, but cytoplasm-fill path differs from clip path).
@@ -464,6 +483,7 @@ export class Canvas2DRenderer extends RendererBase {
         ctx.arc(hx, hy, hr, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+        if (fadingDisk) ctx.restore();
       }
     });
   }

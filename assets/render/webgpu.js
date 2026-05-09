@@ -38,7 +38,7 @@ import { RendererBase } from './renderer.js';
 //  11..13  cytoBot  (rgb)
 //  14..16  nucleus  (rgb)
 //  17..20  outline  (rgba; .a = c.flash)
-const INSTANCE_FLOATS = 21;
+const INSTANCE_FLOATS = 22;
 const INSTANCE_STRIDE = INSTANCE_FLOATS * 4;
 
 const BODY_KIND_FLOAT = {
@@ -74,6 +74,7 @@ struct VsIn {
   @location(4) cytoBot: vec3<f32>,
   @location(5) nucleus: vec3<f32>,
   @location(6) outline: vec4<f32>,
+  @location(7) diskAlpha: f32,    // SPLITTING crossfade: 0..1 over p ∈ [0.5, 1.0]
 };
 
 struct VsOut {
@@ -85,6 +86,7 @@ struct VsOut {
   @location(4) cytoBot: vec3<f32>,
   @location(5) nucleus: vec3<f32>,
   @location(6) outline: vec4<f32>,
+  @location(7) diskAlpha: f32,
 };
 
 @vertex
@@ -112,6 +114,7 @@ fn vs_main(in: VsIn) -> VsOut {
   out.cytoBot = in.cytoBot;
   out.nucleus = in.nucleus;
   out.outline = in.outline;
+  out.diskAlpha = in.diskAlpha;
   return out;
 }
 
@@ -180,7 +183,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let ringT = sdf / (bodyR * 0.30);
     if (ringT >= 1.0) { discard; }
     let ringA = smoothstep(0.0, 0.20, ringT) * (1.0 - smoothstep(0.65, 1.0, ringT));
-    return vec4<f32>(highlight, ringA);
+    return vec4<f32>(highlight, ringA * in.diskAlpha);
   }
 
   // Soft body edge AA.
@@ -255,7 +258,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     col = mix(col, highlight, vec3<f32>(0.30));
   }
 
-  return vec4<f32>(col, bodyA);
+  return vec4<f32>(col, bodyA * in.diskAlpha);
 }
 `;
 
@@ -1546,6 +1549,7 @@ export class WebGPURenderer extends RendererBase {
               { shaderLocation: 4, offset: 44, format: 'float32x3' }, // a_cytoBot
               { shaderLocation: 5, offset: 56, format: 'float32x3' }, // a_nucleus
               { shaderLocation: 6, offset: 68, format: 'float32x4' }, // a_outline
+              { shaderLocation: 7, offset: 84, format: 'float32'   }, // a_diskAlpha (split-end crossfade)
             ],
           },
         ],
@@ -1827,6 +1831,13 @@ export class WebGPURenderer extends RendererBase {
           let arr = splittingByCellId.get(s.cell.id);
           if (!arr) { arr = []; splittingByCellId.set(s.cell.id, arr); }
           arr.push(s);
+          // Disk-pass crossfade: re-include the half over p ∈ [0.5, 1.0]
+          // so the disk content reaches full opacity by the moment
+          // finishSplit fires and the metaball pass stops. No pop.
+          if (s.cell.splitProgress > 0.5) {
+            s.diskAlpha = (s.cell.splitProgress - 0.5) * 2;
+            singletons.push(s);
+          }
         } else {
           singletons.push(s);
         }
@@ -1872,6 +1883,7 @@ export class WebGPURenderer extends RendererBase {
         data[j + 14] = nuc[0]; data[j + 15] = nuc[1]; data[j + 16] = nuc[2];
         data[j + 17] = outlineRgb[0]; data[j + 18] = outlineRgb[1]; data[j + 19] = outlineRgb[2];
         data[j + 20] = c.flash || 0;
+        data[j + 21] = (s.diskAlpha !== undefined) ? s.diskAlpha : 1;
       }
       device.queue.writeBuffer(
         this._instanceBuffer, 0,
