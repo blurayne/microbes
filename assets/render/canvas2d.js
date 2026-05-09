@@ -1028,7 +1028,8 @@ export class Canvas2DRenderer extends RendererBase {
           const env = Math.sin(c.splitProgress * Math.PI);
           const blurPx = env * 0.09 * cr * cam.scale;
           if (blurPx > 0.5) ctx.filter = `blur(${blurPx.toFixed(2)}px)`;
-          ctx.globalAlpha = (ctx.globalAlpha || 1) * (1 - 0.8 * env);
+          // Linear face fade: 0.5 at split start → 1.0 at split end.
+          ctx.globalAlpha = (ctx.globalAlpha || 1) * (0.5 + 0.5 * c.splitProgress);
         }
         ctx.lineWidth = lw;
         ctx.strokeStyle = theme.outline.color;

@@ -14,10 +14,15 @@
     color: #000 !important;
   }
 
-  /* Top nav is screen-only chrome. */
+  /* Top nav is screen-only chrome. The original GDD used <nav class="topnav">;
+   * MkDocs's default theme uses Bootstrap's .navbar / .bs-sidebar instead. */
   nav.topnav,
   .nav-links,
-  .nav-brand {
+  .nav-brand,
+  .navbar,
+  .navbar-collapse,
+  .navbar-toggler,
+  .bs-sidebar {
     display: none !important;
   }
 

@@ -1,0 +1,54 @@
+site_name: Immunsystem · GDD v10
+site_description: Game Design Document — 12 Immunzellen, 12 Pathogene, 5 Bosse, 18 Levels.
+site_url: https://blurayne.github.io/microbes/docs/_book/
+
+docs_dir: docs
+# mkdocs requires site_dir be outside docs_dir; output lives at the
+# repo root so it deploys at https://blurayne.github.io/microbes/book/.
+site_dir: book
+
+# Custom CSS extracted verbatim from the original GDD HTML carries the
+# layout / animation / colour palette. print.css is media-scoped so it
+# only kicks in when printing.
+extra_css:
+  - assets/style.css
+  - assets/print.css
+
+# Mermaid (diagrams in chapter 03) needs the runtime + the original
+# theme-variables init block extracted from _source.html.
+extra_javascript:
+  - https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js
+  - assets/mermaid-init.js
+
+# Use a minimal theme so the inline HTML in each chapter file
+# (.chapter / .tier-group / .cell-card / .chapter-header etc.) carries
+# the visual identity without fighting a built-in theme's chrome.
+theme:
+  name: mkdocs
+
+nav:
+  - Einleitung: index.md
+  - 01 · Helden: ch01-helden.md
+  - 02 · Pathogene: ch02-pathogene.md
+  - 03 · Diagramme & Abläufe: ch03-diagramme.md
+  - 04 · Konzept & Tiers: ch04-konzept.md
+  - 05 · Adaptiver Codex: ch05-codex.md
+  - 06 · Level-Struktur: ch06-levels.md
+  - 07 · Boss-Katalog: ch07-bosse.md
+  - 08 · Sieg & Regeln: ch08-regeln.md
+  - 09 · Game Feel: ch09-game-feel.md
+  - 10 · Schadens-Matrix: ch10-schaden.md
+  - 11 · Physik & Magnetismus: ch11-physik.md
+  - 12 · Briefing & Konter-Quickref: ch12-briefing.md
+
+# Allow inline HTML (chapter files are mostly raw HTML blocks).
+markdown_extensions:
+  - md_in_html
+  - attr_list
+  - admonition
+  - tables
+
+# _source.html is the original upload kept for fidelity reference;
+# don't include it in the rendered book navigation but still ship it.
+exclude_docs: |
+  _book/

@@ -491,6 +491,132 @@ struct VsOut {
 }
 `;
 
+// ---------- Background: gradient + spots + drifting RBC silhouettes ----
+// Mirrors webgl2.js FRAG_BG (lines 249-340) bit-for-bit. One uniform
+// buffer carries kind/vignette/grid/time + camera + viewport +
+// spot/RBC flags + 5 colour vec4s + 8 spot vec4s + 8 spot-colour vec4s.
+// Vertex shader is the canonical big-triangle (3 verts cover the clip
+// rect) so no VBO is needed.
+const MAX_SPOTS = 8;
+const BG_WGSL = /* wgsl */ `
+struct BgU {
+  // (kind, vignette, gridStep, time)
+  misc: vec4<f32>,
+  // (camera.scale, camera.tx, camera.ty, _)
+  cam: vec4<f32>,
+  // (viewportW, viewportH, spotCount, rbcOn)
+  vp: vec4<f32>,
+  base: vec4<f32>,
+  top: vec4<f32>,
+  bot: vec4<f32>,
+  ringColor: vec4<f32>,
+  gridColor: vec4<f32>,
+  spots: array<vec4<f32>, ${MAX_SPOTS}>,
+  spotCols: array<vec4<f32>, ${MAX_SPOTS}>,
+};
+@group(0) @binding(0) var<uniform> u: BgU;
+
+struct VsOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) uv: vec2<f32>,
+};
+
+@vertex fn vs_main(@builtin(vertex_index) i: u32) -> VsOut {
+  // Big-triangle fullscreen pattern.
+  //   i=0 -> (-1,-1);  i=1 -> ( 3,-1);  i=2 -> (-1, 3)
+  var p: vec2<f32>;
+  if (i == 0u) { p = vec2<f32>(-1.0, -1.0); }
+  else if (i == 1u) { p = vec2<f32>( 3.0, -1.0); }
+  else              { p = vec2<f32>(-1.0,  3.0); }
+  var out: VsOut;
+  out.pos = vec4<f32>(p, 0.0, 1.0);
+  // 0..1 with v=0 at the bottom of the framebuffer (matches webgl2).
+  out.uv  = (p + vec2<f32>(1.0, 1.0)) * 0.5;
+  return out;
+}
+
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
+  let uv = in.uv;
+  let kind = i32(u.misc.x + 0.5);
+  let vignette = u.misc.y;
+  let gridStep = u.misc.z;
+  let time = u.misc.w;
+  let camScale = u.cam.x;
+  let camTx = u.cam.y;
+  let camTy = u.cam.z;
+  let viewport = u.vp.xy;
+  let spotCount = i32(u.vp.z + 0.5);
+  let rbcOn = i32(u.vp.w + 0.5);
+
+  var col = u.base.rgb;
+  if (kind == 1) {
+    col = mix(u.top.rgb, u.bot.rgb, uv.y);
+  }
+
+  // World-space pixel.
+  let screenPx = uv * viewport;
+  let worldPx = (screenPx - vec2<f32>(camTx, camTy)) / max(camScale, 0.0001);
+
+  // Petri-dish concentric rings — 1px thin at every 32 world units.
+  if (kind == 2) {
+    let ctr = viewport * 0.5;
+    let r = length(worldPx - ctr);
+    let nearestRing = floor(r / 32.0 + 0.5) * 32.0;
+    let dToRing = abs(r - nearestRing);
+    let pxWorld = 1.0 / max(camScale, 0.0001);
+    let band = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.5, dToRing);
+    col = mix(col, u.ringColor.rgb, band * 0.18);
+  }
+
+  // Cyber grid — thin lines every gridStep world units in both axes.
+  if (kind == 3) {
+    let g = worldPx - floor(worldPx / gridStep) * gridStep;
+    let dToLine = min(g, vec2<f32>(gridStep, gridStep) - g);
+    let pxWorld = 1.0 / max(camScale, 0.0001);
+    let lineX = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.x);
+    let lineY = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.y);
+    let line = max(lineX, lineY);
+    col = mix(col, u.gridColor.rgb, line * 0.30);
+  }
+
+  // Drifting light spots — additive, screen UV. Colours pre-multiplied.
+  for (var i: i32 = 0; i < ${MAX_SPOTS}; i = i + 1) {
+    if (i >= spotCount) { break; }
+    let s = u.spots[i];
+    let d = distance(uv, s.xy);
+    let a = 1.0 - smoothstep(0.0, s.z, d);
+    col = col + u.spotCols[i].rgb * a;
+  }
+
+  // Drifting RBC silhouettes — bloodstream theme flair. 22 ellipses
+  // with darker centre dot, drift on screen UV with time.
+  if (rbcOn == 1) {
+    for (var i: i32 = 0; i < 22; i = i + 1) {
+      let seed = f32(i) * 1.31;
+      let fx = fract(f32(i) / 22.0 + 0.06 * sin(time * 0.25 + seed));
+      let fy = fract(fract(seed * 0.7) + time * 0.15 + f32(i) * 0.13);
+      let c = vec2<f32>(fx, fy);
+      let r = 0.018 + 0.016 * fract(seed * 0.21);
+      let dEll = (uv - c) / vec2<f32>(r, r * 0.78);
+      let ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
+      col = mix(col, vec3<f32>(1.0, 0.35, 0.35), ellA);
+      let dDot = length(uv - c) / (r * 0.32);
+      let dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
+      col = mix(col, vec3<f32>(0.47, 0.08, 0.08), dotA);
+    }
+  }
+
+  // Vignette: darken the corners.
+  if (vignette > 0.0) {
+    let v = length(uv - vec2<f32>(0.5, 0.5)) * 1.4;
+    let vAmt = vignette * smoothstep(0.4, 1.0, v);
+    col = col * (1.0 - vAmt);
+  }
+
+  return vec4<f32>(col, 1.0);
+}
+`;
+
 // ---------- Particles: kill-mode protein/gut explosions ----------
 // One instanced quad per particle. Per-instance: (worldX, worldY, r,
 // alpha) packed as float32x4. Fragment shader fills a smooth disc.
@@ -926,6 +1052,28 @@ export class WebGPURenderer extends RendererBase {
     this._faceCapacity = 0;             // face-bearing cells
     this._faceData = new Float32Array(0);
 
+    // Background pass — gradient + spots + drifting RBC silhouettes.
+    // Mirrors webgl2.js's bg pipeline 1:1 (FRAG_BG → BG_WGSL).
+    this._bgPipeline = null;
+    this._bgUniformBuffer = null;
+    this._bgBindGroup = null;
+    this._bgUniformData = new Float32Array(0);
+    // One-time random light-spot layout, mirrors webgl2.js:935.
+    this._spots = [];
+    for (let i = 0; i < MAX_SPOTS; i++) {
+      this._spots.push({
+        ax: 0.15 + Math.random() * 0.7,
+        ay: 0.15 + Math.random() * 0.7,
+        ox1: 0.12 + Math.random() * 0.18,
+        oy1: 0.12 + Math.random() * 0.18,
+        w1: 0.10 + Math.random() * 0.18,
+        w2: 0.05 + Math.random() * 0.10,
+        phx: Math.random() * Math.PI * 2,
+        phy: Math.random() * Math.PI * 2,
+        r: 0.32 + Math.random() * 0.30,
+      });
+    }
+
     // Per-frame transient state (set in beginFrame, cleared in endFrame).
     this._frameEncoder = null;
     this._frameView = null;
@@ -1031,6 +1179,36 @@ export class WebGPURenderer extends RendererBase {
     this._markerBindGroup = device.createBindGroup({
       layout: this._markerPipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: this._markerUniformBuffer } }],
+    });
+
+    // ---- Background pass (gradient + spots + drifting RBC silhouettes) ----
+    // Single fullscreen triangle; shader reads everything from one
+    // uniform buffer. Uniform layout (96 floats / 384 bytes):
+    //   [0..3]    misc (kind, vignette, gridStep, time)
+    //   [4..7]    cam  (scale, tx, ty, _)
+    //   [8..11]   vp   (W, H, spotCount, rbcOn)
+    //   [12..31]  base, top, bot, ringColor, gridColor (5 × vec4)
+    //   [32..63]  spots[8] vec4 (cx, cy, r, _) screen 0..1
+    //   [64..95]  spotCols[8] vec4 (r, g, b, _) pre-multiplied
+    const bgModule = device.createShaderModule({ code: BG_WGSL });
+    this._bgPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: bgModule, entryPoint: 'vs_main' },
+      fragment: {
+        module: bgModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: fmt }],   // opaque base, no blend
+      },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._bgUniformBuffer = device.createBuffer({
+      size: 96 * 4,                    // 384 bytes
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._bgUniformData = new Float32Array(96);
+    this._bgBindGroup = device.createBindGroup({
+      layout: this._bgPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this._bgUniformBuffer } }],
     });
 
     // ---- Particles (instanced quad, 8 floats per particle) ----
@@ -1552,22 +1730,82 @@ export class WebGPURenderer extends RendererBase {
     this._frameView = tex.createView();
   }
 
-  drawBackground(/* timeMs */) {
+  drawBackground(timeMs) {
     if (!this._frameEncoder || !this._frameView) return;
+    if (!this._bgPipeline) return;       // pipeline not yet created
     const bg = currentBackground();
-    // Skeleton: solid clear. Gradient backgrounds collapse to the top
-    // colour for now; a vertex-shader-driven gradient + spots / decor
-    // lands in a follow-up commit.
-    const cssColor = (bg.kind === 'gradient' && bg.topColor) ? bg.topColor : (bg.base || '#0a0612');
-    const clearValue = cssToGpuColor(cssColor);
+    const t = (timeMs || 0) * 0.001 * (S.bgFlowSpeed || 1);
+
+    let kind = 0; // flat
+    if (bg.kind === 'gradient') kind = 1;
+    else if (bg.kind === 'agar') kind = 2;
+    else if (bg.kind === 'cybergrid') kind = 3;
+
+    const data = this._bgUniformData;
+    // misc
+    data[0] = kind;
+    data[1] = bg.vignette || 0;
+    data[2] = bg.gridStep || 48;
+    data[3] = t;
+    // cam
+    data[4] = this.camera.scale;
+    data[5] = this.camera.tx;
+    data[6] = this.camera.ty;
+    data[7] = 0;
+    // vp + spotCount + rbcOn
+    const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
+    data[8] = this.W;
+    data[9] = this.H;
+    data[10] = count;
+    data[11] = bg.rbcSilhouettes ? 1 : 0;
+    // base / top / bot / ringColor / gridColor (each as vec4 with .a = 0 padding)
+    const writeRgb = (off, css, fallback) => {
+      const c = cssToGpuColor(css || '', fallback);
+      data[off]     = c.r;
+      data[off + 1] = c.g;
+      data[off + 2] = c.b;
+      data[off + 3] = 0;
+    };
+    writeRgb(12, bg.base,                       { r: 0, g: 0, b: 0, a: 1 });
+    writeRgb(16, bg.topColor || bg.base,        { r: 0, g: 0, b: 0, a: 1 });
+    writeRgb(20, bg.botColor || bg.base,        { r: 0, g: 0, b: 0, a: 1 });
+    writeRgb(24, bg.ringColor || 'rgba(120,80,30,0.5)',  { r: 120/255, g: 80/255, b: 30/255, a: 0.5 });
+    writeRgb(28, bg.gridColor || 'rgba(0,255,170,0.5)',  { r: 0, g: 1, b: 170/255, a: 0.5 });
+    // spots[8] + spotCols[8]: drift positions and pre-multiplied colours
+    const spotCols = Array.isArray(bg.spotColors) ? bg.spotColors : null;
+    const fallbackCol = bg.spotColor || 'rgba(255,255,255,0.10)';
+    for (let i = 0; i < MAX_SPOTS; i++) {
+      const s = this._spots[i];
+      const cx = s.ax + s.ox1 * Math.sin(t * s.w1 + s.phx);
+      const cy = s.ay + s.oy1 * Math.cos(t * s.w2 + s.phy);
+      data[32 + i * 4]     = cx;
+      data[32 + i * 4 + 1] = cy;
+      data[32 + i * 4 + 2] = s.r;
+      data[32 + i * 4 + 3] = 0;
+      const colSrc = spotCols ? spotCols[i % spotCols.length] : fallbackCol;
+      const c = cssToGpuColor(colSrc, { r: 1, g: 1, b: 1, a: 0.10 });
+      // Pre-multiply rgb by source alpha so the shader can add directly.
+      data[64 + i * 4]     = c.r * c.a;
+      data[64 + i * 4 + 1] = c.g * c.a;
+      data[64 + i * 4 + 2] = c.b * c.a;
+      data[64 + i * 4 + 3] = 0;
+    }
+    this.device.queue.writeBuffer(
+      this._bgUniformBuffer, 0, data.buffer, data.byteOffset, data.byteLength,
+    );
+
     const pass = this._frameEncoder.beginRenderPass({
       colorAttachments: [{
         view: this._frameView,
-        clearValue,
+        // Clear value irrelevant — fragment writes every pixel.
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
         loadOp: 'clear',
         storeOp: 'store',
       }],
     });
+    pass.setPipeline(this._bgPipeline);
+    pass.setBindGroup(0, this._bgBindGroup);
+    pass.draw(3, 1, 0, 0);             // big-triangle, 3 verts, no VBO
     pass.end();
   }
 
@@ -2059,7 +2297,8 @@ export class WebGPURenderer extends RendererBase {
       if (c.state === 'SPLITTING') {
         const env = Math.sin(c.splitProgress * Math.PI);
         data[j + 14] = env * 0.12;
-        data[j + 15] = 1 - 0.8 * env;
+        // Linear face fade: 0.5 at split start → 1.0 at split end.
+        data[j + 15] = 0.5 + 0.5 * c.splitProgress;
       } else {
         data[j + 14] = 0;
         data[j + 15] = 1;
@@ -2485,6 +2724,7 @@ export class WebGPURenderer extends RendererBase {
     tryDestroy(this._particleInstanceBuffer);
     tryDestroy(this._faceUniformBuffer);
     tryDestroy(this._faceInstanceBuffer);
+    tryDestroy(this._bgUniformBuffer);
     tryDestroy(this._decorUniformBuffer);
     tryDestroy(this._decorLineBuffer);
     tryDestroy(this._decorTriBuffer);
@@ -2503,6 +2743,7 @@ export class WebGPURenderer extends RendererBase {
     this._decorUniformBuffer = null;
     this._decorLineBuffer = null;
     this._decorTriBuffer = null;
+    this._bgUniformBuffer = null;
     this._diskPipeline = null;
     this._diskBindGroup = null;
     this._metaPolyPipeline = null;
@@ -2517,6 +2758,8 @@ export class WebGPURenderer extends RendererBase {
     this._particleBindGroup = null;
     this._facePipeline = null;
     this._faceBindGroup = null;
+    this._bgPipeline = null;
+    this._bgBindGroup = null;
     this._decorLinePipeline = null;
     this._decorTriPipeline = null;
     this._decorBindGroup = null;

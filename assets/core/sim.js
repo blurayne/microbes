@@ -11,6 +11,12 @@ import {
   pickRandomActiveType,
 } from './state.js';
 
+// Push-apart impulse from finishSplit() ramps in linearly over this
+// duration so the new cells don't snap outward at the moment of
+// transition. 0.30 s reads as "soft drift apart" without delaying the
+// physics noticeably.
+const SPLIT_IMPULSE_FADE_S = 0.30;
+
 export class Sim {
   constructor() {
     /** @type {Array} */
@@ -80,6 +86,11 @@ export class Sim {
       splitTimer: this.rollSplitTimer(t),
       splitProgress: 0,
       splitAngle: 0,
+      // Set in finishSplit; consumed in update(dt) to fade the
+      // push-apart impulse in over SPLIT_IMPULSE_FADE_S.
+      splitImpulseDx: 0,
+      splitImpulseDy: 0,
+      splitImpulseT: 0,
       bondTimer: 0,
       phase: Math.random() * Math.PI * 2,
       orientation: Math.random() * Math.PI * 2,
@@ -127,8 +138,9 @@ export class Sim {
     } else {
       cell.splitAngle = Math.random() * Math.PI * 2;
     }
-    cell.vx *= 0.3;
-    cell.vy *= 0.3;
+    // Keep the parent's full pre-split velocity. The SPLITTING-state
+    // branch in update() integrates position + friction so the cell
+    // drifts naturally throughout the split.
   }
 
   finishSplit(cell, idx) {
@@ -139,17 +151,24 @@ export class Sim {
     const right = this.makeCell(cell.x + cx * sep, cell.y + cy * sep, cell.r, cell.type);
     left.orientation = cell.orientation;
     right.orientation = cell.orientation;
+    // Inherit parent's velocity. The push-apart impulse below is NOT
+    // applied directly — we store it as splitImpulseRemaining* and ramp
+    // it in over SPLIT_IMPULSE_FADE_S so the cells don't suddenly snap
+    // outward at the moment of transition.
     left.vx = cell.vx; left.vy = cell.vy;
     right.vx = cell.vx; right.vy = cell.vy;
 
-    if (S.splitMode === 'pushApart') {
-      const speed = 70;
-      left.vx -= cx * speed; left.vy -= cy * speed;
-      right.vx += cx * speed; right.vy += cy * speed;
-    } else if (S.splitMode === 'bondDrift') {
-      const speed = 14;
-      left.vx -= cx * speed; left.vy -= cy * speed;
-      right.vx += cx * speed; right.vy += cy * speed;
+    const speed = (S.splitMode === 'pushApart') ? 70
+                : (S.splitMode === 'bondDrift') ? 14 : 0;
+    if (speed !== 0) {
+      left.splitImpulseDx = -cx * speed;
+      left.splitImpulseDy = -cy * speed;
+      left.splitImpulseT = SPLIT_IMPULSE_FADE_S;
+      right.splitImpulseDx = cx * speed;
+      right.splitImpulseDy = cy * speed;
+      right.splitImpulseT = SPLIT_IMPULSE_FADE_S;
+    }
+    if (S.splitMode === 'bondDrift') {
       left.bondTimer = BOND_DURATION;
       right.bondTimer = BOND_DURATION;
     }
@@ -400,6 +419,26 @@ export class Sim {
             if (sp > maxV) { c.vx = c.vx / sp * maxV; c.vy = c.vy / sp * maxV; }
           }
 
+          // Split-end impulse fade: ramp the push-apart velocity in
+          // linearly over SPLIT_IMPULSE_FADE_S instead of snapping it
+          // on at finishSplit. Each frame applies (dt / remaining)
+          // of the still-pending impulse → total integrates to the
+          // original full kick over the fade window.
+          if (c.splitImpulseT > 0) {
+            const stepDt = Math.min(dt, c.splitImpulseT);
+            const frac = stepDt / c.splitImpulseT;
+            c.vx += c.splitImpulseDx * frac;
+            c.vy += c.splitImpulseDy * frac;
+            c.splitImpulseDx *= (1 - frac);
+            c.splitImpulseDy *= (1 - frac);
+            c.splitImpulseT -= stepDt;
+            if (c.splitImpulseT < 1e-4) {
+              c.splitImpulseDx = 0;
+              c.splitImpulseDy = 0;
+              c.splitImpulseT = 0;
+            }
+          }
+
           let frictionEff = S.friction * (moveCfg.friction || 1);
           if (S.splitMode === 'bondDrift' && c.bondTimer > 0) {
             c.bondTimer -= dt;
@@ -415,6 +454,15 @@ export class Sim {
         }
       } else if (c.state === 'SPLITTING') {
         c.splitProgress += dt / SPLIT_DURATION;
+        // Keep moving with the original velocity — same friction model
+        // as the NORMAL block, but no AI / goal / Brownian terms so the
+        // splitting cell drifts naturally without picking up new forces.
+        c.x += c.vx * dt;
+        c.y += c.vy * dt;
+        const fricEff = Math.max(0, Math.min(1, S.friction));
+        const dampingPerSec = Math.max(0.001, Math.pow(0.05, fricEff));
+        const k = Math.pow(dampingPerSec, dt);
+        c.vx *= k; c.vy *= k;
         if (c.splitProgress >= 1) {
           this.finishSplit(c, i);
         }
