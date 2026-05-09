@@ -26,6 +26,7 @@ export const DEFAULTS = {
   randomSplit: false,
   metaSplit: true,          // metaball merge between the two halves while SPLITTING
   metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu / pixi alike.
+  metaOutlineMode: 'edge',  // 'edge' | 'sdf' | 'polygon' — outline style for the merged blob during SPLITTING. 'edge': trace blurred-mask threshold (1 shared rim). 'sdf': stroke each half polygon (2 rims). 'polygon': polygon-union rim, sharp/no-blur.
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
@@ -84,6 +85,8 @@ export function loadSettings() {
     if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
     const validMetaRtModes = ['bbox', 'fullCanvas', 'sharedMax'];
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
+    const validMetaOutlineModes = ['edge', 'sdf', 'polygon'];
+    if (!validMetaOutlineModes.includes(parsed.metaOutlineMode)) parsed.metaOutlineMode = DEFAULTS.metaOutlineMode;
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Migrate legacy `highlightColor` field to the new `useHighlight` toggle.

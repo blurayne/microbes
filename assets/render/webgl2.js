@@ -412,6 +412,9 @@ uniform float u_gr;             // gradient radius in physical px
 uniform float u_K;              // threshold contrast (field.contrast)
 uniform vec3 u_cytoTop;
 uniform vec3 u_cytoBot;
+uniform int u_outlineMode;      // 0 = edge (rim from blurred mask), else no rim here (sdf/polygon use a separate line pass)
+uniform vec3 u_outlineColor;    // rim colour for edge mode
+uniform float u_outlineWidth;   // half-width of the rim band in normalised mask-alpha units (~0.06)
 out vec4 outColor;
 void main() {
   // gl_FragCoord is canvas-window coords (bottom-left). Translate to
@@ -434,8 +437,18 @@ void main() {
     alphaMul = 1.0 - (t - 0.55) / 0.45;
   }
   float thresholded = clamp(u_K * m.a - u_K * 0.5, 0.0, 1.0);
-  float a = thresholded * alphaMul;
-  outColor = vec4(col, a);
+  float bodyA = thresholded * alphaMul;
+
+  // Edge-mode rim: thin band along the blurred-mask 0.5 contour, which
+  // tracks the metaball silhouette exactly. sdf / polygon modes draw
+  // their rims via the decoration line pipeline so this contributes 0.
+  float outlineA = 0.0;
+  if (u_outlineMode == 0) {
+    outlineA = 1.0 - smoothstep(0.0, max(u_outlineWidth, 0.001), abs(m.a - 0.5));
+  }
+  vec3 finalRGB = mix(col, u_outlineColor, outlineA);
+  float finalA = max(bodyA, outlineA);
+  outColor = vec4(finalRGB, finalA);
 }`;
 
 const INSTANCE_FLOATS = 21; // see _diskVao layout in init()
@@ -626,16 +639,26 @@ in vec2 v_uv;
 in vec4 v_inst;       // (.., .., .., mouthKind)
 in vec4 v_face1;      // (eyesCount, eyeR, eyeY, pupilR)
 in vec4 v_face2;      // (lookX, lookY, mouthW, blink)
-in vec4 v_face3;      // (mouthY, phase, _, _)
+in vec4 v_face3;      // (mouthY, phase, blur, _)
 in vec3 v_mouthCol;
 uniform float u_time;
 out vec4 outColor;
 
 const float FACE_SCALE = 1.2;
 
+// Edge-widening smoothstep — approximates Gaussian blur by extending the
+// AA band by v_face3.z (= blur amount in body-radius units). Replaces
+// every fixed smoothstep edge below so the face softens uniformly during
+// SPLITTING. Cheap (no extra texture sampling); good enough at the
+// modest blur amounts we use (≤ 0.10).
+float sstep(float a, float b, float x) {
+  float blur = v_face3.z;
+  return smoothstep(a - blur, b + blur, x);
+}
+
 // Soft disc fill: returns alpha 0..1 inside, fades to 0 outside r.
 float discA(vec2 p, vec2 c, float r) {
-  return 1.0 - smoothstep(r * 0.92, r, length(p - c));
+  return 1.0 - sstep(r * 0.92, r, length(p - c));
 }
 
 // Stroked arc segment: thin band along an arc from a0 to a1, centre c, radius r,
@@ -643,7 +666,7 @@ float discA(vec2 p, vec2 c, float r) {
 float arcA(vec2 p, vec2 c, float r, float hw, float a0, float a1) {
   vec2 d = p - c;
   float dist = abs(length(d) - r);
-  float band = 1.0 - smoothstep(hw * 0.5, hw, dist);
+  float band = 1.0 - sstep(hw * 0.5, hw, dist);
   float ang = atan(d.y, d.x);
   // Wrap into [-PI, PI].
   float lo = a0;
@@ -686,25 +709,25 @@ void main() {
       if (blink > 0.5) {
         // Squint slit.
         float ed = length(vec2(d.x / eyeR, d.y / (eyeR * 0.12)));
-        float wA = 1.0 - smoothstep(0.92, 1.0, ed);
+        float wA = 1.0 - sstep(0.92, 1.0, ed);
         col = mix(col, vec3(1.0), wA);
         a = max(a, wA);
       } else {
         float ed = length(d) / eyeR;
         if (ed < 1.05) {
-          float white = 1.0 - smoothstep(0.92, 1.0, ed);
+          float white = 1.0 - sstep(0.92, 1.0, ed);
           col = mix(col, vec3(1.0), white);
           a = max(a, white);
           // Pupil
           vec2 pupilCentre = ec + look * (eyeR * 0.45);
           float pd = length(v_uv - pupilCentre) / pupilR;
-          float pupilA = 1.0 - smoothstep(0.92, 1.05, pd);
+          float pupilA = 1.0 - sstep(0.92, 1.05, pd);
           col = mix(col, vec3(0.06, 0.07, 0.09), pupilA);
           a = max(a, pupilA);
           // Glint
           vec2 glintCentre = pupilCentre - vec2(pupilR * 0.35, pupilR * 0.35);
           float gd = length(v_uv - glintCentre) / (pupilR * 0.30);
-          float glintA = (1.0 - smoothstep(0.92, 1.05, gd)) * 0.85;
+          float glintA = (1.0 - sstep(0.92, 1.05, gd)) * 0.85;
           col = mix(col, vec3(1.0), glintA);
         }
       }
@@ -727,7 +750,7 @@ void main() {
       float dripPhase = fract(u_time * 0.6 + phase);
       vec2 dripC = vec2(mouthW * 0.25, mouthY + mouthW * 0.25 + dripPhase * mouthW * 0.8);
       vec2 dr = (v_uv - dripC) / vec2(mouthW * 0.10, mouthW * 0.16);
-      float dripA = (1.0 - smoothstep(0.85, 1.0, length(dr))) * (1.0 - dripPhase);
+      float dripA = (1.0 - sstep(0.85, 1.0, length(dr))) * (1.0 - dripPhase);
       col = mix(col, vec3(0.47, 0.86, 0.51), dripA);
       a = max(a, dripA);
     }
@@ -745,33 +768,33 @@ void main() {
       float seg = floor((xrel + 1.0) * 2.5);
       float yTarget = mouthY + (mod(seg, 2.0) < 0.5 ? 0.0 : mouthW * 0.18);
       float dy = abs(v_uv.y - yTarget);
-      float zigA = 1.0 - smoothstep(0.02, 0.04, dy);
+      float zigA = 1.0 - sstep(0.02, 0.04, dy);
       col = mix(col, v_mouthCol, zigA);
       a = max(a, zigA);
     }
   } else if (mouthKind == 4) {
     // FANGS — open mouth ellipse + two white triangles
     vec2 dn = d / vec2(mouthW, mouthW * 0.45);
-    float open = 1.0 - smoothstep(0.92, 1.0, length(dn));
+    float open = 1.0 - sstep(0.92, 1.0, length(dn));
     col = mix(col, v_mouthCol, open);
     a = max(a, open);
     // Approximate fangs with two small bright wedges below the mouth ellipse.
     vec2 fL = vec2(-mouthW * 0.40, mouthY + mouthW * 0.10);
     vec2 fR = vec2( mouthW * 0.40, mouthY + mouthW * 0.10);
-    float fLA = (1.0 - smoothstep(0.85, 1.0, length((v_uv - fL) / vec2(mouthW * 0.10, mouthW * 0.32)))) * 1.0;
-    float fRA = (1.0 - smoothstep(0.85, 1.0, length((v_uv - fR) / vec2(mouthW * 0.10, mouthW * 0.32)))) * 1.0;
+    float fLA = (1.0 - sstep(0.85, 1.0, length((v_uv - fL) / vec2(mouthW * 0.10, mouthW * 0.32)))) * 1.0;
+    float fRA = (1.0 - sstep(0.85, 1.0, length((v_uv - fR) / vec2(mouthW * 0.10, mouthW * 0.32)))) * 1.0;
     col = mix(col, vec3(1.0), max(fLA, fRA));
     a = max(a, max(fLA, fRA));
   } else if (mouthKind == 5) {
     // TONGUE — open mouth + pink tongue ellipse below
     vec2 dn = d / vec2(mouthW, mouthW * 0.40);
-    float open = 1.0 - smoothstep(0.92, 1.0, length(dn));
+    float open = 1.0 - sstep(0.92, 1.0, length(dn));
     col = mix(col, v_mouthCol, open);
     a = max(a, open);
     float wag = sin(u_time * 5.0 + phase) * mouthW * 0.18;
     vec2 tc = vec2(wag, mouthY + mouthW * 0.30);
     vec2 td = (v_uv - tc) / vec2(mouthW * 0.32, mouthW * 0.22);
-    float tA = 1.0 - smoothstep(0.85, 1.0, length(td));
+    float tA = 1.0 - sstep(0.85, 1.0, length(td));
     col = mix(col, vec3(1.0, 0.54, 0.63), tA);
     a = max(a, tA);
   }
@@ -779,6 +802,23 @@ void main() {
   if (a <= 0.0) discard;
   outColor = vec4(col, a);
 }`;
+
+// Point-in-polygon ray-cast test. `verts` is a flat (x, y) Float64Array
+// of N vertices; tests whether (px, py) is inside the closed polygon.
+// Used by 'polygon' metaSplit outline mode to skip segments whose
+// midpoint falls inside the partner half (approximate union).
+function pointInPoly(px, py, verts) {
+  const n = verts.length / 2;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i, i++) {
+    const ix = verts[i * 2], iy = verts[i * 2 + 1];
+    const jx = verts[j * 2], jy = verts[j * 2 + 1];
+    if (((iy > py) !== (jy > py)) && (px < (jx - ix) * (py - iy) / (jy - iy + 1e-12) + ix)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
 
 function hexToVec3(hex) {
   let h = (hex || '#000').replace('#', '');
@@ -1153,6 +1193,9 @@ export class WebGL2Renderer extends RendererBase {
       K: gl.getUniformLocation(this._metaTintProg, 'u_K'),
       cytoTop: gl.getUniformLocation(this._metaTintProg, 'u_cytoTop'),
       cytoBot: gl.getUniformLocation(this._metaTintProg, 'u_cytoBot'),
+      outlineMode: gl.getUniformLocation(this._metaTintProg, 'u_outlineMode'),
+      outlineColor: gl.getUniformLocation(this._metaTintProg, 'u_outlineColor'),
+      outlineWidth: gl.getUniformLocation(this._metaTintProg, 'u_outlineWidth'),
     };
 
     this._metaPolyVbo = gl.createBuffer();
@@ -1582,6 +1625,15 @@ export class WebGL2Renderer extends RendererBase {
       gl.uniform1f(this._metaTintU.K, fld.contrast);
       gl.uniform3fv(this._metaTintU.cytoTop, hexToVec3(cc.cytoTop));
       gl.uniform3fv(this._metaTintU.cytoBot, hexToVec3(cc.cytoBot));
+      // Outline mode: 0 = trace blob edge in this shader; 1/2 (sdf/
+      // polygon) emit lines via the decoration pipeline so we suppress
+      // the in-shader rim. Width is in normalised mask-alpha units;
+      // ~0.06 reads as a clean ~1-2 px rim at default zoom.
+      const outlineModeIdx = (S.metaOutlineMode === 'sdf') ? 1
+        : (S.metaOutlineMode === 'polygon') ? 2 : 0;
+      gl.uniform1i(this._metaTintU.outlineMode, outlineModeIdx);
+      gl.uniform3fv(this._metaTintU.outlineColor, hexToVec3(cc.cytoBot));
+      gl.uniform1f(this._metaTintU.outlineWidth, 0.06);
       gl.bindTexture(gl.TEXTURE_2D, rt.texA);
       gl.uniform1i(this._metaTintU.src, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -1631,10 +1683,13 @@ export class WebGL2Renderer extends RendererBase {
       const mc = (CELL_TYPES[c.type] || CELL_TYPES.neutrophil).colors;
       const mcRgb = hexToVec3(mc.nucleus);
 
+      // Face follows each shape entry. During SPLITTING getShapes
+      // emits two entries with correct half centres + radius
+      // (shape.js:96-97); for NORMAL cells s.{x,y,r} === c.{x,y,r}.
       const j = n * FACE_INSTANCE_FLOATS;
-      data[j]     = c.x;
-      data[j + 1] = c.y;
-      data[j + 2] = c.r;
+      data[j]     = s.x;
+      data[j + 1] = s.y;
+      data[j + 2] = s.r;
       data[j + 3] = mouthKind;
       data[j + 4] = eyesCount;
       data[j + 5] = cfg.eyeR != null ? cfg.eyeR : 0.18;
@@ -1646,7 +1701,12 @@ export class WebGL2Renderer extends RendererBase {
       data[j + 11] = blink;
       data[j + 12] = 0.18;           // mouthY
       data[j + 13] = c.phase || 0;
-      data[j + 14] = 0;
+      // Blur during SPLITTING (sine envelope over splitProgress, peaks
+      // mid-split). Body-radius units; widens every smoothstep edge in
+      // the face shader. Cap below 0.10 so eyes/pupils don't dissolve.
+      data[j + 14] = (c.state === 'SPLITTING')
+        ? Math.sin(c.splitProgress * Math.PI) * 0.08
+        : 0;
       data[j + 15] = 0;
       data[j + 16] = mcRgb[0];
       data[j + 17] = mcRgb[1];
@@ -1690,8 +1750,66 @@ export class WebGL2Renderer extends RendererBase {
         case 'yReceptorsMany':    this._decorY(s, theme, time, 14); break;
       }
     }
+    // metaSplit outline modes 'sdf' / 'polygon' emit polygon strokes
+    // via this same line pipeline. 'edge' is handled inside the tint
+    // shader so emit nothing here.
+    if (S.metaSplit && (S.metaOutlineMode === 'sdf' || S.metaOutlineMode === 'polygon')) {
+      this._emitMetaSplitOutlines(shapes, time);
+    }
     if (this._decorLines.length === 0 && this._decorTris.length === 0) return;
     this._uploadAndDrawDecorations();
+  }
+
+  // Pair up SPLITTING shapes by cell.id, emit each half's wobble
+  // polygon as 32 line segments (cytoBot colour). For 'polygon' mode,
+  // skip segments whose midpoint falls inside the partner polygon —
+  // approximate union of the two halves (sub-ms even with several
+  // pairs: 32 edges × 64 segment midpoints = 2048 ray-cast ops).
+  _emitMetaSplitOutlines(shapes, time) {
+    const N = WOBBLE_VERTS;
+    const pairs = new Map();
+    for (const s of shapes) {
+      const c = s.cell;
+      if (c.state !== 'SPLITTING') continue;
+      let bucket = pairs.get(c.id);
+      if (!bucket) { bucket = []; pairs.set(c.id, bucket); }
+      bucket.push(s);
+    }
+    if (pairs.size === 0) return;
+    const skipUnion = (S.metaOutlineMode === 'polygon');
+    for (const halves of pairs.values()) {
+      // Pre-compute each half's polygon verts (we need both for the
+      // point-in-polygon test in 'polygon' mode).
+      const polys = halves.map((s) => {
+        const verts = new Float64Array(N * 2);
+        for (let i = 0; i < N; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], time);
+          verts[i * 2]     = v.x;
+          verts[i * 2 + 1] = v.y;
+        }
+        return verts;
+      });
+      for (let hi = 0; hi < halves.length; hi++) {
+        const c = halves[hi].cell;
+        const cc = cellColors(c);
+        const col = hexToVec3(cc.cytoBot);
+        const verts = polys[hi];
+        const partner = (skipUnion && polys.length === 2) ? polys[1 - hi] : null;
+        for (let i = 0; i < N; i++) {
+          const a = i * 2;
+          const b = ((i + 1) % N) * 2;
+          if (partner) {
+            const mx = (verts[a] + verts[b]) * 0.5;
+            const my = (verts[a + 1] + verts[b + 1]) * 0.5;
+            if (pointInPoly(mx, my, partner)) continue;
+          }
+          this._pushLine(
+            verts[a], verts[a + 1], verts[b], verts[b + 1],
+            col[0], col[1], col[2], 1.0,
+          );
+        }
+      }
+    }
   }
 
   _pushLine(x1, y1, x2, y2, r, g, b, a) {

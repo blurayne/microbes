@@ -35,6 +35,22 @@ import { RendererBase } from './renderer.js';
 const PIXI_URL = new URL('../vendor/pixi.min.mjs', import.meta.url).href;
 
 let _pixiPromise = null;
+// Point-in-polygon ray-cast test. `verts` is a flat (x, y) Float64Array
+// of N vertices; tests whether (px, py) is inside the closed polygon.
+// Used by 'edge' / 'polygon' metaSplit outline modes.
+function pointInPoly(px, py, verts) {
+  const n = verts.length / 2;
+  let inside = false;
+  for (let i = 0, j = n - 1; i < n; j = i, i++) {
+    const ix = verts[i * 2], iy = verts[i * 2 + 1];
+    const jx = verts[j * 2], jy = verts[j * 2 + 1];
+    if (((iy > py) !== (jy > py)) && (px < (jx - ix) * (py - iy) / (jy - iy + 1e-12) + ix)) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 function loadPixi() {
   if (!_pixiPromise) {
     _pixiPromise = import(/* @vite-ignore */ PIXI_URL);
@@ -63,6 +79,8 @@ export class PixiRenderer extends RendererBase {
     this.nucleiGfx = null;
     this.particlesGfx = null;
     this.facesGfx = null;
+    this.facesBlurGfx = null;
+    this.metaOutlineGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
 
@@ -151,6 +169,17 @@ export class PixiRenderer extends RendererBase {
     this.nucleiContainer.filters = [new PIXI.BlurFilter({ strength: 2, quality: 3 })];
     this.particlesGfx = new PIXI.Graphics();
     this.facesGfx = new PIXI.Graphics();
+    // Face blur buckets for SPLITTING cells. Each bucket has a static
+    // BlurFilter; per-cell blur strength is quantized to the nearest
+    // bucket. Sine envelope (sin(p·π) · maxBlur) over splitProgress.
+    // 4 buckets at 1.5/3.0/4.5/6.0 px = visually smooth with bounded
+    // filter cost.
+    this.faceBlurStrengths = [1.5, 3.0, 4.5, 6.0];
+    this.facesBlurGfx = this.faceBlurStrengths.map((strength) => {
+      const g = new PIXI.Graphics();
+      g.filters = [new PIXI.BlurFilter({ strength, quality: 3 })];
+      return g;
+    });
     this.selectionGfx = new PIXI.Graphics();
     this.debugGfx = new PIXI.Graphics();
     // Z-order matches canvas2d's draw order: body+granules → nuclei →
@@ -161,6 +190,7 @@ export class PixiRenderer extends RendererBase {
     this.worldLayer.addChild(this.nucleiContainer);
     this.worldLayer.addChild(this.particlesGfx);
     this.worldLayer.addChild(this.facesGfx);
+    for (const g of this.facesBlurGfx) this.worldLayer.addChild(g);
     this.worldLayer.addChild(this.selectionGfx);
     this.worldLayer.addChild(this.debugGfx);
 
@@ -176,9 +206,16 @@ export class PixiRenderer extends RendererBase {
     this.pairContainer.addChild(this.pairPolyGfx);
     this.pairContainer.filters = [this.pairBlur, this.pairThreshold];
 
+    // Outline strokes for the metaball blob ('sdf' / 'edge' / 'polygon'
+    // modes). Rendered in screen-pixel space directly above splittingLayer
+    // so the rim is visible over the fused blob. Emitted from drawCells
+    // in screen coords (world * cam.scale + cam.tx).
+    this.metaOutlineGfx = new PIXI.Graphics();
+
     app.stage.addChild(this.bgLayer);
     app.stage.addChild(this.worldLayer);
     app.stage.addChild(this.splittingLayer);
+    app.stage.addChild(this.metaOutlineGfx);
   }
 
   // Map alpha through K*a - K/2 (clamps in the framebuffer to a hard
@@ -451,9 +488,81 @@ export class PixiRenderer extends RendererBase {
     // animation is its own thing.
     this._drawNucleiPass(time);
 
+    // metaSplit outline strokes for each pair (above the metaball blob).
+    // 'sdf' strokes both halves; 'polygon' / 'edge' stroke the union.
+    this._drawMetaSplitOutlines(splittingByCellId, time);
+
     // Cartoon-face overlay (eyes + mouth). Always clear so toggling
     // S.cartoon off mid-run drops the faces immediately.
     this._drawFacesPass(shapes, time);
+  }
+
+  _drawMetaSplitOutlines(splittingByCellId, time) {
+    const og = this.metaOutlineGfx;
+    if (!og) return;
+    og.clear();
+    if (!splittingByCellId || splittingByCellId.size === 0) return;
+    const mode = S.metaOutlineMode;
+    const useUnion = (mode === 'edge' || mode === 'polygon');
+    const useSdf   = (mode === 'sdf');
+    if (!useUnion && !useSdf) return;
+    const cam = this.camera;
+    const membraneAlpha = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
+    const strokeWidth = Math.max(2, (S.outlinePx || 5) * 0.85);
+    // 'edge' mode applies a soft Pixi BlurFilter to the whole layer for
+    // the duration of the call to approximate the metaball silhouette.
+    if (mode === 'edge') {
+      if (!this._metaOutlineBlur) this._metaOutlineBlur = new PIXI.BlurFilter({ strength: 1.5, quality: 3 });
+      og.filters = [this._metaOutlineBlur];
+    } else {
+      og.filters = [];
+    }
+    for (const halves of splittingByCellId.values()) {
+      const polys = halves.map((s) => {
+        const verts = new Float64Array(WOBBLE_VERTS * 2);
+        for (let i = 0; i < WOBBLE_VERTS; i++) {
+          const v = shapeVertex(s, THETA_TABLE[i], time);
+          // World -> screen px (this layer is screen-space, not under worldLayer).
+          verts[i * 2]     = v.x * cam.scale + cam.tx;
+          verts[i * 2 + 1] = v.y * cam.scale + cam.ty;
+        }
+        return verts;
+      });
+      const cytoBot = cellColors(halves[0].cell).cytoBot || '#d36699';
+      for (let hi = 0; hi < halves.length; hi++) {
+        const verts = polys[hi];
+        const partner = (useUnion && polys.length === 2) ? polys[1 - hi] : null;
+        // Build a polyline. Skipped segments break the path; emit each
+        // contiguous run as its own poly() so the stroke stays clean.
+        let runStart = -1;
+        for (let i = 0; i < WOBBLE_VERTS; i++) {
+          const a = i * 2;
+          const b = ((i + 1) % WOBBLE_VERTS) * 2;
+          const skip = partner
+            && pointInPoly((verts[a] + verts[b]) * 0.5, (verts[a + 1] + verts[b + 1]) * 0.5, partner);
+          if (skip) {
+            if (runStart >= 0) {
+              this._strokePixiRun(og, verts, runStart, i, cytoBot, strokeWidth, membraneAlpha);
+              runStart = -1;
+            }
+            continue;
+          }
+          if (runStart < 0) runStart = i;
+        }
+        if (runStart >= 0) {
+          this._strokePixiRun(og, verts, runStart, WOBBLE_VERTS, cytoBot, strokeWidth, membraneAlpha);
+        }
+      }
+    }
+  }
+
+  _strokePixiRun(og, verts, fromIdx, toIdx, color, width, alpha) {
+    const pts = [];
+    for (let k = fromIdx; k < toIdx; k++) {
+      pts.push(verts[k * 2], verts[k * 2 + 1]);
+    }
+    pts.push(verts[(toIdx % WOBBLE_VERTS) * 2], verts[(toIdx % WOBBLE_VERTS) * 2 + 1]);
+    og.poly(pts, false).stroke({ color, width, alpha, alignment: 0.5 });
   }
 
   // Per-kind nucleus rendering, ported from canvas2D's _drawNucleus.
@@ -553,26 +662,47 @@ export class PixiRenderer extends RendererBase {
   // (in worldLayer order) so the eye whites read clean against the
   // cytoplasm, but below the selection ring.
   _drawFacesPass(shapes, t) {
-    const g = this.facesGfx;
-    g.clear();
+    const gNorm = this.facesGfx;
+    gNorm.clear();
+    for (const bg of this.facesBlurGfx) bg.clear();
     if (!S.cartoon || !shapes || shapes.length === 0) return;
     const theme = currentTheme();
     const outline = (theme && theme.outline && theme.outline.color) || '#000000';
     const cam = this.camera;
     const lw = Math.max(1.5, (S.outlinePx || 5) * 0.6) / Math.max(0.0001, cam.scale);
     const now = (typeof performance !== 'undefined') ? performance.now() : 0;
+    const blurStrengths = this.faceBlurStrengths;
+    const maxBlurPx = blurStrengths[blurStrengths.length - 1];
 
     for (const s of shapes) {
       const c = s.cell;
       const cfg = FACE[c.type] || FACE.default;
       if (!cfg.eyes && cfg.mouth === 'none') continue;
+      // Dispatch per-cell into the right blur bucket. Sine envelope
+      // over splitProgress; quantize to nearest available bucket so we
+      // don't allocate a Graphics per face.
+      let g = gNorm;
+      if (c.state === 'SPLITTING') {
+        const want = Math.sin(c.splitProgress * Math.PI) * maxBlurPx;
+        if (want > 0.5) {
+          let bestIdx = 0, bestErr = Infinity;
+          for (let i = 0; i < blurStrengths.length; i++) {
+            const err = Math.abs(blurStrengths[i] - want);
+            if (err < bestErr) { bestErr = err; bestIdx = i; }
+          }
+          g = this.facesBlurGfx[bestIdx];
+        }
+      }
 
       // Blink: re-arm timer same as the canvas2d / webgl2 paths so the
       // 120 ms squint fires every 3-6.5 s.
       if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
       const blinking = (c.nextBlink - now) < 120 && (c.nextBlink - now) > 0;
 
-      const cx = c.x, cy = c.y;
+      // Face follows each shape entry. During SPLITTING getShapes
+      // emits two entries with correct half centres + radius
+      // (shape.js:96-97); for NORMAL cells s.{x,y,r} === c.{x,y,r}.
+      const cx = s.x, cy = s.y, cr = s.r;
       // Look direction: velocity-driven, falls back to alarm target.
       let lookX = c.vx, lookY = c.vy;
       if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
@@ -584,14 +714,14 @@ export class PixiRenderer extends RendererBase {
       // ---- Eyes ----
       if (cfg.eyes >= 1) {
         const FACE_SCALE = 1.2;
-        const eyeR = c.r * cfg.eyeR * FACE_SCALE;
-        const eyeY = cy + c.r * cfg.eyeY;
-        const pupilR = c.r * cfg.pupilR * FACE_SCALE;
+        const eyeR = cr * cfg.eyeR * FACE_SCALE;
+        const eyeY = cy + cr * cfg.eyeY;
+        const pupilR = cr * cfg.pupilR * FACE_SCALE;
         const pupilOff = eyeR * 0.45;
         const pdx = (lookX / lm) * pupilOff;
         const pdy = (lookY / lm) * pupilOff;
         const eyeXs = cfg.eyes === 2
-          ? [cx - c.r * 0.22 * FACE_SCALE, cx + c.r * 0.22 * FACE_SCALE]
+          ? [cx - cr * 0.22 * FACE_SCALE, cx + cr * 0.22 * FACE_SCALE]
           : [cx];
         for (const ex of eyeXs) {
           if (blinking) {
@@ -620,8 +750,8 @@ export class PixiRenderer extends RendererBase {
 
       // ---- Mouth ----
       if (cfg.mouth && cfg.mouth !== 'none') {
-        const mY = cy + c.r * 0.18;
-        const mW = c.r * 0.34 * 1.2;
+        const mY = cy + cr * 0.18;
+        const mW = cr * 0.34 * 1.2;
         const cc = cellColors(c);
         const mouthColor = cc.nucleus || '#1d1c5a';
         const mlw = lw * 1.3;
@@ -918,6 +1048,8 @@ export class PixiRenderer extends RendererBase {
     this.nucleiGfx = null;
     this.particlesGfx = null;
     this.facesGfx = null;
+    this.facesBlurGfx = null;
+    this.metaOutlineGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
     this.splittingLayer = null;
