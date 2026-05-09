@@ -693,7 +693,8 @@ export class PixiRenderer extends RendererBase {
       let faceAlpha = 1;
       if (c.state === 'SPLITTING') {
         const env = Math.sin(c.splitProgress * Math.PI);
-        faceAlpha = 1 - 0.8 * env;
+        // Linear face fade: 0.5 at split start → 1.0 at split end.
+        faceAlpha = 0.5 + 0.5 * c.splitProgress;
         const want = env * maxBlurPx;
         if (want > 0.5) {
           let bestIdx = 0, bestErr = Infinity;
