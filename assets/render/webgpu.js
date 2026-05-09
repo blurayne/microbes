@@ -1,9 +1,7 @@
 // Microbes — hand-rolled WebGPU renderer.
 //
 // Companion to assets/render/webgl2.js — same author, same layering,
-// using the WebGPU API + WGSL shaders. Independent from Pixi's
-// internal WebGPU backend (reachable via the "Pixi (WebGPU)" dropdown
-// option).
+// using the WebGPU API + WGSL shaders.
 //
 // Coverage: instanced SDF disks (round / lobed / rippled / oblong /
 // pseudopod / star) with per-type nucleus, membrane, selection ring,
@@ -16,9 +14,8 @@
 // in webgl2.js too — needs a design first).
 //
 // Async note: WebGPU's adapter + device requests are async, but the
-// IRenderer interface's init() is sync. Mirroring the PixiRenderer
-// pattern, init() is a no-op and a separate initAsync() does the real
-// work; app.js's makeRenderer awaits it.
+// IRenderer interface's init() is sync. Sub-classes implement
+// initAsync() for the real work; app.js's makeRenderer awaits it.
 
 import {
   S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
@@ -1821,7 +1818,7 @@ export class WebGPURenderer extends RendererBase {
     // Partition: SPLITTING-cell halves go through the metaball path
     // when S.metaSplit is on; everything else feeds the disk pass.
     // Pairs with only one half in view fall back to singleton (matches
-    // canvas2d / pixi). See render/webgl2.js for the canonical spec.
+    // canvas2d / webgl2). See render/webgl2.js for the canonical spec.
     const useMetaSplit = !!S.metaSplit;
     const splittingByCellId = useMetaSplit ? new Map() : null;
     const singletons = useMetaSplit ? [] : shapes;
