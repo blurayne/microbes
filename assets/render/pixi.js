@@ -21,7 +21,7 @@
 
 import {
   S, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
-  cellColors, currentBackground, currentTheme,
+  cellColors, currentBackground, currentTheme, frac,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { RendererBase } from './renderer.js';
@@ -177,6 +177,33 @@ export class PixiRenderer extends RendererBase {
           alpha: membraneAlpha,
           alignment: 0.5,
         });
+      }
+
+      // Granules — small darker dots scattered inside the cell. Same
+      // placement formula as the canvas2D renderer's _drawGranules so
+      // the dotted "inner texture" matches across renderers. Position
+      // is constrained to rRel ∈ [0.05, 0.90] of the cell radius, so
+      // granules stay inside the wobble polygon without explicit
+      // clipping (the slight wobble at the rim pulls them inward).
+      const cType = CELL_TYPES[s.cell.type] || CELL_TYPES.neutrophil;
+      const Ng = cType.granules || 0;
+      if (Ng > 0) {
+        const cell = s.cell;
+        const seed = cell.id * 9.7 + (cell.wobbleSeed || 0);
+        const isBig = cell.type === 'basophil';
+        const baseSize = isBig ? 0.115 : 0.05;
+        const sizeJitter = isBig ? 0.05 : 0.04;
+        const granAlpha = isBig ? 0.85 : 0.55;
+        const granColor = cc.nucleus || cytoBot;
+        for (let i = 0; i < Ng; i++) {
+          const ang = frac(seed * 1.3 + i * 0.61) * Math.PI * 2;
+          const rRel = 0.05 + 0.85 * Math.sqrt(frac(seed + i * 0.317));
+          const wob = 0.04 * Math.sin(time * 0.5 + i + seed);
+          const wx = s.x + Math.cos(ang) * s.r * (rRel + wob);
+          const wy = s.y + Math.sin(ang) * s.r * (rRel + wob);
+          const gr = s.r * (baseSize + sizeJitter * frac(seed * 1.7 + i * 0.13));
+          g.circle(wx, wy, gr).fill({ color: granColor, alpha: granAlpha });
+        }
       }
     }
   }
