@@ -795,8 +795,12 @@ function frame(ts) {
 
   renderer.beginFrame(ts, dt);
   renderer.drawBackground(ts);
-  if (shapes.length) renderer.drawCells(shapes, t, ts);
-  if (sim.particles.length) renderer.drawParticles(sim.particles, t, ts);
+  // Always call drawCells / drawParticles so the renderer can clear
+  // its own state. Both handle empty input cleanly (early-return after
+  // the initial clear) — gating here would leave stale Graphics in
+  // Pixi mode when the user kills every cell, which reads as a freeze.
+  renderer.drawCells(shapes, t, ts);
+  renderer.drawParticles(sim.particles, t, ts);
   renderer.drawSelection(shapes, t);
   if (S.showDebugField) renderer.drawDebug(shapes);
   renderer.endFrame();

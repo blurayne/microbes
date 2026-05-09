@@ -239,7 +239,11 @@ export class PixiRenderer extends RendererBase {
     // ones we use below.
     for (const entry of this._pairPool) entry.sprite.visible = false;
 
-    if (!shapes.length) return;
+    // No early-return on empty `shapes`: we still need to fall
+    // through so _drawNucleiPass runs and clears nucleiGfx (the
+    // partition + singleton loops below are no-ops with no shapes).
+    // Otherwise old nucleus polygons stick around forever after the
+    // last cell dies, which reads as a freeze in kill mode.
 
     // metaSplit partition: pairs (both halves of a SPLITTING cell when
     // S.metaSplit is on) vs singletons (everything else).
