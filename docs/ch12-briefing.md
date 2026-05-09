@@ -10,7 +10,7 @@
       <div class="chapter-num">12</div>
       <div class="chapter-title-block">
         <h2>Briefing &<br><em>Konter-Quickref</em></h2>
-        <div class="chapter-subtitle">Vor jedem Level: Wer kommt, wie schlagen wir sie. Während des Levels: jederzeit per HUD-Button aufrufbar. Single-Source-of-Truth zwischen Codex (§5) und Schadens-Matrix (§10).</div>
+        <div class="chapter-subtitle">Vor jedem Level, während des Levels — und permanent als Status-Line. Single-Source-of-Truth zwischen Codex (§5) und Schadens-Matrix (§10), modus-übergreifend (Kampagne &amp; Free Game).</div>
       </div>
     </div>
 
@@ -156,6 +156,93 @@
           <li>T-Helfer-Aura + Antikörper + Schwarm = <strong>4× DMG</strong> (siehe §10)</li>
           <li>Mast Cell vorhalten für Tier-3-Toxin (Konter „?" — nach Kontakt enthüllt)</li>
         </ul>
+      </div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <div class="section-num">12.5</div>
+        <div>
+          <div class="section-title">Permanente Status-Line</div>
+          <div class="section-desc">Echtzeit-Hinweis am HUD: aktueller Gegner + Konter. Modus-unabhängig. Sim läuft weiter.</div>
+        </div>
+      </div>
+
+      <div class="principle">
+        <div class="principle-symbol">›</div>
+        <div>
+          <h3>Briefing für den nächsten Atemzug</h3>
+          <p>Während die Briefing-Karte (§12.1–§12.4) <em>strategisch</em> wirkt — pausiert das Spiel, gibt einen Überblick — wirkt die Status-Line <em>taktisch</em>: eine Zeile am HUD, die den aktuell relevanten Gegner und seinen Konter zeigt, ohne das Spiel zu unterbrechen. Sie läuft <strong>in Kampagne und Free Game gleich</strong>.</p>
+        </div>
+      </div>
+
+      <div class="grid-auto col-auto-280" style="margin-top: 16px;">
+        <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› POSITION</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Unterer HUD-Rand</div><div style="color: var(--ink-dim); font-size: 13px;">Screen-fixed, oberhalb der drei Lebensbalken (§8.2).</div></div>
+        <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› LAYOUT</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Icon · Name → Konter</div><div style="color: var(--ink-dim); font-size: 13px;">Pathogen am Anfang der Zeile, Pfeil, Konter-Hinweis. JetBrains Mono.</div></div>
+        <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› FOKUS</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Auswahl-Logik</div><div style="color: var(--ink-dim); font-size: 13px;">Hover/Tap → diese Instanz. Sonst: nächstgelegener Gegner. Sonst: Idle-Zeile.</div></div>
+        <div class="card"><div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); margin-bottom: 8px;">› CODEX</div><div style="font-size: 16px; font-weight: 500; margin-bottom: 6px;">Discovery-Aware</div><div style="color: var(--ink-dim); font-size: 13px;">Kampagne: unentdeckte Schwächen als „?". Free Game: immer voll enthüllt.</div></div>
+      </div>
+
+      <div class="diagram-card" style="margin-top: 16px;">
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); letter-spacing: 0.15em; margin-bottom: 12px;">STATUS-LINE · BEISPIELE</div>
+
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 14px; padding: 10px 14px; background: rgba(255,255,255,0.04); border-left: 3px solid var(--p-flu); margin-bottom: 8px;">
+          <span style="color: var(--p-flu);">🦠 Influenza</span>
+          <span style="color: var(--ink-dim);"> · Wandlungsfähig · 14 HP</span>
+          <span style="color: var(--accent);"> &nbsp;→&nbsp; NK + Antikörper-Synergie</span>
+        </div>
+
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 14px; padding: 10px 14px; background: rgba(255,255,255,0.04); border-left: 3px solid var(--p-bact); margin-bottom: 8px;">
+          <span style="color: var(--p-bact);">🧫 Bacterium</span>
+          <span style="color: var(--ink-dim);"> · Stäbchen · 22 HP</span>
+          <span style="color: var(--accent);"> &nbsp;→&nbsp; Neutrophil-Schwarm</span>
+        </div>
+
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 14px; padding: 10px 14px; background: rgba(255,255,255,0.04); border-left: 3px solid var(--p-toxin); margin-bottom: 8px;">
+          <span style="color: var(--p-toxin);">☠️ Toxin (?)</span>
+          <span style="color: var(--ink-dim);"> · Tier 3 · ?? HP</span>
+          <span style="color: var(--accent-warm);"> &nbsp;→&nbsp; Konter unbekannt — Mast Cell vorhalten</span>
+        </div>
+
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 14px; padding: 10px 14px; background: rgba(255,255,255,0.04); border-left: 3px solid var(--ink-dim);">
+          <span style="color: var(--ink-dim);">◆ Keine aktive Bedrohung — Patrouille läuft</span>
+        </div>
+      </div>
+
+      <table class="matrix-table" style="margin-top: 16px;">
+        <thead>
+          <tr>
+            <th>Status-Line-Sektion</th>
+            <th>Quelle</th>
+            <th>Logik</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Pathogen-Icon + Name</td>
+            <td>fokussierte Instanz aus Sim-Loop</td>
+            <td>Hover &gt; nächstgelegener Gegner &gt; Idle</td>
+          </tr>
+          <tr>
+            <td>Sub-Stats (HP, Tier)</td>
+            <td>Live aus Sim-State</td>
+            <td>Aktualisiert mit Tick-Rate des Renderers</td>
+          </tr>
+          <tr>
+            <td>Konter-Hinweis</td>
+            <td>§10 Schadens-Matrix</td>
+            <td>Beste 1-Zeilen-Empfehlung; Synergien wenn beide Teile im Roster (Kampagne) bzw. spawnable (Free Game)</td>
+          </tr>
+          <tr>
+            <td>„?"-Maskierung</td>
+            <td>§5 Codex Discovery-State</td>
+            <td>Nur in Kampagne. Free Game: immer voll enthüllt.</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="callout" style="margin-top: 16px;">
+        <strong>Modus-Unabhängigkeit:</strong> Status-Line ist die einzige Briefing-UX, die in <em>jedem</em> Spielmodus erscheint. Briefing-Karte (§12.1–§12.4) ist Kampagne-spezifisch (kein Level → kein Briefing); Status-Line lebt von Sim-State allein und braucht keinen Wave-Schedule.
       </div>
     </section>
   </div>
