@@ -221,6 +221,8 @@ function endPointer(ev) {
         sim.drag.cell.vx = (b.x - a.x) / dt * S.throwStrength;
         sim.drag.cell.vy = (b.y - a.y) / dt * S.throwStrength;
         sim.drag.cell.target = null;
+      } else if (sim.killMode) {
+        sim.killCell(sim.drag.cell);
       } else if (S.splitOnTap) {
         sim.beginSplit(sim.drag.cell);
       } else {
@@ -405,28 +407,41 @@ function bindCheckbox(id, key, onChange) {
 
 const modeTargetBtn = document.getElementById('modeTarget');
 const modeSplitBtn  = document.getElementById('modeSplit');
+const modeKillBtn   = document.getElementById('modeKill');
 function applyModeUi() {
-  if (modeTargetBtn) modeTargetBtn.classList.toggle('active', !S.splitOnTap);
-  if (modeSplitBtn)  modeSplitBtn.classList.toggle('active',  !!S.splitOnTap);
+  const kill = !!sim.killMode;
+  if (modeKillBtn)   modeKillBtn.classList.toggle('active',   kill);
+  if (modeTargetBtn) modeTargetBtn.classList.toggle('active', !kill && !S.splitOnTap);
+  if (modeSplitBtn)  modeSplitBtn.classList.toggle('active',  !kill &&  !!S.splitOnTap);
 }
 function setSplitOnTap(on) {
   S.splitOnTap = !!on;
+  sim.killMode = false;
   saveSettings();
   applyModeUi();
   const cb = document.getElementById('splitOnTap');
   if (cb) cb.checked = S.splitOnTap;
 }
+function setKillMode(on) {
+  sim.killMode = !!on;
+  applyModeUi();
+}
 if (modeTargetBtn) modeTargetBtn.addEventListener('click', () => {
   // Pressing target while already in target mode is a "clear selection"
   // gesture: drops any selected cells and the active target marker.
-  if (!S.splitOnTap) {
+  if (!sim.killMode && !S.splitOnTap) {
     sim.selectedCells.clear();
     sim.targetMarker = null;
     return;
   }
+  setKillMode(false);
   setSplitOnTap(false);
 });
 if (modeSplitBtn)  modeSplitBtn.addEventListener('click',  () => setSplitOnTap(true));
+if (modeKillBtn)   modeKillBtn.addEventListener('click',   () => {
+  // Toggle: pressing kill while already active drops back to target mode.
+  setKillMode(!sim.killMode);
+});
 bindCheckbox('splitOnTap', 'splitOnTap', applyModeUi);
 applyModeUi();
 bindCheckbox('randomSplit', 'randomSplit');
@@ -766,6 +781,7 @@ function frame(ts) {
   renderer.beginFrame(ts, dt);
   renderer.drawBackground(ts);
   if (shapes.length) renderer.drawCells(shapes, t, ts);
+  if (sim.particles.length) renderer.drawParticles(sim.particles, t, ts);
   renderer.drawSelection(shapes, t);
   if (S.showDebugField) renderer.drawDebug(shapes);
   renderer.endFrame();

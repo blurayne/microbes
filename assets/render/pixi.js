@@ -53,6 +53,7 @@ export class PixiRenderer extends RendererBase {
     this.bgGfx = null;
     this.worldLayer = null;
     this.cellsGfx = null;
+    this.particlesGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
 
@@ -102,9 +103,11 @@ export class PixiRenderer extends RendererBase {
 
     this.worldLayer = new PIXI.Container();
     this.cellsGfx = new PIXI.Graphics();
+    this.particlesGfx = new PIXI.Graphics();
     this.selectionGfx = new PIXI.Graphics();
     this.debugGfx = new PIXI.Graphics();
     this.worldLayer.addChild(this.cellsGfx);
+    this.worldLayer.addChild(this.particlesGfx);
     this.worldLayer.addChild(this.selectionGfx);
     this.worldLayer.addChild(this.debugGfx);
 
@@ -361,6 +364,17 @@ export class PixiRenderer extends RendererBase {
     }
   }
 
+  drawParticles(particles /* , time, timeMs */) {
+    if (!this.app || !this.particlesGfx) return;
+    this.particlesGfx.clear();
+    if (!particles || !particles.length) return;
+    const g = this.particlesGfx;
+    for (const p of particles) {
+      const a = Math.max(0, Math.min(1, p.life / p.maxLife));
+      g.circle(p.x, p.y, p.r).fill({ color: p.color, alpha: a });
+    }
+  }
+
   drawSelection(shapes /* , time */) {
     if (!this.app || !this.selectionGfx) return;
     this.selectionGfx.clear();
@@ -417,6 +431,7 @@ export class PixiRenderer extends RendererBase {
     this.bgGfx = null;
     this.worldLayer = null;
     this.cellsGfx = null;
+    this.particlesGfx = null;
     this.selectionGfx = null;
     this.debugGfx = null;
     this.splittingLayer = null;

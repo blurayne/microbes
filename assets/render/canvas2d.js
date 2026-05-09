@@ -1058,6 +1058,23 @@ export class Canvas2DRenderer extends RendererBase {
     });
   }
 
+  // ---------- Particles (kill-mode debris) ----------
+  drawParticles(particles /* , t, ts */) {
+    if (!particles || !particles.length) return;
+    const ctx = this.ctx;
+    this.withCameraCtx(() => {
+      for (const p of particles) {
+        const a = Math.max(0, Math.min(1, p.life / p.maxLife));
+        ctx.globalAlpha = a;
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    });
+  }
+
   // ---------- Selection / target marker / flash ----------
   drawSelection(shapes, t) {
     const ctx = this.ctx, cam = this.camera;

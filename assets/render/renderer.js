@@ -131,5 +131,7 @@ export class RendererBase {
   beginFrame(/* timeMs, dt */) {}
   endFrame() {}
   drawDebug(/* shapes */) {}
+  /** Optional: draw free-floating particles released by Sim.killCell(). */
+  drawParticles(/* particles, time, timeMs */) {}
   destroy() {}
 }
