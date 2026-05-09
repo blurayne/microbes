@@ -374,6 +374,14 @@ export class PixiRenderer extends RendererBase {
     this.app.renderer.render(this.app.stage);
   }
 
+  /** Short identifier for the FPS overlay's renderer suffix. */
+  get info() {
+    if (!this.app || !this.app.renderer) return 'pixi';
+    // Pixi v8 sets `renderer.type` to 'webgl' or 'webgpu'.
+    const t = this.app.renderer.type;
+    return 'pixi/' + (t || 'webgl');
+  }
+
   destroy() {
     this._destroyed = true;
     if (this.unionMaskRT) { try { this.unionMaskRT.destroy(true); } catch {} this.unionMaskRT = null; }

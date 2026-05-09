@@ -78,6 +78,9 @@ export class Canvas2DRenderer extends RendererBase {
   beginFrame() { /* no-op for Canvas2D */ }
   endFrame() { /* no-op for Canvas2D */ }
 
+  /** Short identifier for the FPS overlay's renderer suffix. */
+  get info() { return 'canvas2d'; }
+
   // ---------- Background ----------
   drawBackground(ts) {
     const ctx = this.ctx;

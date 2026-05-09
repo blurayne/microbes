@@ -426,6 +426,7 @@ bindCheckbox('showFPS', 'showFPS', (on) => {
   const el = document.getElementById('fps');
   if (el) el.classList.toggle('on', !!on);
 });
+bindCheckbox('showRenderer', 'showRenderer');
 
 for (const r of settingsEl.querySelectorAll('input[name="splitMode"]')) {
   r.checked = (r.value === S.splitMode);
@@ -692,7 +693,7 @@ if (resetBtn) resetBtn.addEventListener('click', () => sim.resetSim());
 function renderBuildStamp() {
   const el = document.getElementById('build');
   if (!el) return;
-  const b = window.__BUILD__ || { sha: 'dev', run: 0, dateUtc: null };
+  const b = window.__BUILD__ || { sha: 'dev', run: 0, dateUtc: null, branch: null };
   const sha = (b.sha || 'dev').slice(0, 7);
   let when = '';
   if (b.dateUtc) {
@@ -705,7 +706,12 @@ function renderBuildStamp() {
       when = `${mm}-${dd} ${hh}:${mi}`;
     }
   }
-  el.textContent = when ? `${sha} · ${when}` : sha;
+  const parts = [];
+  if (b.branch) parts.push(b.branch);
+  parts.push(sha);
+  if (b.run > 0) parts.push(`#${b.run}`);
+  if (when) parts.push(when);
+  el.textContent = parts.join(' · ');
 }
 renderBuildStamp();
 
@@ -723,7 +729,11 @@ function updateFPS(dt, ts) {
   for (const v of fpsBuf) sum += v;
   const avg = sum / fpsBuf.length;
   const fps = avg > 0 ? Math.round(1 / avg) : 0;
-  fpsEl.textContent = T('fps_line', { fps, n: sim.cells.length });
+  let line = T('fps_line', { fps, n: sim.cells.length });
+  if (S.showRenderer && renderer && typeof renderer.info === 'string') {
+    line += ` (${renderer.info})`;
+  }
+  fpsEl.textContent = line;
 }
 
 function frame(ts) {
