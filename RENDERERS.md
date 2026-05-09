@@ -372,3 +372,91 @@ If we wanted prettier effects without a full engine swap:
 For now: **keep what we have**, drop pixi, and treat the
 webgl2/webgpu pair as the long-term default. Revisit libraries
 when one of the three triggers above fires.
+
+## Survey: dmnsgn's WebGL/WebGPU library list
+
+Reference: <https://gist.github.com/dmnsgn/76878ba6903cf15789b712464875cfdc>
+— a curated catalogue of WebGL and WebGPU frameworks. Below is each
+entry from the "Engines and libraries" + "WebGPU" sections,
+classified against our specific need: **a 2D microbe simulator with
+a sim layer that's renderer-agnostic and ~600 LOC of fragment
+shaders per backend, no build step today**.
+
+The bar is high: a library has to either (a) eliminate the dual-
+shader maintenance cost, (b) give us drop-in effects without an
+engine commitment, or (c) solve a problem we don't currently have
+worth taking on a dependency for. **None of the entries clear the
+bar today.** A few are worth keeping a tab open on.
+
+### Worth a closer look (3 entries)
+
+| Library | What it is | Why it could fit |
+|---|---|---|
+| **[Zephyr3D](https://github.com/gavinyork/zephyr3d)** | "3D rendering framework for browsers, supports both WebGL and WebGPU." | The only entry on the list that explicitly addresses the dual-backend pain point we have. If the dual-shader maintenance cost ever bites (currently bounded at ~2–4 h / year), Zephyr3D's unified API is the obvious-shape solution. Caveat: it's 3D-focused; our 2D use case may not be its sweet spot. Worth a 1-hour evaluation if/when we revisit. |
+| **[Vello](https://github.com/linebender/vello)** | "An experimental GPU compute-centric 2D renderer." (Rust + WASM) | Linebender's vector renderer. Anti-aliased 2D paths on GPU compute. Beautiful tech, and our cells are 2D vector content. But: Rust toolchain or pre-built WASM, ~2 MB asset, and it solves rendering quality (we're not bottlenecked there). File under "if we ever need print-quality anti-aliased curves at high zoom." |
+| **[Two.js](https://github.com/jonobr1/two.js)** | "A renderer agnostic two-dimensional drawing api for the web." | The 2D analogue of three.js. SVG / Canvas / WebGL backends. Renderer-agnostic API across the three, which would let us collapse `canvas2d.js + webgl2.js` into one source. But Two.js doesn't have a WebGPU backend, and the abstraction would slow us down vs. our hand-rolled WebGL2 (same Pixi-style "geometry per shape" trap). Skip. |
+
+### Inspiration only (4 entries)
+
+These are interesting reads but not adoption candidates. Their
+shader code or technique might inspire effects we want to build by
+hand into our existing renderers.
+
+- **[points](https://github.com/Absulit/points)** — generative-art
+  WebGPU library. Source of WGSL effect ideas if we add visual
+  flair (procedural backgrounds, particle trails, etc.). Adoption
+  cost is the framework, but we can read its shaders.
+- **[shadeup](https://github.com/AskingQuestions/shadeup)** — a
+  higher-level language for WebGPU shaders. Compiles to WGSL.
+  Interesting but doesn't help our WebGL2 path; would replace
+  WGSL-handwriting with shadeup-handwriting + a build step. Skip.
+- **[dgel](https://github.com/dmnsgn/dgel)** — Damien's own WebGPU
+  engine. Worth reading for architecture, not for adoption.
+- **[Vello samples](https://github.com/linebender/vello)** — even
+  if we don't adopt the renderer, the WGSL compute kernels
+  (anti-aliased path rasterisation, wave-front scheduling) are
+  reference-quality reading.
+
+### Skip — heavy engines, off-target, defunct, or single-backend
+
+| Entry | Verdict |
+|---|---|
+| three.js | Already evaluated above (TSL is the strongest case; still a rewrite). |
+| stack.gl | Namespace of small WebGL-only modules; mostly stale. |
+| PixiJS | Already in our codebase, slated for demotion / removal per the "Why not Pixi" section. |
+| Pex | Damien's component framework; WebGL only; adoption cost. |
+| Babylon.js | Heavy 3D engine. |
+| Filament (Google) | C++/WASM, PBR-focused, ~2 MB. Way too heavy. |
+| ClayGL, AwayJS, SceneJS, Blend4Web, Turbulenz, litescene | Defunct / unmaintained. |
+| PlayCanvas | Full game engine, 3D-first. Overkill. |
+| Hilo3d, Rhodonite, Zogra, LayaAir, Galacean, LudoGL, webgl-operate | WebGL-only renderers / engines. Don't address dual-backend. |
+| libGDX | Java game framework — JVM/Android-first; doesn't apply to a browser-only project. |
+| LittleJS | Small HTML5 2D engine, but Canvas2D-focused; doesn't help our GPU path. |
+| react-three-game | React-Three-Fiber + Rapier physics. Adopts react-three + a physics engine. |
+| dawn / wgpu | Native WebGPU implementations (C++ / Rust). They power browsers; not for our use. |
+| sokol | C 3D-API wrapper. Doesn't apply to a browser project. |
+| RedGPU, YUE, Simple-GPU, GWebGPUEngine, Orillusion, SWGPU, XGPU, dtysky/webgpu-renderer, WebGPU-Kit, Sundown, Cobalt, C2-Renderer, khudiiash/webgpu-renderer, minimal-gpu | WebGPU-only renderers / engines. Adopting any would lose our WebGL2 fallback (~99% browser coverage today vs ~85% for WebGPU). If we ever drop WebGL2, **Cobalt** (2D, small) and **Orillusion** (mature, well-documented) are the two I'd benchmark first. |
+| WebGPU Raytracer, roquefort | Niche (path tracing, fluid sim). Cool tech, not our use case. |
+
+### Net answer to "could we profit from any of those libs?"
+
+**No, not today.** None of the 47 entries clears the bar:
+
+- **Engines** (three.js, Babylon, PlayCanvas, etc.) ⇒ adoption cost
+  swamps any gain.
+- **WebGPU-only renderers** (Orillusion, Cobalt, Sundown, etc.) ⇒
+  losing the WebGL2 fallback isn't worth a code-size win.
+- **WebGL-only renderers** (PixiJS, ClayGL, Galacean, etc.) ⇒
+  doesn't solve the dual-backend story, and we already have
+  hand-rolled WebGL2 + canvas2d that match performance.
+- **Renderer-agnostic 2D** (Two.js) ⇒ no WebGPU support and
+  abstraction would erase our GPU perf advantage.
+- **Cross-backend frameworks** (Zephyr3D) ⇒ closest to a real fit;
+  worth evaluating if/when the dual-shader cost grows past today's
+  bounded ~2–4 h / year.
+
+The shader-cross-compilation option (`naga-oil`, `tint`-wasm),
+captured in [`IDEAS.md`](./IDEAS.md), remains the cleaner long-term
+play than swapping out the renderer. It targets **the actual pain
+point** (writing a shader twice) without changing anything about the
+rendering path.
