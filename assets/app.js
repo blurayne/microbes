@@ -13,6 +13,7 @@ import { Sim } from './core/sim.js';
 import { getShapes } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
+import { PixiRenderer } from './render/pixi.js';
 
 // ---------- DOM ----------
 const canvas = document.getElementById('stage');
@@ -20,21 +21,37 @@ const canvas = document.getElementById('stage');
 // ---------- Sim + renderer ----------
 const sim = new Sim();
 
-function makeRenderer() {
+async function makeRenderer() {
+  if (S.renderer === 'pixi') {
+    try {
+      const r = new PixiRenderer(canvas, sim);
+      await r.initAsync();
+      return r;
+    } catch (e) {
+      console.warn('[microbes] PixiJS unavailable, falling back to Canvas2D:', e && e.message);
+      S.renderer = 'canvas2d';
+      saveSettings();
+    }
+  }
   if (S.renderer === 'webgl2') {
     try {
-      return new WebGL2Renderer(canvas, sim);
+      const r = new WebGL2Renderer(canvas, sim);
+      r.init();
+      return r;
     } catch (e) {
       console.warn('[microbes] WebGL2 unavailable, falling back to Canvas2D:', e && e.message);
       S.renderer = 'canvas2d';
       saveSettings();
     }
   }
-  return new Canvas2DRenderer(canvas, sim);
+  const r = new Canvas2DRenderer(canvas, sim);
+  r.init();
+  return r;
 }
 
-let renderer = makeRenderer();
-renderer.init();
+// Renderer construction is async (PixiJS needs `await app.init()`).
+// Boot finishes via the bottom-of-file `bootRenderer` async block.
+let renderer = null;
 
 // ---------- Resize ----------
 let dpr = 1;
@@ -497,7 +514,7 @@ if (upscaleEl) {
     applyUpscaleMode();
   });
 }
-bindCheckbox('scanlines', 'scanlines', applyScanlines);
+bindCheckbox('scanlinesToggle', 'scanlines', applyScanlines);
 
 // Renderer engine — fundamental change, easiest to handle by reloading.
 const rendererSel = document.getElementById('rendererEngine');
@@ -514,7 +531,9 @@ if (rendererSel) {
   }
   rendererSel.value = S.renderer;
   rendererSel.addEventListener('change', () => {
-    const kind = (rendererSel.value === 'webgl2' && webglSupported) ? 'webgl2' : 'canvas2d';
+    let kind = rendererSel.value;
+    if (kind === 'webgl2' && !webglSupported) kind = 'canvas2d';
+    if (kind !== 'canvas2d' && kind !== 'webgl2' && kind !== 'pixi') kind = 'canvas2d';
     if (kind === S.renderer) return;
     S.renderer = kind;
     saveSettings();
@@ -720,7 +739,12 @@ function frame(ts) {
 }
 
 // ---------- Boot ----------
-resize();
-window.addEventListener('resize', resize);
-sim.resetSim();
-requestAnimationFrame(frame);
+// Renderer init is async (PixiJS). We await it before the first
+// resize() / frame() so those calls always see a live renderer.
+(async () => {
+  renderer = await makeRenderer();
+  resize();
+  window.addEventListener('resize', resize);
+  sim.resetSim();
+  requestAnimationFrame(frame);
+})();
