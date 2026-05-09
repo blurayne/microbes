@@ -89,6 +89,11 @@ function startPinchIfTwoPointers() {
   const dy = pts[1].y - pts[0].y;
   sim.pinch = {
     startDist: Math.hypot(dx, dy) || 1,
+    // Angle between the two fingers at the start of the gesture; the
+    // rotation delta is (currentAngle - startAngle), applied to
+    // sim.camera.rotation. Pinch midpoint stays anchored in world space.
+    startAngle: Math.atan2(dy, dx),
+    startRotation: sim.camera.rotation,
     startMid: { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 },
     startScale: sim.camera.scale,
     startTx: sim.camera.tx,
@@ -163,11 +168,26 @@ document.addEventListener('pointermove', (ev) => {
     const mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
     const factor = dist / sim.pinch.startDist;
     const newScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, sim.pinch.startScale * factor));
-    const wx = (sim.pinch.startMid.x - sim.pinch.startTx) / sim.pinch.startScale;
-    const wy = (sim.pinch.startMid.y - sim.pinch.startTy) / sim.pinch.startScale;
+    const newRotation = sim.pinch.startRotation
+      + (Math.atan2(dy, dx) - sim.pinch.startAngle);
+    // Rotation-aware re-anchor: keep the world point that was under the
+    // pinch midpoint at gesture start under the current pinch midpoint
+    // as scale + rotation change. (When rotation collapses to 0 this
+    // reduces to the original wx/wy formula.)
+    const c0 = Math.cos(sim.pinch.startRotation);
+    const s0 = Math.sin(sim.pinch.startRotation);
+    const dx0 = sim.pinch.startMid.x - sim.pinch.startTx;
+    const dy0 = sim.pinch.startMid.y - sim.pinch.startTy;
+    const wx = ( c0 * dx0 + s0 * dy0) / sim.pinch.startScale;
+    const wy = (-s0 * dx0 + c0 * dy0) / sim.pinch.startScale;
+    const cN = Math.cos(newRotation);
+    const sN = Math.sin(newRotation);
+    const wsx = wx * newScale;
+    const wsy = wy * newScale;
     sim.camera.scale = newScale;
-    sim.camera.tx = mid.x - wx * newScale;
-    sim.camera.ty = mid.y - wy * newScale;
+    sim.camera.rotation = newRotation;
+    sim.camera.tx = mid.x - (cN * wsx - sN * wsy);
+    sim.camera.ty = mid.y - (sN * wsx + cN * wsy);
     return;
   }
 

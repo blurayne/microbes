@@ -33,7 +33,7 @@ layout(location=5) in vec3 a_nucleus;
 layout(location=6) in vec4 a_outline;        // .a = c.flash (0..1)
 layout(location=7) in float a_diskAlpha;     // per-instance fade-in (split-end)
 
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 
 out vec2 v_uv;
@@ -50,7 +50,13 @@ void main() {
   // selection ring (which extends to 1.30 × bodyR).
   float quadR = a_inst.z * 1.70;
   vec2 worldPos = a_inst.xy + a_corner * quadR;
-  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, then rotate by u_camera.w, then translate.
+  // Reduces to plain "worldPos * scale + (tx, ty)" when rotation == 0.
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -262,7 +268,7 @@ uniform vec3 u_ringColor;
 uniform vec3 u_gridColor;
 uniform float u_gridStep;
 uniform float u_vignette;
-uniform vec3 u_camera;       // (scale, tx, ty)
+uniform vec4 u_camera;       // (scale, tx, ty, rotation-radians)
 uniform vec2 u_viewport;     // (W, H)
 uniform float u_time;        // seconds
 uniform int u_spotCount;
@@ -299,7 +305,11 @@ void main() {
 
   // World-space pixel — screen px → world px through camera.
   vec2 screenPx = v_uv * u_viewport;
-  vec2 worldPx = (screenPx - u_camera.yz) / u_camera.x;
+  // Inverse camera transform (screen → world): un-translate, un-rotate, un-scale.
+  vec2 dCam = screenPx - u_camera.yz;
+  float ccwBg = cos(u_camera.w), scwBg = sin(u_camera.w);
+  vec2 worldPx = vec2(ccwBg * dCam.x + scwBg * dCam.y,
+                      -scwBg * dCam.x + ccwBg * dCam.y) / u_camera.x;
 
   // Petri-dish concentric rings — 1px thin at every 32 world units,
   // centred on the world middle. Matches Canvas2D's stroke loop.
@@ -573,11 +583,16 @@ const VERT_DECOR = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_pos;
 layout(location=1) in vec4 a_col;
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 out vec4 v_col;
 void main() {
-  vec2 screenPos = a_pos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, rotate by u_camera.w, then translate.
+  vec2 a_posScaled = a_pos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * a_posScaled.x - scw * a_posScaled.y,
+                        scw * a_posScaled.x + ccw * a_posScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -595,11 +610,16 @@ const VERT_DASH = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_pos;
 layout(location=1) in float a_dist;
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 out float v_dist;
 void main() {
-  vec2 screenPos = a_pos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, rotate by u_camera.w, then translate.
+  vec2 a_posScaled = a_pos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * a_posScaled.x - scw * a_posScaled.y,
+                        scw * a_posScaled.x + ccw * a_posScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -621,13 +641,19 @@ void main() {
 const VERT_MARKER = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_corner;
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 uniform vec3 u_marker;       // (x, y, scaledRadius_world)
 out vec2 v_uv;
 void main() {
   vec2 worldPos = u_marker.xy + a_corner * u_marker.z;
-  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, then rotate by u_camera.w, then translate.
+  // Reduces to plain "worldPos * scale + (tx, ty)" when rotation == 0.
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -663,13 +689,19 @@ precision highp float;
 layout(location=0) in vec2 a_corner;
 layout(location=1) in vec4 a_inst;        // (x, y, r, alpha)
 layout(location=2) in vec4 a_rgb;         // (R, G, B, _)
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 out vec2 v_uv;
 out vec4 v_col;
 void main() {
   vec2 worldPos = a_inst.xy + a_corner * a_inst.z;
-  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, then rotate by u_camera.w, then translate.
+  // Reduces to plain "worldPos * scale + (tx, ty)" when rotation == 0.
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -709,7 +741,7 @@ layout(location=3) in vec4 a_face2;    // (lookX, lookY, mouthW, blink)
 layout(location=4) in vec4 a_face3;    // (mouthY, phase, blur, alphaMul)
 layout(location=5) in vec3 a_mouthCol; // RGB for mouth fill / stroke
 
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 
 out vec2 v_uv;
@@ -723,7 +755,13 @@ void main() {
   // Quad covers the body extent (no need for spike margins — faces sit
   // inside the cell). 1.0 × r is enough for any face-bearing cell.
   vec2 worldPos = a_inst.xy + a_corner * a_inst.z * 1.0;
-  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, then rotate by u_camera.w, then translate.
+  // Reduces to plain "worldPos * scale + (tx, ty)" when rotation == 0.
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -1465,7 +1503,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform3fv(this._bgU.gridColor, rgbaStringToVec3(bg.gridColor || 'rgba(0,255,170,0.5)'));
     gl.uniform1f(this._bgU.gridStep, bg.gridStep || 48);
     gl.uniform1f(this._bgU.vignette, bg.vignette || 0);
-    gl.uniform3f(this._bgU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform4f(this._bgU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._bgU.viewport, this.W, this.H);
     gl.uniform1f(this._bgU.time, t);
     gl.uniform1i(this._bgU.spotCount, count);
@@ -1569,7 +1607,7 @@ export class WebGL2Renderer extends RendererBase {
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, singletons.length * INSTANCE_FLOATS);
 
       gl.useProgram(this._diskProg);
-      gl.uniform3f(this._diskU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+      gl.uniform4f(this._diskU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
       gl.uniform2f(this._diskU.viewport, this.W, this.H);
       gl.uniform1f(this._diskU.time, time);
       gl.uniform1f(this._diskU.wobbleAmp, S.wobbleAmp || 0);
@@ -1849,7 +1887,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * FACE_INSTANCE_FLOATS);
 
     gl.useProgram(this._faceProg);
-    gl.uniform3f(this._faceU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform4f(this._faceU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._faceU.viewport, this.W, this.H);
     gl.uniform1f(this._faceU.time, time);
     gl.bindVertexArray(this._faceVao);
@@ -1954,7 +1992,7 @@ export class WebGL2Renderer extends RendererBase {
   _uploadAndDrawDecorations() {
     const gl = this.gl;
     gl.useProgram(this._decorProg);
-    gl.uniform3f(this._decorU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform4f(this._decorU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._decorU.viewport, this.W, this.H);
 
     if (this._decorLines.length > 0) {
@@ -2241,7 +2279,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindBuffer(gl.ARRAY_BUFFER, this._particleVbo);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * PARTICLE_INSTANCE_FLOATS);
     gl.useProgram(this._particleProg);
-    gl.uniform3f(this._particleU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform4f(this._particleU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._particleU.viewport, this.W, this.H);
     gl.bindVertexArray(this._particleVao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
@@ -2286,7 +2324,7 @@ export class WebGL2Renderer extends RendererBase {
         gl.bindBuffer(gl.ARRAY_BUFFER, this._dashVbo);
         gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
         gl.useProgram(this._dashProg);
-        gl.uniform3f(this._dashU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+        gl.uniform4f(this._dashU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
         gl.uniform2f(this._dashU.viewport, this.W, this.H);
         gl.uniform1f(this._dashU.dashOffset, -now * 0.04);
         gl.uniform1f(this._dashU.alpha, fade);
@@ -2302,7 +2340,7 @@ export class WebGL2Renderer extends RendererBase {
     const innerWorld = 4 / camScale;
     const quadR = ringWorld + 6 / camScale;
     gl.useProgram(this._markerProg);
-    gl.uniform3f(this._markerU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform4f(this._markerU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._markerU.viewport, this.W, this.H);
     gl.uniform3f(this._markerU.marker, m.x, m.y, quadR);
     gl.uniform1f(this._markerU.age, age);

@@ -50,7 +50,7 @@ export class Sim {
     this.activePointers = new Map();
 
     /** Camera: world-space → screen-space affine = scale*world + translate. */
-    this.camera = { scale: 1, tx: 0, ty: 0 };
+    this.camera = { scale: 1, tx: 0, ty: 0, rotation: 0 };
 
     // Viewport in CSS pixels (set by app.js after each resize).
     this.W = 0;
@@ -63,11 +63,25 @@ export class Sim {
   setViewport(W, H) { this.W = W; this.H = H; }
 
   // Camera helpers. Pure math; safe to call any time.
+  // Forward transform: screen = R(θ) · (world · scale) + (tx, ty).
+  // When rotation === 0 the trig collapses to (cos, sin) = (1, 0)
+  // and these reduce to the original (sx - tx)/scale form.
   screenToWorld(sx, sy) {
-    return { x: (sx - this.camera.tx) / this.camera.scale, y: (sy - this.camera.ty) / this.camera.scale };
+    const s = this.camera.scale;
+    const c = Math.cos(this.camera.rotation);
+    const r = Math.sin(this.camera.rotation);
+    const dx = sx - this.camera.tx;
+    const dy = sy - this.camera.ty;
+    // Inverse rotation R(-θ) = [[c, r], [-r, c]] then divide by scale.
+    return { x: (c * dx + r * dy) / s, y: (-r * dx + c * dy) / s };
   }
   worldToScreen(wx, wy) {
-    return { x: wx * this.camera.scale + this.camera.tx, y: wy * this.camera.scale + this.camera.ty };
+    const s = this.camera.scale;
+    const c = Math.cos(this.camera.rotation);
+    const r = Math.sin(this.camera.rotation);
+    const sx = wx * s;
+    const sy = wy * s;
+    return { x: c * sx - r * sy + this.camera.tx, y: r * sx + c * sy + this.camera.ty };
   }
 
   // ---------- Cell lifecycle ----------

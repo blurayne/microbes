@@ -67,7 +67,20 @@ export class Canvas2DRenderer extends RendererBase {
     const ctx = this.ctx;
     const cam = this.camera;
     ctx.save();
-    ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+    // Forward transform: screen = R(θ) · (world · scale) + (tx, ty).
+    // ctx.setTransform takes the matrix in (a, b, c, d, e, f) form
+    // where the resulting transform is [[a, c, e], [b, d, f], [0, 0, 1]].
+    // Composing scale then rotate gives:
+    //   a =  scale·cos    c = -scale·sin
+    //   b =  scale·sin    d =  scale·cos
+    //   e = tx            f = ty
+    // Falls back to the original setTransform when rotation === 0.
+    if (cam.rotation === 0) {
+      ctx.setTransform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+    } else {
+      const co = Math.cos(cam.rotation), si = Math.sin(cam.rotation);
+      ctx.setTransform(cam.scale * co, cam.scale * si, -cam.scale * si, cam.scale * co, cam.tx, cam.ty);
+    }
     try { fn(); } finally { ctx.restore(); }
   }
 
