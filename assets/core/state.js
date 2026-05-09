@@ -52,7 +52,7 @@ export const DEFAULTS = {
 
 const KNOWN_THEME_KEYS = [
   'bloodstream', 'cartoonNight', 'spectrum', 'lymphNode',
-  'lung', 'aurora', 'underwater', 'lavaFire',
+  'lung', 'aurora', 'underwater', 'lavaFire', 'reactor',
 ];
 
 const VALID_RENDER_SCALES = [1, 0.5, 0.25, 0.125];
@@ -637,6 +637,17 @@ export const THEMES = {
     bg: { kind: 'lava', base: '#1a0402', topColor: '#3b0a05', botColor: '#0a0202', spotCount: 0, vignette: 0.50 },
     outline: { color: '#1a0606', defaultPx: 4 },
     ui: { panelAccent: '#ff5a00' },
+  },
+  // Gray-Scott reaction-diffusion. The renderer maintains two
+  // half-resolution ping-pong textures, runs N step iterations per
+  // visible frame, and refreshes a few uniform-random B-concentration
+  // seed discs every ~10 s. WebGL2 + WebGPU implement; canvas2d falls
+  // back to the base colour. See .claude/plan/04-reactor-bg.md.
+  reactor: {
+    label: 'Reactor',
+    bg: { kind: 'reactor', base: '#02060a', spotCount: 0, vignette: 0.40 },
+    outline: { color: '#0a1816', defaultPx: 4 },
+    ui: { panelAccent: '#7eff8a' },
   },
 };
 

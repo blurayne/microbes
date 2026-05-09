@@ -119,6 +119,15 @@ on init + periodically refreshed).
    frame".
 7. **WebGL2 + WebGPU** both implement. Canvas2D: fall back to
    `solid` for this theme.
+
+   **Actual scope shipped (PR #37):** WebGL2 only. WebGPU + Canvas2D
+   fall through to the theme's `base` colour (acid-green `#02060a`,
+   nearly black). The renderer-parity gap is tracked as Plan #5
+   ([`05-reactor-webgpu-port.md`](./05-reactor-webgpu-port.md)) —
+   the port is a mechanical translation of the GLSL into WGSL plus
+   a ping-pong `GPUTexture` pool. Canvas2D has no realistic path
+   (Gray-Scott in JS at 60 fps via ImageData reads/writes is too
+   slow), so its base-colour fallback is permanent.
 8. **Settings**: no user-facing parameters in the first cut. The
    feed/kill values come from the shader source. (A future
    follow-up could expose feed/kill as sliders.)
