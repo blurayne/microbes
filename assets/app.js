@@ -430,6 +430,7 @@ if (modeSplitBtn)  modeSplitBtn.addEventListener('click',  () => setSplitOnTap(t
 bindCheckbox('splitOnTap', 'splitOnTap', applyModeUi);
 applyModeUi();
 bindCheckbox('randomSplit', 'randomSplit');
+bindCheckbox('metaSplit', 'metaSplit');
 bindCheckbox('cartoon', 'cartoon');
 bindCheckbox('showFPS', 'showFPS', (on) => {
   const el = document.getElementById('fps');

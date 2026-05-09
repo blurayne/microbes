@@ -21,6 +21,10 @@ export class Canvas2DRenderer extends RendererBase {
   constructor(canvas, sim) {
     super(canvas, sim);
     this.ctx = canvas.getContext('2d');
+    // Lazy-allocated scratch canvas used by the per-splitting-pair
+    // metaball renderer (S.metaSplit). Resized per pair per frame.
+    this._scratch = null;
+    this._scratchCtx = null;
     this.W = 0;
     this.H = 0;
     this.dpr = 1;
@@ -362,8 +366,46 @@ export class Canvas2DRenderer extends RendererBase {
   _drawCellBodies(shapes, t) {
     const ctx = this.ctx;
     const N = WOBBLE_VERTS;
-    this.withCameraCtx(() => {
+
+    // Partition: when S.metaSplit is on, both halves of any SPLITTING
+    // cell render together as a per-pair metaball. Everything else
+    // renders as an independent shape via the per-cell path below.
+    const useMetaSplit = !!S.metaSplit;
+    const splittingByCellId = new Map();
+    const singletons = [];
+    if (useMetaSplit) {
       for (const s of shapes) {
+        if (s.cell.state === 'SPLITTING') {
+          if (!splittingByCellId.has(s.cell.id)) splittingByCellId.set(s.cell.id, []);
+          splittingByCellId.get(s.cell.id).push(s);
+        } else {
+          singletons.push(s);
+        }
+      }
+      // Cells where only one half is in view fall back to the singleton
+      // path (no pair → no metaball merge).
+      for (const [id, pair] of splittingByCellId) {
+        if (pair.length < 2) {
+          for (const s of pair) singletons.push(s);
+          splittingByCellId.delete(id);
+        }
+      }
+    } else {
+      for (const s of shapes) singletons.push(s);
+    }
+
+    // ---- Per-pair metaball pass (each splitting cell rendered once)
+    if (splittingByCellId.size > 0) {
+      this.withCameraCtx(() => {
+        for (const [, pair] of splittingByCellId) {
+          this._renderSplittingPair(pair[0].cell, t);
+        }
+      });
+    }
+
+    // ---- Per-cell direct-render pass (the WebGL2-style clean look)
+    this.withCameraCtx(() => {
+      for (const s of singletons) {
         const c = s.cell;
         const cc = cellColors(c);
         const cType = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
@@ -426,6 +468,99 @@ export class Canvas2DRenderer extends RendererBase {
     });
   }
 
+  // Per-pair metaball render for a SPLITTING cell. The two halves are
+  // drawn (white) into a scratch canvas, blur+contrast carves a binary
+  // metaball mask that fuses them, then the mask is tinted with the
+  // cytoplasm gradient via source-in and blitted into the main canvas
+  // at the bbox. Membrane stroke comes later via _drawMembrane (which
+  // strokes each half polygon — visually OK because the merge is
+  // carried by the fill).
+  _renderSplittingPair(c, t) {
+    const ctx = this.ctx;
+    const cam = this.camera;
+    const cType = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+    const fld = cType.field || { blur: 6, contrast: 20 };
+    const cc = cellColors(c);
+    const N = WOBBLE_VERTS;
+    const halves = splitVirtualCenters(c);
+
+    // World-space bbox covering both wobble polygons (with a generous
+    // body multiplier) plus blur padding.
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const h of halves) {
+      const buf = h.r * 1.6;
+      if (h.x - buf < minX) minX = h.x - buf;
+      if (h.y - buf < minY) minY = h.y - buf;
+      if (h.x + buf > maxX) maxX = h.x + buf;
+      if (h.y + buf > maxY) maxY = h.y + buf;
+    }
+    // 1 scratch pixel per screen pixel at current zoom keeps the blur
+    // strength matched to canvas2D's filter() spec (px-based).
+    const scratchScale = Math.max(0.5, cam.scale);
+    const padScratchPx = fld.blur * 3 + 4;
+    const padWorld = padScratchPx / scratchScale;
+    minX -= padWorld; minY -= padWorld;
+    maxX += padWorld; maxY += padWorld;
+    const sw = Math.max(8, Math.ceil((maxX - minX) * scratchScale));
+    const sh = Math.max(8, Math.ceil((maxY - minY) * scratchScale));
+
+    if (!this._scratch) {
+      this._scratch = document.createElement('canvas');
+      this._scratchCtx = this._scratch.getContext('2d');
+    }
+    this._scratch.width = sw;
+    this._scratch.height = sh;
+    const sctx = this._scratchCtx;
+
+    // World→scratch transform.
+    sctx.setTransform(scratchScale, 0, 0, scratchScale, -minX * scratchScale, -minY * scratchScale);
+
+    // 1) Both halves filled solid white onto the freshly-sized scratch.
+    sctx.fillStyle = '#ffffff';
+    for (const h of halves) {
+      const ref = { x: h.x, y: h.y, r: h.r, cell: c };
+      sctx.beginPath();
+      for (let i = 0; i <= N; i++) {
+        const v = shapeVertex(ref, THETA_TABLE[i], t);
+        if (i === 0) sctx.moveTo(v.x, v.y);
+        else sctx.lineTo(v.x, v.y);
+      }
+      sctx.closePath();
+      sctx.fill();
+    }
+
+    // 2) Apply blur+contrast in identity space (filter spec is in
+    // scratch pixels), copying scratch onto itself to carve the
+    // metaball edge.
+    sctx.save();
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+    sctx.globalCompositeOperation = 'copy';
+    sctx.filter = `blur(${fld.blur}px) contrast(${fld.contrast})`;
+    sctx.drawImage(this._scratch, 0, 0);
+    sctx.filter = 'none';
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.restore();
+
+    // 3) Tint the mask with the cytoplasm gradient via source-in.
+    sctx.save();
+    sctx.globalCompositeOperation = 'source-in';
+    const mx = (halves[0].x + halves[1].x) / 2;
+    const my = (halves[0].y + halves[1].y) / 2;
+    const gr = Math.max(halves[0].r, halves[1].r) * 1.95;
+    const grad = sctx.createRadialGradient(mx, my - gr * 0.18, 0, mx, my, gr);
+    grad.addColorStop(0,    cc.cytoTop);
+    grad.addColorStop(0.55, cc.cytoBot);
+    grad.addColorStop(1,    cc.cytoBotTransp || hexToRgba(cc.cytoBot, 0));
+    sctx.fillStyle = grad;
+    sctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+    sctx.globalCompositeOperation = 'source-over';
+    sctx.restore();
+
+    // 4) Blit scratch into the main canvas at the world bbox. The
+    // surrounding withCameraCtx already applies the camera transform,
+    // so `minX / minY` are world coordinates here.
+    ctx.drawImage(this._scratch, 0, 0, sw, sh, minX, minY, maxX - minX, maxY - minY);
+  }
 
   _drawMembrane(shapes, t, theme) {
     const ctx = this.ctx;
