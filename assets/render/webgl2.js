@@ -717,6 +717,50 @@ void main() {
 // Two off-screen RGBA8 textures (`_reactorRtA` + `_reactorRtB`) ping-
 // pong each visible frame. Encoding: the texel stores
 // `(A * 0.05, B, 0, 1)` so both concentrations fit cleanly in 0..1.
+// Caustics overlay post-process: samples the bg texture (rendered
+// in a previous pass to an offscreen FBO) at uv displaced by an
+// animated water-turbulence pattern, then multiplies by a
+// green/teal tint — reads as light dancing through water on top of
+// whatever bg theme is selected.
+//
+// Adapted from "Tileable Water Caustic" by David Hoskins (modified
+// joltz0r 2013) — https://www.shadertoy.com/view/ltSczG · Shadertoy
+// default licence (CC BY-NC-SA 3.0). Same caustic math as the
+// shader-test page's PR #73 implementation.
+const FRAG_CAUSTIC_BG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_bg;
+uniform float u_time;
+out vec4 outColor;
+
+void main() {
+  vec2 uv = v_uv;
+  float TAU = 6.28318530718;
+  float time2 = u_time * 0.5 + 23.0;
+  vec2 p0 = mod(uv * TAU, TAU) - 150.0;
+  vec2 i = p0;
+  float c = 1.0;
+  float inten = 0.005;
+  for (int n = 0; n < 5; n++) {
+    float tn = time2 * (1.0 - (3.5 / float(n + 1)));
+    i = p0 + vec2(cos(tn - i.x) + sin(tn + i.y),
+                  sin(tn - i.y) + cos(tn + i.x));
+    vec2 denom = vec2(p0.x / (sin(i.x + tn) / inten),
+                      p0.y / (cos(i.y + tn) / inten));
+    c += 1.0 / max(length(denom), 1e-4);
+  }
+  c /= 5.0;
+  c = 1.17 - pow(c, 1.4);
+  float shade = pow(abs(c), 8.0);
+  vec3 tint = clamp((vec3(shade) + vec3(0.0, 1.35, 0.5)) * 2.0, 0.0, 1.0);
+  vec2 off = vec2(cos(c) - 0.75, sin(c) - 0.75) * 0.04;
+  vec2 sampleUv = clamp(uv + off, 0.0, 1.0);
+  vec3 bg = texture(u_bg, sampleUv).rgb;
+  outColor = vec4(bg * tint, 1.0);
+}
+`;
+
 // Step shader runs N iterations per visible frame; seed shader writes
 // fresh B-discs every ~10 s so the pattern keeps regrowing.
 const FRAG_REACTOR_STEP = `#version 300 es
@@ -2014,6 +2058,58 @@ export class WebGL2Renderer extends RendererBase {
     this._reactorProgsReady = false;
   }
 
+  // ── Caustics overlay (S.causticsOverlay) ──
+  // Lazy-allocated full-canvas RGBA8 RT (LINEAR filter so the
+  // caustic UV-displacement sample doesn't pixelate). The bg pass
+  // renders into this when the toggle is on; FRAG_CAUSTIC_BG then
+  // samples from it on a fullscreen post-pass to the default fb.
+  _causticEnsureRt() {
+    const gl = this.gl;
+    const w = this.W | 0;
+    const h = this.H | 0;
+    if (this._causticRt && this._causticRt.w === w && this._causticRt.h === h) return;
+    if (this._causticRt) {
+      gl.deleteFramebuffer(this._causticRt.fbo);
+      gl.deleteTexture(this._causticRt.tex);
+    }
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    this._causticRt = { fbo, tex, w, h };
+  }
+  _causticEnsureProg() {
+    if (this._causticProg) return;
+    const gl = this.gl;
+    const prog = link(gl, VERT_FULLSCREEN, FRAG_CAUSTIC_BG);
+    this._causticProg = prog;
+    this._causticU = {
+      bg:   gl.getUniformLocation(prog, 'u_bg'),
+      time: gl.getUniformLocation(prog, 'u_time'),
+    };
+  }
+  _causticDestroy() {
+    const gl = this.gl;
+    if (this._causticRt) {
+      gl.deleteFramebuffer(this._causticRt.fbo);
+      gl.deleteTexture(this._causticRt.tex);
+      this._causticRt = null;
+    }
+    if (this._causticProg) {
+      gl.deleteProgram(this._causticProg);
+      this._causticProg = null;
+      this._causticU = null;
+    }
+  }
+
   drawBackground(timeMs) {
     const gl = this.gl;
     const bg = currentBackground();
@@ -2095,7 +2191,38 @@ export class WebGL2Renderer extends RendererBase {
 
     gl.bindVertexArray(this._bgVao);
     gl.disable(gl.BLEND);
+
+    // Caustics-overlay path: render the bg into our offscreen FBO,
+    // then run a second fullscreen pass that samples it with a
+    // water-turbulence UV-displacement + tint. When the toggle is
+    // off (default) we skip both the FBO bind and the post-pass —
+    // zero added cost.
+    const useCaustics = !!S.causticsOverlay;
+    if (useCaustics) {
+      this._causticEnsureRt();
+      this._causticEnsureProg();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._causticRt.fbo);
+      gl.viewport(0, 0, this._causticRt.w, this._causticRt.h);
+    }
+
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+    if (useCaustics && this._causticProg) {
+      // Switch to the default framebuffer + caustic post-pass.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.W, this.H);
+      gl.useProgram(this._causticProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._causticRt.tex);
+      gl.uniform1i(this._causticU.bg, 0);
+      gl.uniform1f(this._causticU.time, t);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    } else if (this._causticRt) {
+      // Toggled off mid-session — release the offscreen RT so the
+      // memory doesn't sit around for the rest of the page lifetime.
+      this._causticDestroy();
+    }
+
     gl.enable(gl.BLEND);
     gl.bindVertexArray(null);
     // Decor (lobules, villi, neurons, …) intentionally not ported —
@@ -3033,6 +3160,7 @@ export class WebGL2Renderer extends RendererBase {
     if (this._metaPolyVao) gl.deleteVertexArray(this._metaPolyVao);
     this._metaDestroyPool();
     this._reactorDestroy();
+    this._causticDestroy();
     this.gl = null;
   }
 }

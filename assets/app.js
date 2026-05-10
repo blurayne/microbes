@@ -623,6 +623,11 @@ bindCheckbox('compositionHud', 'compositionHud');
 // hook needed; the next render frame picks up the new value.
 bindCheckbox('virusShader3D', 'virusShader3D');
 
+// Caustics-overlay toggle. Renderer reads S.causticsOverlay each
+// frame inside drawBackground; no listener hook needed — the next
+// rAF picks up the new value.
+bindCheckbox('causticsToggle', 'causticsOverlay');
+
 // Fullscreen toggle. Browsers REQUIRE a user gesture to enter
 // fullscreen, so this can't be a saved-and-restored S.* setting —
 // we only react to the user's click. The checkbox state is kept

@@ -732,6 +732,55 @@ struct SeedU {
 // Vertex shader is the canonical big-triangle (3 verts cover the clip
 // rect) so no VBO is needed.
 const MAX_SPOTS = 8;
+
+// Caustics overlay post-process. The bg pass can render to an
+// offscreen texture; this pass samples that texture at uv displaced
+// by an animated water-turbulence pattern + multiplies by a
+// green/teal tint. Adapted from "Tileable Water Caustic" by David
+// Hoskins (https://www.shadertoy.com/view/ltSczG · CC BY-NC-SA 3.0).
+// Same maths as PR #73's shader-test path.
+const CAUSTIC_BG_WGSL = /* wgsl */ `
+struct CausticU { time: f32 };
+@group(0) @binding(0) var<uniform> U : CausticU;
+@group(0) @binding(1) var bgSamp : sampler;
+@group(0) @binding(2) var bgTex  : texture_2d<f32>;
+
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+  // Big-triangle fullscreen pattern: 3 verts covering the screen.
+  let x = f32((vi << 1u) & 2u) * 2.0 - 1.0;
+  let y = f32(vi & 2u) * 2.0 - 1.0;
+  return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+@fragment fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+  let dim = vec2<f32>(textureDimensions(bgTex, 0));
+  let uv  = frag.xy / dim;
+  let TAU: f32 = 6.28318530718;
+  let time2 = U.time * 0.5 + 23.0;
+  var p0 = ((uv * TAU) % vec2<f32>(TAU) + vec2<f32>(TAU)) % vec2<f32>(TAU) - vec2<f32>(150.0);
+  var i = p0;
+  var c: f32 = 1.0;
+  let inten: f32 = 0.005;
+  for (var n: i32 = 0; n < 5; n = n + 1) {
+    let tn = time2 * (1.0 - (3.5 / f32(n + 1)));
+    i = p0 + vec2<f32>(cos(tn - i.x) + sin(tn + i.y),
+                       sin(tn - i.y) + cos(tn + i.x));
+    let denom = vec2<f32>(p0.x / (sin(i.x + tn) / inten),
+                          p0.y / (cos(i.y + tn) / inten));
+    c = c + 1.0 / max(length(denom), 1e-4);
+  }
+  c = c / 5.0;
+  c = 1.17 - pow(c, 1.4);
+  let shade = pow(abs(c), 8.0);
+  let tint = clamp((vec3<f32>(shade) + vec3<f32>(0.0, 1.35, 0.5)) * 2.0,
+                   vec3<f32>(0.0), vec3<f32>(1.0));
+  let off = vec2<f32>(cos(c) - 0.75, sin(c) - 0.75) * 0.04;
+  let sampleUv = clamp(uv + off, vec2<f32>(0.0), vec2<f32>(1.0));
+  let bg = textureSample(bgTex, bgSamp, sampleUv).rgb;
+  return vec4<f32>(bg * tint, 1.0);
+}
+`;
+
 const BG_WGSL = /* wgsl */ `
 struct BgU {
   // (kind, vignette, gridStep, time)
@@ -1483,6 +1532,16 @@ export class WebGPURenderer extends RendererBase {
     this._reactorRtSize = { w: 0, h: 0 };
     this._reactorFront = 0;
     this._reactorLastSeedMs = -Infinity;
+
+    // Caustics-overlay post-process (S.causticsOverlay). Lazy: nothing
+    // is allocated until the toggle is first turned on, and everything
+    // is released on toggle-off.
+    this._causticBgRt = null;        // { tex, view, w, h }
+    this._causticBgPipeline = null;  // GPURenderPipeline
+    this._causticBgSampler = null;   // GPUSampler (linear)
+    this._causticBgUbo = null;       // GPUBuffer (16 bytes — time + padding)
+    this._causticBgUboData = null;   // Float32Array(4)
+
     // One-time random light-spot layout, mirrors webgl2.js:935.
     this._spots = [];
     for (let i = 0; i < MAX_SPOTS; i++) {
@@ -2184,6 +2243,53 @@ export class WebGPURenderer extends RendererBase {
     this._reactorLastSeedMs = -Infinity;
   }
 
+  // ── Caustics overlay (S.causticsOverlay) ──
+  // Builds a full-canvas RGBA8unorm texture with RENDER_ATTACHMENT
+  // + TEXTURE_BINDING usage so the bg pass can render INTO it and
+  // the post-pass below can sample FROM it.
+  _causticBgEnsureRt() {
+    const device = this.device;
+    const w = this.W | 0;
+    const h = this.H | 0;
+    if (this._causticBgRt && this._causticBgRt.w === w && this._causticBgRt.h === h) return;
+    if (this._causticBgRt) { try { this._causticBgRt.tex.destroy(); } catch {} }
+    const tex = device.createTexture({
+      size: [w, h],
+      format: this.format,                 // match the canvas format so the
+                                           // post-pass output matches the
+                                           // surface's pipeline target.
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    this._causticBgRt = { tex, view: tex.createView(), w, h };
+  }
+  _causticBgEnsurePipeline() {
+    if (this._causticBgPipeline) return;
+    const device = this.device;
+    const mod = device.createShaderModule({ code: CAUSTIC_BG_WGSL });
+    this._causticBgPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex:   { module: mod, entryPoint: 'vs_main' },
+      fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format }] },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._causticBgSampler = device.createSampler({
+      magFilter: 'linear', minFilter: 'linear',
+      addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
+    });
+    this._causticBgUbo = device.createBuffer({
+      size: 16,                            // 1 float + 12 padding bytes
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._causticBgUboData = new Float32Array(4);
+  }
+  _causticBgDestroy() {
+    if (this._causticBgRt) { try { this._causticBgRt.tex.destroy(); } catch {} this._causticBgRt = null; }
+    if (this._causticBgUbo) { try { this._causticBgUbo.destroy(); } catch {} this._causticBgUbo = null; }
+    this._causticBgPipeline = null;
+    this._causticBgSampler = null;
+    this._causticBgUboData = null;
+  }
+
   _buildDiskPipeline() {
     const device = this.device;
 
@@ -2528,9 +2634,24 @@ export class WebGPURenderer extends RendererBase {
       ],
     });
 
+    // Caustics-overlay path: the bg pass renders into our offscreen
+    // RT instead of straight to the canvas, then a post-pass below
+    // samples that texture with a water-turbulence UV displacement
+    // + tint. When the toggle is off (default) we render straight
+    // to _frameView — zero added cost, no allocation.
+    const useCaustics = !!S.causticsOverlay;
+    let bgTarget = this._frameView;
+    if (useCaustics) {
+      this._causticBgEnsureRt();
+      this._causticBgEnsurePipeline();
+      bgTarget = this._causticBgRt.view;
+    } else if (this._causticBgRt) {
+      // Toggled off mid-session — release.
+      this._causticBgDestroy();
+    }
     const pass = this._frameEncoder.beginRenderPass({
       colorAttachments: [{
-        view: this._frameView,
+        view: bgTarget,
         // Clear value irrelevant — fragment writes every pixel.
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
         loadOp: 'clear',
@@ -2541,6 +2662,35 @@ export class WebGPURenderer extends RendererBase {
     pass.setBindGroup(0, bgBindGroup);
     pass.draw(3, 1, 0, 0);             // big-triangle, 3 verts, no VBO
     pass.end();
+
+    if (useCaustics && this._causticBgPipeline) {
+      this._causticBgUboData[0] = t;
+      this.device.queue.writeBuffer(
+        this._causticBgUbo, 0,
+        this._causticBgUboData.buffer, this._causticBgUboData.byteOffset,
+        this._causticBgUboData.byteLength,
+      );
+      const cBg = this.device.createBindGroup({
+        layout: this._causticBgPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._causticBgUbo } },
+          { binding: 1, resource: this._causticBgSampler },
+          { binding: 2, resource: this._causticBgRt.view },
+        ],
+      });
+      const post = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: this._frameView,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      post.setPipeline(this._causticBgPipeline);
+      post.setBindGroup(0, cBg);
+      post.draw(3, 1, 0, 0);
+      post.end();
+    }
   }
 
   drawCells(shapes, time /*, timeMs */) {
@@ -3537,6 +3687,7 @@ export class WebGPURenderer extends RendererBase {
     tryDestroy(this._decorTriBuffer);
     this._metaDestroyPool();
     this._reactorDestroy();
+    this._causticBgDestroy();
     tryDestroy(this._reactorStepUniformBuffer);
     tryDestroy(this._reactorSeedUniformBuffer);
     tryDestroy(this._reactorDummyTex);
