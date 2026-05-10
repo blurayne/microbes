@@ -390,7 +390,10 @@ const paletteDialog = addDialog;
 const paletteBadDialog = addDialog;
 const helpBtn = document.getElementById('help');
 const paletteBtn = document.getElementById('palette');
-const paletteBadBtn = document.getElementById('paletteBad');
+// #paletteBad FAB was removed (PR #?? — unified add-dialog); the
+// const stays as null so other references that filter Boolean
+// don't break.
+const paletteBadBtn = null;
 const reloadBtn = document.getElementById('reload');
 const pauseBtn = document.getElementById('pause');
 const eyeBtn = document.getElementById('eyeToggle');
@@ -457,58 +460,23 @@ gearBtn.addEventListener('click', () => {
 if (helpBtn) helpBtn.addEventListener('click', () => {
   helpDialog.classList.contains('hidden') ? openOnly(helpDialog) : closeAll();
 });
-// Tab switcher for the merged add-dialog. Renders the appropriate
-// grid lazily on first activation; theme tab is static so no
-// render needed there.
-function setAddTab(name) {
-  for (const t of document.querySelectorAll('.add-tab')) {
-    const on = t.dataset.addTab === name;
-    t.classList.toggle('active', on);
-    t.setAttribute('aria-selected', String(on));
-  }
-  for (const p of document.querySelectorAll('.add-pane')) {
-    const on = p.dataset.addPane === name;
-    p.hidden = !on;
-    p.classList.toggle('active', on);
-  }
-  // Title reflects the active tab; falls back to a generic "Add"
-  // for the theme tab where neither cell nor pathogen applies.
-  const title = document.getElementById('addDialogTitle');
-  if (title) {
-    if      (name === 'cells')     title.setAttribute('data-i18n', 'add_cell');
-    else if (name === 'pathogens') title.setAttribute('data-i18n', 'add_pathogen');
-    else                           title.setAttribute('data-i18n', 'theme');
-    applyI18n();
-  }
-  if      (name === 'cells')     renderPaletteGrid();
-  else if (name === 'pathogens') renderPaletteBadGrid();
-}
-document.querySelectorAll('.add-tab').forEach(t => {
-  t.addEventListener('click', () => {
-    if (t.dataset.addTab === 'pathogens' && !S.allowBadGuys) return;
-    setAddTab(t.dataset.addTab);
-  });
-});
-// The pathogens tab is hidden when S.allowBadGuys is off — the
-// label gets disabled-style + click is a no-op above. Update on
-// every dialog open in case the setting flipped.
-function syncAddTabsForBadGuys() {
-  const pathTab = document.querySelector('.add-tab[data-add-tab="pathogens"]');
-  if (pathTab) pathTab.hidden = !S.allowBadGuys;
+// Render BOTH grids when the dialog opens (cells always, pathogens
+// only when S.allowBadGuys). Also toggles the pathogens section
+// title's visibility so the dialog stays clean when bad-guys are
+// off.
+function renderAddDialogContents() {
+  renderPaletteGrid();
+  const showBad = !!S.allowBadGuys;
+  const pathTitle = document.querySelector('.add-section-pathogens');
+  const pathGrid  = document.getElementById('cellGridBad');
+  if (pathTitle) pathTitle.hidden = !showBad;
+  if (pathGrid)  pathGrid.hidden  = !showBad;
+  if (showBad) renderPaletteBadGrid();
 }
 
 if (paletteBtn) paletteBtn.addEventListener('click', () => {
   if (addDialog.classList.contains('hidden')) {
-    syncAddTabsForBadGuys();
-    setAddTab('cells');
-    openOnly(addDialog);
-  } else closeAll();
-});
-if (paletteBadBtn) paletteBadBtn.addEventListener('click', () => {
-  if (!S.allowBadGuys) return;
-  if (addDialog.classList.contains('hidden')) {
-    syncAddTabsForBadGuys();
-    setAddTab('pathogens');
+    renderAddDialogContents();
     openOnly(addDialog);
   } else closeAll();
 });

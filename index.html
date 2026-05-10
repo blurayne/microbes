@@ -213,8 +213,9 @@
   </button>
   <button id="pause" class="fab" type="button" aria-label="Pause" title="Pause" aria-pressed="false" data-i18n-attr="aria-label=pause,title=pause">⏸</button>
   <button id="help" class="fab" type="button" aria-label="Help" title="Help" data-i18n-attr="aria-label=nav_help,title=nav_help">?</button>
-  <button id="paletteBad" class="fab fab-bad" type="button" aria-label="Add pathogen" title="Add a pathogen" data-i18n-attr="aria-label=nav_add_pathogen,title=nav_add_pathogen">✚</button>
-  <button id="palette" class="fab" type="button" aria-label="Add cell" title="Add a cell" data-i18n-attr="aria-label=nav_add_cell,title=nav_add_cell">+</button>
+  <!-- #paletteBad FAB removed (per user spec — pathogens spawn from
+       the unified add-dialog opened by #palette). -->
+  <button id="palette" class="fab" type="button" aria-label="Add" title="Add" data-i18n-attr="aria-label=nav_add_cell,title=nav_add_cell">+</button>
   <button id="reload" class="fab" type="button" aria-label="Reload" title="Hard reload" data-i18n-attr="aria-label=nav_reload,title=nav_reload">⟳</button>
   <div id="pauseOverlay" class="pause-overlay" aria-hidden="true"><div class="pause-text" data-i18n="paused">PAUSE</div></div>
   <div id="cellTagLayer" class="cell-tag-layer" aria-hidden="true"></div>
@@ -294,38 +295,40 @@
     </aside>
   </div>
 
+  <!-- Add-dialog: flat structure. All cells + pathogens render in one
+       grid (gated by S.allowBadGuys); theme picker sits at the bottom.
+       No colour-palette chooser here (kept in main Settings). The
+       legacy 3-tab layout was removed per user spec, and the separate
+       #paletteBad FAB is gone too — pathogens come through this same
+       dialog. -->
   <div id="addDialog" class="dialog hidden" role="dialog" aria-label="Add">
     <div class="dialog-backdrop" data-close></div>
     <aside class="dialog-panel">
       <header>
-        <h2><span id="addDialogTitle" data-i18n="add_title">Add</span></h2>
+        <h2 data-i18n="add_title">Add</h2>
         <button type="button" class="close" data-close aria-label="Close">&times;</button>
       </header>
-      <div class="add-tabs" role="tablist">
-        <button class="add-tab active" data-add-tab="cells" role="tab" aria-selected="true" data-i18n="add_tab_cells">Cells</button>
-        <button class="add-tab" data-add-tab="pathogens" role="tab" aria-selected="false" data-i18n="add_tab_pathogens">Pathogens</button>
-        <button class="add-tab" data-add-tab="theme" role="tab" aria-selected="false" data-i18n="add_tab_theme">Theme</button>
-      </div>
-      <div class="add-pane add-pane-cells active" data-add-pane="cells">
+      <div class="add-body">
+        <h3 class="add-section-title" data-i18n="add_tab_cells">Cells</h3>
         <div id="cellGrid"></div>
-        <p class="palette-footer"><a href="#" id="paletteToHelp" data-i18n="palette_to_help">Learn what each cell does →</a></p>
-      </div>
-      <div class="add-pane add-pane-pathogens" data-add-pane="pathogens" hidden>
+        <h3 class="add-section-title add-section-pathogens" data-i18n="add_tab_pathogens">Pathogens</h3>
         <div id="cellGridBad"></div>
-        <p class="palette-footer"><a href="#" id="paletteBadToHelp" data-i18n="palette_bad_to_help">Learn what each pathogen does →</a></p>
+        <p class="palette-footer">
+          <a href="#" id="paletteToHelp" data-i18n="palette_to_help">Learn what each cell does →</a>
+        </p>
       </div>
-      <div class="add-pane add-pane-theme" data-add-pane="theme" hidden>
-        <h3 data-i18n="theme">Theme</h3>
-        <select id="themeSelectInline">
-          <option value="legacy"     data-i18n="theme_legacy">Legacy (default)</option>
-          <option value="microscope" data-i18n="theme_microscope">Microscope</option>
-          <option value="cartoon"    data-i18n="theme_cartoon">Cartoon</option>
-          <option value="kurzgesagt" data-i18n="theme_kurzgesagt">Kurzgesagt</option>
-          <option value="classic"    data-i18n="theme_classic">Classic</option>
-        </select>
-        <h3 data-i18n="background">Background</h3>
-        <select id="bgSelectInline"></select>
-      </div>
+      <footer class="add-footer">
+        <label class="add-theme-row">
+          <span data-i18n="theme">Theme</span>
+          <select id="themeSelectInline">
+            <option value="legacy"     data-i18n="theme_legacy">Legacy (default)</option>
+            <option value="microscope" data-i18n="theme_microscope">Microscope</option>
+            <option value="cartoon"    data-i18n="theme_cartoon">Cartoon</option>
+            <option value="kurzgesagt" data-i18n="theme_kurzgesagt">Kurzgesagt</option>
+            <option value="classic"    data-i18n="theme_classic">Classic</option>
+          </select>
+        </label>
+      </footer>
     </aside>
   </div>
 
