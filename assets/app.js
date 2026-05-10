@@ -233,14 +233,21 @@ function enterAddMode(typeKey) {
   const lbl = document.getElementById('addBadgeLabel');
   if (lbl) lbl.textContent = T('adding', { name: localised });
   document.body.classList.add('adding');
+  console.debug('[add] enter', typeKey);
 }
 function cancelAddMode() {
+  if (sim.addMode) console.debug('[add] cancel', sim.addMode.type);
   sim.addMode = null;
   document.body.classList.remove('adding');
 }
 
 canvas.addEventListener('pointerdown', (ev) => {
-  if (ev.target !== canvas) return;
+  // When in add mode, allow the click to spawn regardless of the
+  // event target — a stale spawn-banner or other floating overlay
+  // can briefly shift ev.target away from the canvas even though the
+  // overlay has pointer-events: none. Strict target check stays for
+  // the normal drag/select path.
+  if (ev.target !== canvas && !sim.addMode) return;
   const sp = pointerScreen(ev);
   sim.activePointers.set(ev.pointerId, { x: sp.x, y: sp.y });
   canvas.setPointerCapture?.(ev.pointerId);
@@ -250,7 +257,12 @@ canvas.addEventListener('pointerdown', (ev) => {
   if (sim.addMode && ev.button === 0) {
     const w0 = sim.screenToWorld(sp.x, sp.y);
     const justSpawnedType = sim.addMode.type;
-    sim.spawnAtWorld(justSpawnedType, w0.x, w0.y);
+    const spawned = sim.spawnAtWorld(justSpawnedType, w0.x, w0.y);
+    console.debug('[add] spawn',
+      justSpawnedType,
+      'at', Math.round(w0.x), Math.round(w0.y),
+      spawned ? 'ok' : 'CAP',
+    );
     // First-spawn banner: SpawnBanner.notify is a no-op for any
     // type the user has already seen (localStorage-tracked) so
     // it's safe to call unconditionally.
