@@ -33,6 +33,13 @@ When **shipping** the change:
 - **Always branch off `main`.** Never commit directly to main.
 - **One PR per logical change.** Big plans split into sub-PRs;
   the plan file in `.claude/plan/` describes the split.
+- **Always announce the build number after a merge or push.**
+  After merging a PR or pushing to main, the assistant must tell
+  the user which **build number** is now deploying — this is the
+  GitHub PR number that just landed (e.g. "PR #95 merged → build
+  #95 is deploying"). The user uses this to know which version
+  of the GitHub Pages site to expect on next refresh. Do this on
+  every merge/push without being asked.
 - **Pre-commit checks**: `node --test` + render-module imports
   (`for r in canvas2d webgl2 webgpu; do node -e "import('./assets/render/${r}.js').then(()=>console.log(r))"; done`).
 - **Renderer parity**: when a visual change touches one renderer
