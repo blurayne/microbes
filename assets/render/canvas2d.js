@@ -1166,19 +1166,20 @@ export class Canvas2DRenderer extends RendererBase {
             ctx.closePath();
             ctx.fill();
           } else if (mouthKind === 'snarl') {
-            // Solid filled band with a zig-zag bottom edge for
-            // teeth — top straight, bottom bobs between two heights.
+            // 5 downward-pointing triangular teeth sharing their top
+            // edges — solid filled (not a sawtooth-bottom rectangle).
             ctx.beginPath();
             const N = 5;
-            const topY = mY - mW * 0.18;
-            ctx.moveTo(cx - mW, topY);
-            ctx.lineTo(cx + mW, topY);
-            for (let i = N; i >= 0; i--) {
-              const x = cx - mW + (2 * mW) * (i / N);
-              const y = mY + (i % 2 === 0 ? mW * 0.20 : mW * 0.04);
-              ctx.lineTo(x, y);
+            const topY = mY - mW * 0.05;
+            const toothH = mW * 0.30;
+            const step = (2 * mW) / N;
+            for (let i = 0; i < N; i++) {
+              const tCx = cx - mW + (i + 0.5) * step;
+              ctx.moveTo(tCx - step * 0.5, topY);
+              ctx.lineTo(tCx + step * 0.5, topY);
+              ctx.lineTo(tCx, topY + toothH);
+              ctx.closePath();
             }
-            ctx.closePath();
             ctx.fill();
           } else if (mouthKind === 'fangs') {
             ctx.beginPath();

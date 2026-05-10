@@ -1612,18 +1612,24 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
     col = mix(col, in.mouthCol, fill);
     a = max(a, fill);
   } else if (mouthKind == 3) {
-    // SNARL — solid filled band with a zig-zag bottom edge.
-    let xrel = uv.x / max(mouthW, 0.001);
-    if (abs(xrel) < 1.0) {
-      let seg = floor((xrel + 1.0) * 2.5);
-      let segMod = seg - 2.0 * floor(seg * 0.5);
-      let zigBot = mouthY + select(mouthW * 0.04, mouthW * 0.20, segMod < 0.5);
-      let topY = mouthY - mouthW * 0.18;
-      let topMask = sstep(topY - 0.005, topY + 0.005, uv.y, blur);
-      let botMask = 1.0 - sstep(zigBot - 0.005, zigBot + 0.005, uv.y, blur);
-      let fill = topMask * botMask;
-      col = mix(col, in.mouthCol, fill);
-      a = max(a, fill);
+    // SNARL — 5 downward-pointing triangular teeth sharing top
+    // edges. Mirror of WebGL2 FRAG_FACE.
+    let topY = mouthY - mouthW * 0.05;
+    let toothH = mouthW * 0.30;
+    let halfStep = mouthW / 5.0;
+    let ly = uv.y - topY;
+    if (ly > 0.0 && ly < toothH) {
+      let xrel = (uv.x + mouthW) / (2.0 * mouthW);
+      if (xrel > 0.0 && xrel < 1.0) {
+        let idx = floor(xrel * 5.0);
+        let cx = -mouthW + (idx + 0.5) * (2.0 * mouthW / 5.0);
+        let t = ly / toothH;
+        let halfAtY = (1.0 - t) * halfStep;
+        let fill = 1.0 - smoothstep(halfAtY - 0.005, halfAtY + 0.005,
+                                     abs(uv.x - cx));
+        col = mix(col, in.mouthCol, fill);
+        a = max(a, fill);
+      }
     }
   } else if (mouthKind == 4) {
     // FANGS — open ellipse + two white wedges.

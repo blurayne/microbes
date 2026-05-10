@@ -1583,18 +1583,26 @@ void main() {
     col = mix(col, v_mouthCol, fill);
     a = max(a, fill);
   } else if (mouthKind == 3) {
-    // SNARL — solid filled band with a zig-zag bottom edge that
-    // reads as teeth. The band stretches from xrel ∈ [-1, 1].
-    float xrel = v_uv.x / mouthW;
-    if (abs(xrel) < 1.0) {
-      float seg = floor((xrel + 1.0) * 2.5);
-      float zigBot = mouthY + (mod(seg, 2.0) < 0.5 ? mouthW * 0.20 : mouthW * 0.04);
-      float topY = mouthY - mouthW * 0.18;
-      float topMask = sstep(topY - 0.005, topY + 0.005, v_uv.y);
-      float botMask = 1.0 - sstep(zigBot - 0.005, zigBot + 0.005, v_uv.y);
-      float fill = topMask * botMask;
-      col = mix(col, v_mouthCol, fill);
-      a = max(a, fill);
+    // SNARL — 5 downward-pointing triangular teeth sharing their
+    // top edges. Solid filled (not a rectangle with sawtooth).
+    float topY = mouthY - mouthW * 0.05;
+    float toothH = mouthW * 0.30;
+    float halfStep = mouthW / 5.0;          // half-width of each tooth
+    float ly = v_uv.y - topY;
+    if (ly > 0.0 && ly < toothH) {
+      // Locate which tooth this fragment is over.
+      float xrel = (v_uv.x + mouthW) / (2.0 * mouthW);  // 0..1 across the band
+      if (xrel > 0.0 && xrel < 1.0) {
+        float idx = floor(xrel * 5.0);
+        float cx = -mouthW + (idx + 0.5) * (2.0 * mouthW / 5.0);
+        float t = ly / toothH;
+        float halfAtY = (1.0 - t) * halfStep;
+        // Soft tooth edge AA: ramp the boundary across ~0.005 uv.
+        float fill = 1.0 - smoothstep(halfAtY - 0.005, halfAtY + 0.005,
+                                       abs(v_uv.x - cx));
+        col = mix(col, v_mouthCol, fill);
+        a = max(a, fill);
+      }
     }
   } else if (mouthKind == 4) {
     // FANGS — open mouth ellipse + two white triangles

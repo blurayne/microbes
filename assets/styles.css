@@ -293,6 +293,22 @@ body.is-paused #aboutDialog {
   margin-bottom: 6px;
   color: var(--accent);
 }
+/* Hint block under a settings control — small, dim, leaves room
+   above so it reads as a footnote to the preceding label. <b>mode</b>
+   tokens are tinted with the active accent. */
+.settings-panel .hint {
+  margin: 4px 4px 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #d8d0c8aa;
+}
+.settings-panel .hint li { margin: 2px 0; }
+.settings-panel .hint b {
+  color: var(--accent);
+  font-weight: 600;
+}
 .settings-panel h3 {
   margin: 0 0 8px;
   font-size: 12px;
