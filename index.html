@@ -178,6 +178,7 @@
 
       <section class="actions">
         <button type="button" id="resetSim" data-i18n="reset_sim">Reset simulation</button>
+        <button type="button" id="aboutBtn" class="about-btn" data-i18n="about">About</button>
       </section>
 
       <section>
@@ -239,6 +240,58 @@
        just pre-select a different tab. The theme tab moves the
        palette-relevant theme switcher out of the deep settings
        panel, where users were missing it. -->
+  <!-- About dialog: project credits + licence flags. The CC BY-NC-SA
+       block is the project's standing audit reminder — three assets
+       on main are non-permissive (Shadertoy default licence). -->
+  <div id="aboutDialog" class="dialog hidden" role="dialog" aria-label="About">
+    <div class="dialog-backdrop" data-close></div>
+    <aside class="dialog-panel">
+      <header>
+        <h2 data-i18n="about">About</h2>
+        <button type="button" class="close" data-close aria-label="Close">&times;</button>
+      </header>
+      <div class="about-body">
+        <p class="about-desc" data-i18n="about_desc">
+          A 2D microbe sim — phagocytes, lymphocytes, and the pathogens they hunt.
+        </p>
+        <h3 data-i18n="about_credits">Credits</h3>
+        <ul class="about-list">
+          <li>Code &amp; design: <a href="https://github.com/blurayne" target="_blank" rel="noopener">blurayne</a></li>
+          <li>Assistant: Claude (Anthropic)</li>
+        </ul>
+        <h3 data-i18n="about_licences">Third-party licences</h3>
+        <p class="about-note" data-i18n="about_licences_note">
+          Three shader assets carry the Shadertoy default
+          <strong>CC BY-NC-SA 3.0</strong> licence (NonCommercial + ShareAlike).
+          They'd need to be replaced if this project ever ships under a
+          permissive licence.
+        </p>
+        <ul class="about-list">
+          <li>
+            "Red Cells I" — <em>shader-test</em> bg
+            (<a href="https://www.shadertoy.com/view/WlfGDM" target="_blank" rel="noopener">source</a>)
+            · author: wrasm · CC BY-NC-SA 3.0
+          </li>
+          <li>
+            "Tileable Water Caustic" — <em>shader-test</em> overlay
+            (<a href="https://www.shadertoy.com/view/ltSczG" target="_blank" rel="noopener">source</a>)
+            · author: David Hoskins (mod. joltz0r 2013) · CC BY-NC-SA 3.0
+          </li>
+          <li>
+            "Tileable Water Caustic" — <em>in-game</em> caustics overlay
+            (<a href="https://www.shadertoy.com/view/ltSczG" target="_blank" rel="noopener">source</a>)
+            · same author / licence as above
+          </li>
+        </ul>
+        <h3 data-i18n="about_permissive">Permissive ports</h3>
+        <ul class="about-list">
+          <li>"Star Nest" by Pablo Roman Andrioli (MIT) — shader-test brain</li>
+          <li>"Smoke" by Roman Bobniev / FatumR (Apache 2.0) — shader-test lung</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+
   <div id="addDialog" class="dialog hidden" role="dialog" aria-label="Add">
     <div class="dialog-backdrop" data-close></div>
     <aside class="dialog-panel">

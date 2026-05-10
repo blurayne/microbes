@@ -381,6 +381,7 @@ canvas.addEventListener('wheel', (ev) => {
 const settingsEl = document.getElementById('settings');
 const gearBtn = document.getElementById('gear');
 const helpDialog = document.getElementById('helpDialog');
+const aboutDialog = document.getElementById('aboutDialog');
 const addDialog = document.getElementById('addDialog');
 // Compatibility shims so the rest of the file's references to
 // `paletteDialog` / `paletteBadDialog` keep pointing somewhere
@@ -432,7 +433,9 @@ function setPaused(p) {
 if (pauseBtn) {
   pauseBtn.addEventListener('click', () => setPaused(!_paused));
 }
-const allDialogs = [settingsEl, helpDialog, addDialog].filter(Boolean);
+const allDialogs = [settingsEl, helpDialog, addDialog, aboutDialog].filter(Boolean);
+const aboutBtn = document.getElementById('aboutBtn');
+if (aboutBtn) aboutBtn.addEventListener('click', () => openOnly(aboutDialog));
 _hookDebugLogButtons();
 
 function openOnly(target) {
