@@ -142,6 +142,34 @@ float cnoise(vec2 P) {
   return 2.3 * mix(n_x.x, n_x.y, fade_xy.y);
 }
 
+// Lightweight value-noise + 4-octave fbm for the cytoplasm grain
+// pass. Mirrors shader-test's fbm() in scale + octaves so the
+// non-legacy theme cyto matches what the playground shows.
+float cellHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+float cellNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(cellHash(i),                  cellHash(i + vec2(1.0, 0.0)), u.x),
+    mix(cellHash(i + vec2(0.0, 1.0)), cellHash(i + vec2(1.0, 1.0)), u.x),
+    u.y);
+}
+float cellFbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) { v += a * cellNoise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+// 2D rotated capsule SDF — used for mitochondria.
+float cellCapsule(vec2 p, vec2 a, vec2 b, float r) {
+  vec2 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
+
 float bodyScale(vec2 uv) {
   int kind = bodyKind();
   float ang = atan(uv.y, uv.x);
@@ -313,6 +341,23 @@ void main() {
   float topLift = max(0.0, 0.55 - distance(v_uv, vec2(-0.30, -0.40))) * 0.65;
   cyto = mix(cyto, v_cytoTop, topLift);
 
+  // Non-legacy themes: shader-test cytoplasm texturing — fine
+  // granular fbm subtracted (cell-grain feel) + slow sheets fbm
+  // added (organelle-density variation). B-cell rough ER stripes
+  // when testKind == 4. Identical numerical formula to shader-
+  // test's fs_main; kAmp / wobble already match by PR-B.1.
+  if (themeId != 0) {
+    float granular = cellFbm(v_uv * 22.0 + vec2(u_time * 0.02, 0.0));
+    cyto -= vec3(0.10, 0.07, 0.08) * granular;
+    float sheets = cellFbm(v_uv * 6.0 - vec2(u_time * 0.03, u_time * 0.02));
+    cyto += vec3(0.08, 0.04, 0.05) * (sheets - 0.5);
+    if (testKind() == 4) {
+      // b-cell — diagonal rough-ER striping
+      float er = sin(v_uv.x * 14.0 + v_uv.y * 6.0 + u_time * 0.4) * 0.5 + 0.5;
+      cyto += vec3(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
+    }
+  }
+
   // Donut-hole darkening for cells flagged bodyHollow (RBCs).
   if (isHollow() == 1) {
     float holeT = 1.0 - smoothstep(0.0, 0.45, length(v_uv));
@@ -411,6 +456,33 @@ void main() {
       // toxin — bright violet glow inside the membrane.
       float glow = pow(smoothstep(1.05, 0.80, d), 2.0) * smoothstep(0.55, 0.85, d);
       col += vec3(0.55, 0.30, 0.85) * glow;
+    }
+  }
+
+  // ── Mitochondria orbits ── 8 capsules drifting around the
+  // nucleus on a slow rotation. Skipped for prokaryotes / virus /
+  // spore / anucleate / toxin (matches shader-test's nMito gate).
+  if (themeId != 0 && d < bodyR) {
+    int tk3 = testKind();
+    bool noMito = (tk3 == 5 || tk3 == 6 || tk3 == 8 || tk3 == 13 ||
+                   tk3 == 16 || tk3 == 17 || tk3 == 20);
+    if (!noMito) {
+      float mito = 1e9;
+      for (int i = 0; i < 8; i++) {
+        float fi = float(i);
+        float baseA = fi * 0.7853 + u_time * 0.08;
+        float radM  = 0.40 + 0.05 * sin(fi * 1.7);
+        vec2 centre = vec2(cos(baseA), sin(baseA)) * radM
+                    + vec2(0.015 * sin(u_time * 1.3 + fi),
+                           0.015 * cos(u_time * 1.1 + fi * 2.0));
+        vec2 dir = vec2(cos(baseA + 1.5708), sin(baseA + 1.5708));
+        float capLen = 0.045;
+        float dCap = cellCapsule(v_uv, centre - dir * capLen,
+                                       centre + dir * capLen, 0.018);
+        mito = min(mito, dCap);
+      }
+      float mitoMask = smoothstep(0.004, -0.004, mito);
+      col = mix(col, vec3(0.95, 0.55, 0.30), mitoMask * 0.55);
     }
   }
 
