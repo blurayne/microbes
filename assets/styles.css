@@ -371,7 +371,10 @@ body.show-build #fps.on { top: 32px; }
   position: absolute;
   left: 0;
   top: 0;
-  display: inline-block;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
   font: 700 18px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   letter-spacing: 0.02em;
   text-shadow: 0 0 6px #000c, 0 1px 2px #000;
@@ -384,6 +387,26 @@ body.show-build #fps.on { top: 32px; }
      centres horizontally + lifts above so labels read as "above the
      cell" rather than "starting at the cell's top-left". */
   translate: -50% -100%;
+}
+.ft-text { display: block; }
+/* Tiny HP bar shown below damage labels — width 28 px, 2 px tall.
+   Fill width = current/max HP; fill colour interpolates green
+   (100 %) → yellow → orange → red (≤ 20 %). Both width + colour
+   are set inline by floating-text.js. */
+.ft-bar {
+  display: block;
+  width: 28px;
+  height: 2px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 1px;
+  overflow: hidden;
+  box-shadow: 0 0 2px #000a;
+}
+.ft-bar-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: #90ee90;  /* default green; overridden inline */
 }
 .ft-damage   { color: #ff6b9a; }
 .ft-heal     { color: #90ee90; }
