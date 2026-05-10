@@ -16,7 +16,7 @@ export const ALL_CELL_KEYS = [
 export const DEFAULTS = {
   splitMode: 'bondDrift',
   autoSplitSeconds: 10,
-  maxCells: 1024,           // hard cap (UI slider removed late 2026; was 32)
+  maxCells: 511,            // population cap. UI slider lives in Settings → Population. Reached cap = spawnAtWorld/beginSplit recycle the oldest cell (#136); see TODO.md for future ideas.
   bgFlowSpeed: 0.55,
   outlinePx: 5,
   showDebugField: false,
@@ -29,6 +29,7 @@ export const DEFAULTS = {
   interfaceColor: 'pink',
   activeTypes: ALL_CELL_KEYS.slice(),
   splitOnTap: false,
+  addDialogView: 'grid',    // 'grid' | 'list' — initial view when the add/cell-info dialog opens. Toggle button in the header swaps modes; ? FAB forces 'list', + FAB respects this setting.
   randomSplit: false,
   metaSplit: true,          // metaball merge between the two halves while SPLITTING
   metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu alike.
@@ -211,6 +212,12 @@ export function loadSettings() {
     if (!validMetaOutlineModes.includes(parsed.metaOutlineMode)) parsed.metaOutlineMode = DEFAULTS.metaOutlineMode;
     const validRippleScopes = ['scene', 'bg'];
     if (!validRippleScopes.includes(parsed.rippleScope)) parsed.rippleScope = DEFAULTS.rippleScope;
+    const validAddDialogViews = ['grid', 'list'];
+    if (!validAddDialogViews.includes(parsed.addDialogView)) parsed.addDialogView = DEFAULTS.addDialogView;
+    if (typeof parsed.maxCells !== 'number' || !Number.isFinite(parsed.maxCells)) {
+      parsed.maxCells = DEFAULTS.maxCells;
+    }
+    parsed.maxCells = Math.max(16, Math.min(1024, Math.round(parsed.maxCells)));
     // 2026-05: user explicitly asked for the split outline to follow
     // the actual rendered metaball shape. 'edge' mode traces the
     // blurred-mask 0.5 contour, which IS the rendered blob silhouette
@@ -341,6 +348,9 @@ export const LOCALES = {
     add_cell: 'Add a cell', add_pathogen: 'Add a pathogen',
     add_title: 'Add', add_tab_cells: 'Cells', add_tab_pathogens: 'Pathogens', add_tab_theme: 'Theme',
     spawn_banner_friends: 'Allies', spawn_banner_prey: 'Prey', spawn_banner_foes: 'Foes', spawn_banner_close: 'Got it',
+    view_grid: 'Grid view', view_list: 'List view',
+    max_cells: 'Max cells',
+    max_cells_hint: 'At the cap, new spawns + splits silently recycle the oldest cell.',
     palette_to_help: 'Learn what each cell does →',
     palette_bad_to_help: 'Learn what each pathogen does →',
     debug_log: 'Debug log', clear: 'Clear', copy: 'Copy',
@@ -468,6 +478,9 @@ export const LOCALES = {
     add_cell: 'Zelle hinzufügen', add_pathogen: 'Erreger hinzufügen',
     add_title: 'Hinzufügen', add_tab_cells: 'Zellen', add_tab_pathogens: 'Erreger', add_tab_theme: 'Thema',
     spawn_banner_friends: 'Verbündete', spawn_banner_prey: 'Beute', spawn_banner_foes: 'Feinde', spawn_banner_close: 'Verstanden',
+    view_grid: 'Rasteransicht', view_list: 'Listenansicht',
+    max_cells: 'Max. Zellen',
+    max_cells_hint: 'Am Limit recyceln neue Spawns + Teilungen die älteste Zelle.',
     palette_to_help: 'Was macht jede Zelle? →',
     palette_bad_to_help: 'Was macht jeder Erreger? →',
     debug_log: 'Debug-Log', clear: 'Leeren', copy: 'Kopieren',

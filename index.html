@@ -125,6 +125,10 @@
         <label><span data-i18n="auto_split">Auto-split (s)</span> <span id="autoVal" class="val"></span>
           <input type="range" id="autoSplitSeconds" min="2" max="30" step="1" />
         </label>
+        <label><span data-i18n="max_cells">Max cells</span> <span id="maxCellsVal" class="val"></span>
+          <input type="range" id="maxCells" min="16" max="1024" step="1" />
+        </label>
+        <p class="hint" data-i18n="max_cells_hint">At the cap, new spawns + splits silently recycle the oldest cell.</p>
       </details>
 
       <details class="settings-section">
@@ -266,22 +270,6 @@
        interactive for the close button. -->
   <div id="spawnBannerLayer" class="spawn-banner-layer"></div>
 
-  <div id="helpDialog" class="dialog hidden" role="dialog" aria-label="Cell help">
-    <div class="dialog-backdrop" data-close></div>
-    <aside class="dialog-panel">
-      <header>
-        <h2 data-i18n="help_title">Cells of the immune system</h2>
-        <button type="button" class="close" data-close aria-label="Close">&times;</button>
-      </header>
-      <ul id="cellList" class="cell-list"></ul>
-    </aside>
-  </div>
-
-  <!-- Unified add-cells / add-pathogens / theme dialog. The two
-       legacy FABs (#palette and #paletteBad) both open this; they
-       just pre-select a different tab. The theme tab moves the
-       palette-relevant theme switcher out of the deep settings
-       panel, where users were missing it. -->
   <!-- About dialog: project credits + licence flags. The CC BY-NC-SA
        block is the project's standing audit reminder — three assets
        on main are non-permissive (Shadertoy default licence). -->
@@ -340,22 +328,43 @@
        legacy 3-tab layout was removed per user spec, and the separate
        #paletteBad FAB is gone too — pathogens come through this same
        dialog. -->
-  <div id="addDialog" class="dialog hidden" role="dialog" aria-label="Add">
+  <div id="addDialog" class="dialog hidden is-view-grid" role="dialog" aria-label="Add">
     <div class="dialog-backdrop" data-close></div>
     <aside class="dialog-panel">
       <header>
         <h2 data-i18n="add_title">Add</h2>
+        <div class="view-toggle" role="tablist" aria-label="View">
+          <button type="button" class="view-toggle-btn" data-view="grid"
+                  role="tab" aria-selected="true"
+                  aria-label="Grid view" title="Grid view"
+                  data-i18n-attr="aria-label=view_grid,title=view_grid">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <rect x="3"  y="3"  width="8" height="8" rx="1.5" fill="currentColor"/>
+              <rect x="13" y="3"  width="8" height="8" rx="1.5" fill="currentColor"/>
+              <rect x="3"  y="13" width="8" height="8" rx="1.5" fill="currentColor"/>
+              <rect x="13" y="13" width="8" height="8" rx="1.5" fill="currentColor"/>
+            </svg>
+          </button>
+          <button type="button" class="view-toggle-btn" data-view="list"
+                  role="tab" aria-selected="false"
+                  aria-label="List view" title="List view"
+                  data-i18n-attr="aria-label=view_list,title=view_list">
+            <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+              <rect x="3" y="5"  width="18" height="2.5" rx="1" fill="currentColor"/>
+              <rect x="3" y="10.75" width="18" height="2.5" rx="1" fill="currentColor"/>
+              <rect x="3" y="16.5" width="18" height="2.5" rx="1" fill="currentColor"/>
+            </svg>
+          </button>
+        </div>
         <button type="button" class="close" data-close aria-label="Close">&times;</button>
       </header>
-      <div class="add-body">
+      <div class="add-body add-body-grid">
         <h3 class="add-section-title" data-i18n="add_tab_cells">Cells</h3>
         <div id="cellGrid"></div>
         <h3 class="add-section-title add-section-pathogens" data-i18n="add_tab_pathogens">Pathogens</h3>
         <div id="cellGridBad"></div>
-        <p class="palette-footer">
-          <a href="#" id="paletteToHelp" data-i18n="palette_to_help">Learn what each cell does →</a>
-        </p>
       </div>
+      <ul class="cell-list add-body-list" id="cellList"></ul>
       <footer class="add-footer">
         <label class="add-theme-row">
           <span data-i18n="theme">Theme</span>
