@@ -780,7 +780,8 @@ const langSelect = document.getElementById('langSelect');
 if (langSelect) {
   const langs = [
     ['en','English'], ['de','Deutsch'], ['es','Español'],
-    ['bar','Bayrisch'], ['latin','Latina'],
+    ['bar','Bayrisch'], ['hes','Hessisch'], ['rhe','Rheinhessisch'],
+    ['latin','Latina'],
   ];
   for (const [k, label] of langs) {
     const opt = document.createElement('option');
