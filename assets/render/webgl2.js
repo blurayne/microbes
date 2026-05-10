@@ -775,6 +775,14 @@ void main() {
 // alpha) + (R, G, B, _pad). Soft-disc fragment shader anti-aliases
 // the rim. Mirrors the WebGPU PARTICLE_WGSL pipeline 1:1.
 const PARTICLE_INSTANCE_FLOATS = 8;
+const ANTIBODY_INSTANCE_FLOATS = 8;            // (x, y, angle, alpha, R, G, B, scale)
+// Unit Y in local coords. Three line segments → 6 vertices, drawn
+// as gl.LINES. Stem points back along -x; arms fan forward along +x.
+const ANTIBODY_UNIT_Y = new Float32Array([
+  -2.4, 0,    0, 0,             // stem
+   0, 0,    1.6, -1.2,           // left arm
+   0, 0,    1.6,  1.2,           // right arm
+]);
 const VERT_PARTICLE = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_corner;
@@ -809,6 +817,43 @@ void main() {
   float a = (1.0 - smoothstep(0.85, 1.0, d)) * v_col.a;
   if (a <= 0.0) discard;
   outColor = vec4(v_col.rgb, a);
+}`;
+
+// ---------- Antibody Y-sprite pass --------------------------------
+// Six-vertex unit Y in local space, drawn as gl.LINES with three
+// segments (stem + two arms). Per-instance: (x, y, angle, alpha,
+// R, G, B, scale). Vertex shader rotates+scales the local Y, then
+// the same camera transform every other pass uses.
+const VERT_ANTIBODY = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_local;       // unit-Y vertex (-2.4..1.6, -1.2..1.2)
+layout(location=1) in vec4 a_inst;        // (x, y, angle, alpha)
+layout(location=2) in vec4 a_rgbScale;    // (R, G, B, scale)
+uniform vec4 u_camera;
+uniform vec2 u_viewport;
+out vec4 v_col;
+void main() {
+  float ca = cos(a_inst.z), sa = sin(a_inst.z);
+  vec2 rotated = vec2(ca * a_local.x - sa * a_local.y,
+                      sa * a_local.x + ca * a_local.y);
+  vec2 worldPos = a_inst.xy + rotated * a_rgbScale.w;
+  // Camera: scale, rotate, translate (matches every other pass).
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
+  vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
+  clipPos.y = -clipPos.y;
+  gl_Position = vec4(clipPos, 0.0, 1.0);
+  v_col = vec4(a_rgbScale.rgb, a_inst.w);
+}`;
+const FRAG_ANTIBODY = `#version 300 es
+precision highp float;
+in vec4 v_col;
+out vec4 outColor;
+void main() {
+  outColor = v_col;
 }`;
 
 // ---------- Cartoon face pass (only drawn when S.cartoon = true) ----------
@@ -1368,6 +1413,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindVertexArray(null);
 
     this._buildParticlePipeline();
+    this._buildAntibodyPipeline();
     this._buildMetaballPipeline();
   }
 
@@ -1399,6 +1445,51 @@ export class WebGL2Renderer extends RendererBase {
       gl.vertexAttribDivisor(2, 1);
     }
     gl.bindVertexArray(null);
+  }
+
+  _buildAntibodyPipeline() {
+    const gl = this.gl;
+    this._antibodyProg = link(gl, VERT_ANTIBODY, FRAG_ANTIBODY);
+    this._antibodyU = {
+      camera:   gl.getUniformLocation(this._antibodyProg, 'u_camera'),
+      viewport: gl.getUniformLocation(this._antibodyProg, 'u_viewport'),
+    };
+    // Static unit-Y vertex buffer.
+    this._antibodyUnitVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyUnitVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, ANTIBODY_UNIT_Y, gl.STATIC_DRAW);
+    // Dynamic per-instance buffer.
+    this._antibodyInstVbo = gl.createBuffer();
+    this._antibodyCapacity = 0;
+    this._antibodyData = new Float32Array(0);
+    this._growAntibodyBuffer(32);
+    // VAO with the unit-Y at location 0 + per-instance attrs at 1, 2.
+    this._antibodyVao = gl.createVertexArray();
+    gl.bindVertexArray(this._antibodyVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyUnitVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyInstVbo);
+    {
+      const stride = ANTIBODY_INSTANCE_FLOATS * 4;
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 0);
+      gl.vertexAttribDivisor(1, 1);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 4, gl.FLOAT, false, stride, 16);
+      gl.vertexAttribDivisor(2, 1);
+    }
+    gl.bindVertexArray(null);
+  }
+
+  _growAntibodyBuffer(target) {
+    if (target <= this._antibodyCapacity) return;
+    const newCap = Math.max(32, Math.ceil(target * 1.5));
+    this._antibodyData = new Float32Array(newCap * ANTIBODY_INSTANCE_FLOATS);
+    this._antibodyCapacity = newCap;
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyInstVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, this._antibodyData.byteLength, gl.DYNAMIC_DRAW);
   }
 
   _growParticleBuffer(target) {
@@ -2542,6 +2633,55 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindVertexArray(null);
   }
 
+  // Y-shaped antibody sprites. Per-instance pack:
+  //   (x, y, angle, alpha) + (R, G, B, scale)
+  // Vertex shader rotates+scales the unit Y, applies the camera, and
+  // drops to clip space. Birth flash + expiry fade are computed JS-side
+  // from each antibody's life ratio (mirrors canvas2d.drawAntibodies).
+  drawAntibodies(antibodies, _t, ts) {
+    if (!antibodies || antibodies.length === 0) return;
+    const gl = this.gl;
+    this._growAntibodyBuffer(antibodies.length);
+    const data = this._antibodyData;
+    const now = (typeof ts === 'number' ? ts : performance.now()) * 0.001;
+    let n = 0;
+    for (let i = 0; i < antibodies.length; i++) {
+      const a = antibodies[i];
+      const age = a.maxLife - a.life;
+      const lifeRatio = a.life / Math.max(a.maxLife, 1e-3);
+      const birth = age < 0.15 ? (0.15 - age) / 0.15 : 0;
+      const scale = a.r * (1.0 + 0.6 * birth);
+      const alpha = lifeRatio < 0.2 ? lifeRatio / 0.2 : 1;
+      if (alpha <= 0) continue;
+      const baseAngle = Math.atan2(a.vy, a.vx);
+      const ambient = (now * 1.5 + (a.ownerId || 0) * 0.7);
+      const angle = baseAngle + Math.sin(ambient) * 0.15;
+      const rgb = hexToVec3(a.color || '#ffe14a');
+      const j = n * ANTIBODY_INSTANCE_FLOATS;
+      data[j]     = a.x;
+      data[j + 1] = a.y;
+      data[j + 2] = angle;
+      data[j + 3] = alpha;
+      data[j + 4] = rgb[0];
+      data[j + 5] = rgb[1];
+      data[j + 6] = rgb[2];
+      data[j + 7] = scale;
+      n++;
+    }
+    if (n === 0) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyInstVbo);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * ANTIBODY_INSTANCE_FLOATS);
+    gl.useProgram(this._antibodyProg);
+    gl.uniform4f(this._antibodyU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
+    gl.uniform2f(this._antibodyU.viewport, this.W, this.H);
+    // Slight extra weight in screen space — line widths > 1.0 aren't
+    // guaranteed in core WebGL2, but most desktop drivers honour ≤2.
+    gl.lineWidth(2);
+    gl.bindVertexArray(this._antibodyVao);
+    gl.drawArraysInstanced(gl.LINES, 0, 6, n);
+    gl.bindVertexArray(null);
+  }
+
   drawSelection(shapes, time) {
     // The per-cell selection ring + tap-flash live in the cell pass
     // (handled by the kind / a_outline.a packing). What's left is the
@@ -2642,6 +2782,10 @@ export class WebGL2Renderer extends RendererBase {
     if (this._particleProg) gl.deleteProgram(this._particleProg);
     if (this._particleVbo) gl.deleteBuffer(this._particleVbo);
     if (this._particleVao) gl.deleteVertexArray(this._particleVao);
+    if (this._antibodyProg) gl.deleteProgram(this._antibodyProg);
+    if (this._antibodyUnitVbo) gl.deleteBuffer(this._antibodyUnitVbo);
+    if (this._antibodyInstVbo) gl.deleteBuffer(this._antibodyInstVbo);
+    if (this._antibodyVao) gl.deleteVertexArray(this._antibodyVao);
     if (this._metaPolyProg) gl.deleteProgram(this._metaPolyProg);
     if (this._metaBlurProg) gl.deleteProgram(this._metaBlurProg);
     if (this._metaTintProg) gl.deleteProgram(this._metaTintProg);

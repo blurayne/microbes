@@ -899,6 +899,53 @@ struct VsOut {
 }
 `;
 
+// ---------- Antibody Y-sprites ----------
+// Six-vertex unit Y in local space, drawn as a line-list pipeline.
+// Per-instance: (x, y, angle, alpha) + (R, G, B, scale). Vertex shader
+// rotates+scales the local Y, applies the camera, drops to clip space.
+const ANTIBODY_WGSL = /* wgsl */ `
+struct AntibodyU {
+  cam: vec4<f32>,        // (scale, tx, ty, rotation)
+  vp:  vec4<f32>,        // (viewportW, viewportH, _, _)
+};
+@group(0) @binding(0) var<uniform> u: AntibodyU;
+
+struct VsOut {
+  @builtin(position) pos: vec4<f32>,
+  @location(0) col: vec4<f32>,
+};
+
+@vertex fn vs_main(
+  @location(0) local: vec2<f32>,        // unit-Y vertex
+  @location(1) inst:  vec4<f32>,        // (x, y, angle, alpha)
+  @location(2) rgbScale: vec4<f32>,     // (r, g, b, scale)
+) -> VsOut {
+  let ca = cos(inst.z);
+  let sa = sin(inst.z);
+  let rotated = vec2<f32>(ca * local.x - sa * local.y,
+                          sa * local.x + ca * local.y);
+  let worldPos = inst.xy + rotated * rgbScale.w;
+  let camScale = u.cam.x;
+  let camT = u.cam.yz;
+  let vp = u.vp.xy;
+  let wScaled = worldPos * camScale;
+  let cR = cos(u.cam.w);
+  let sR = sin(u.cam.w);
+  let screenPos = vec2<f32>(cR * wScaled.x - sR * wScaled.y,
+                            sR * wScaled.x + cR * wScaled.y) + camT;
+  var clip = (screenPos / vp) * 2.0 - 1.0;
+  clip.y = -clip.y;
+  var out: VsOut;
+  out.pos = vec4<f32>(clip, 0.0, 1.0);
+  out.col = vec4<f32>(rgbScale.rgb, inst.w);
+  return out;
+}
+
+@fragment fn fs_main(@location(0) col: vec4<f32>) -> @location(0) vec4<f32> {
+  return col;
+}
+`;
+
 // ---------- Decorations (per-type spikes / tendrils / flagella / etc.) ----------
 // Mirrors webgl2.js's VERT_DECOR / FRAG_DECOR. Two pipelines share this
 // module — same vertex layout (x, y, r, g, b, a), one drawn as line-list
@@ -1513,6 +1560,60 @@ export class WebGPURenderer extends RendererBase {
     });
     this._growParticleBuffer(64);
 
+    // ---- Antibody Y-sprites ----
+    const antibodyModule = device.createShaderModule({ code: ANTIBODY_WGSL });
+    this._antibodyPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: antibodyModule,
+        entryPoint: 'vs_main',
+        buffers: [
+          {
+            arrayStride: 8,                  // unit-Y vertex (vec2)
+            stepMode: 'vertex',
+            attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x2' }],
+          },
+          {
+            arrayStride: 32,                 // (x, y, angle, alpha) + (R, G, B, scale)
+            stepMode: 'instance',
+            attributes: [
+              { shaderLocation: 1, offset: 0,  format: 'float32x4' },
+              { shaderLocation: 2, offset: 16, format: 'float32x4' },
+            ],
+          },
+        ],
+      },
+      fragment: {
+        module: antibodyModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: fmt, blend: stdBlend }],
+      },
+      primitive: { topology: 'line-list' },
+    });
+    this._antibodyUniformBuffer = device.createBuffer({
+      size: 32,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._antibodyBindGroup = device.createBindGroup({
+      layout: this._antibodyPipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: this._antibodyUniformBuffer } }],
+    });
+    // Static unit-Y vertex buffer — same coords as the WebGL2 path.
+    const antibodyUnitY = new Float32Array([
+      -2.4, 0,    0, 0,             // stem
+       0, 0,    1.6, -1.2,           // left arm
+       0, 0,    1.6,  1.2,           // right arm
+    ]);
+    this._antibodyUnitBuffer = device.createBuffer({
+      size: antibodyUnitY.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+    device.queue.writeBuffer(this._antibodyUnitBuffer, 0, antibodyUnitY);
+    this._antibodyInstanceBuffer = null;
+    this._antibodyCapacity = 0;
+    this._antibodyData = new Float32Array(0);
+    this._growAntibodyBuffer(32);
+
     // ---- Decorations (line-list + triangle-list pipelines) ----
     // Both pipelines share an explicit bind-group layout so a single
     // bind group works for both — auto-derived layouts aren't
@@ -1617,6 +1718,18 @@ export class WebGPURenderer extends RendererBase {
     if (this._particleInstanceBuffer) this._particleInstanceBuffer.destroy();
     this._particleInstanceBuffer = this.device.createBuffer({
       size: this._particleData.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  _growAntibodyBuffer(target) {
+    if (target <= this._antibodyCapacity) return;
+    const newCap = Math.max(32, Math.ceil(target * 1.5));
+    this._antibodyData = new Float32Array(newCap * 8);
+    this._antibodyCapacity = newCap;
+    if (this._antibodyInstanceBuffer) this._antibodyInstanceBuffer.destroy();
+    this._antibodyInstanceBuffer = this.device.createBuffer({
+      size: this._antibodyData.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     });
   }
@@ -2752,6 +2865,64 @@ export class WebGPURenderer extends RendererBase {
     pass.end();
   }
 
+  // Y-shaped antibody sprites. Per-instance pack:
+  //   (x, y, angle, alpha) + (R, G, B, scale)
+  // Vertex shader rotates+scales the unit Y by per-instance angle/scale,
+  // applies the camera, drops to clip space. Birth flash + expiry fade
+  // are computed JS-side from each antibody's life ratio (mirrors
+  // canvas2d.drawAntibodies + webgl2.drawAntibodies).
+  drawAntibodies(antibodies, _t, ts) {
+    if (!this._frameEncoder || !this._frameView) return;
+    if (!antibodies || antibodies.length === 0) return;
+    const device = this.device;
+    this._growAntibodyBuffer(antibodies.length);
+    const data = this._antibodyData;
+    const now = (typeof ts === 'number' ? ts : performance.now()) * 0.001;
+    let n = 0;
+    for (let i = 0; i < antibodies.length; i++) {
+      const a = antibodies[i];
+      const age = a.maxLife - a.life;
+      const lifeRatio = a.life / Math.max(a.maxLife, 1e-3);
+      const birth = age < 0.15 ? (0.15 - age) / 0.15 : 0;
+      const scale = a.r * (1.0 + 0.6 * birth);
+      const alpha = lifeRatio < 0.2 ? lifeRatio / 0.2 : 1;
+      if (alpha <= 0) continue;
+      const baseAngle = Math.atan2(a.vy, a.vx);
+      const ambient = (now * 1.5 + (a.ownerId || 0) * 0.7);
+      const angle = baseAngle + Math.sin(ambient) * 0.15;
+      const rgb = hexToRgb(a.color || '#ffe14a');
+      const j = n * 8;
+      data[j]     = a.x;
+      data[j + 1] = a.y;
+      data[j + 2] = angle;
+      data[j + 3] = alpha;
+      data[j + 4] = rgb[0];
+      data[j + 5] = rgb[1];
+      data[j + 6] = rgb[2];
+      data[j + 7] = scale;
+      n++;
+    }
+    if (n === 0) return;
+    device.queue.writeBuffer(
+      this._antibodyInstanceBuffer, 0,
+      data.buffer, data.byteOffset, n * 32,
+    );
+    const cam = this.camera;
+    device.queue.writeBuffer(this._antibodyUniformBuffer, 0, new Float32Array([
+      cam.scale, cam.tx, cam.ty, cam.rotation || 0,
+      this.W, this.H, 0, 0,
+    ]));
+    const pass = this._frameEncoder.beginRenderPass({
+      colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+    });
+    pass.setPipeline(this._antibodyPipeline);
+    pass.setBindGroup(0, this._antibodyBindGroup);
+    pass.setVertexBuffer(0, this._antibodyUnitBuffer);
+    pass.setVertexBuffer(1, this._antibodyInstanceBuffer);
+    pass.draw(6, n, 0, 0);
+    pass.end();
+  }
+
   // Cartoon-face pass. Called from drawCells (after the disk pass)
   // when S.cartoon is on. Per-cell instance: position + radius +
   // mouth kind, eye config (count / size / Y / pupil size), look
@@ -3235,6 +3406,9 @@ export class WebGPURenderer extends RendererBase {
     tryDestroy(this._markerUniformBuffer);
     tryDestroy(this._particleUniformBuffer);
     tryDestroy(this._particleInstanceBuffer);
+    tryDestroy(this._antibodyUniformBuffer);
+    tryDestroy(this._antibodyInstanceBuffer);
+    tryDestroy(this._antibodyUnitBuffer);
     tryDestroy(this._faceUniformBuffer);
     tryDestroy(this._faceInstanceBuffer);
     tryDestroy(this._bgUniformBuffer);

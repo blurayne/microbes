@@ -1188,6 +1188,55 @@ export class Canvas2DRenderer extends RendererBase {
   }
 
   // ---------- Particles (kill-mode debris) ----------
+  // Y-shaped antibody sprites. Each antibody is rotated along its
+  // velocity vector so the stems trail behind. Birth flash scales the
+  // Y up briefly (1.6× → 1.0× over the first 150 ms); the last 20% of
+  // life fades alpha to 0 so misses dissolve instead of popping. A
+  // small ambient spin (~1.5 rad/s, phased per-owner) keeps cruising
+  // antibodies feeling alive without visible per-frame wagging.
+  drawAntibodies(antibodies, _t, ts) {
+    if (!antibodies || !antibodies.length) return;
+    const ctx = this.ctx;
+    this.withCameraCtx(() => {
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const now = (typeof ts === 'number' ? ts : performance.now()) * 0.001;
+      for (const a of antibodies) {
+        const age = a.maxLife - a.life;
+        const lifeRatio = a.life / a.maxLife;
+        // Birth flash: 1.6× → 1.0× over 150 ms.
+        const birth = age < 0.15 ? (0.15 - age) / 0.15 : 0;
+        const scale = a.r * (1.0 + 0.6 * birth);
+        // Expiry fade: ramp alpha to 0 in the last 20% of life.
+        const alpha = lifeRatio < 0.2 ? lifeRatio / 0.2 : 1;
+        const baseAngle = Math.atan2(a.vy, a.vx);
+        const ambient = (now * 1.5 + (a.ownerId || 0) * 0.7) % (Math.PI * 2);
+        // Ambient spin is small (±0.15 rad) so the Y stays oriented
+        // along the velocity but breathes a bit.
+        const angle = baseAngle + Math.sin(ambient) * 0.15;
+        ctx.save();
+        ctx.translate(a.x, a.y);
+        ctx.rotate(angle);
+        ctx.scale(scale, scale);
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = a.color;
+        ctx.lineWidth = 1.0;        // in unit-Y space; scale=r → 1·r screen px
+        ctx.beginPath();
+        // Stem (behind the projectile).
+        ctx.moveTo(-2.4, 0);
+        ctx.lineTo(0, 0);
+        // Arms (ahead).
+        ctx.moveTo(0, 0);
+        ctx.lineTo(1.6, -1.2);
+        ctx.moveTo(0, 0);
+        ctx.lineTo(1.6,  1.2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    });
+  }
+
   drawParticles(particles /* , t, ts */) {
     if (!particles || !particles.length) return;
     const ctx = this.ctx;

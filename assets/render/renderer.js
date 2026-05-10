@@ -133,5 +133,7 @@ export class RendererBase {
   drawDebug(/* shapes */) {}
   /** Optional: draw free-floating particles released by Sim.killCell(). */
   drawParticles(/* particles, time, timeMs */) {}
+  /** Optional: draw Y-shaped antibody projectiles (sim.antibodies). */
+  drawAntibodies(/* antibodies, time, timeMs */) {}
   destroy() {}
 }
