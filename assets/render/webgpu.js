@@ -1026,21 +1026,18 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     col = mix(col, u.gridColor.rgb, line * 0.30);
   }
 
-  // ---- Lung: alveolar foam (kind 4) ----
+  // Lung — Smoke FBM port (Apache 2.0, FatumR). See WebGL2 comment.
   if (kind == 4) {
-    let p = worldPx * 0.012;
-    let pulse = 0.5 + 0.5 * sin(time * 0.6);
-    let cell = floor(p);
-    let cellUv = fract(p) - vec2<f32>(0.5, 0.5);
-    let jitter = bgHash(cell);
-    let r = 0.30 + 0.08 * jitter + 0.04 * pulse;
-    let d = length(cellUv);
-    let bubble = 1.0 - smoothstep(r * 0.85, r, d);
-    let rim = smoothstep(r * 0.80, r * 0.90, d) * (1.0 - smoothstep(r * 0.90, r, d));
-    let tissue   = vec3<f32>(0.45, 0.18, 0.22);
-    let alveolus = vec3<f32>(0.85, 0.55, 0.62);
-    col = mix(col, mix(tissue, alveolus, bubble), 0.60);
-    col = mix(col, vec3<f32>(0.18, 0.06, 0.10), rim * 0.55);
+    let plungP = worldPx * 0.0010 + vec2<f32>(0.0, time * 0.08);
+    let breath = 0.55 + 0.20 * sin(time * 0.6);
+    let n0 = bgFbm(plungP * 0.5);
+    let n1 = bgFbm(plungP + vec2<f32>(2.0 * n0));
+    let n2 = bgFbm(plungP + vec2<f32>(n1));
+    let n3 = bgFbm(plungP + vec2<f32>(time * 0.04, 0.0) + vec2<f32>(n2));
+    let v = breath * n3;
+    let hot  = vec3<f32>(0.510, 0.204, 0.016);
+    let cool = vec3<f32>(0.529, 0.808, 0.980);
+    col = mix(col, mix(hot, cool, clamp(v, 0.0, 1.0)), 0.85);
   }
 
   // ---- Aurora borealis: vertical green/violet ribbons (kind 5) ----
