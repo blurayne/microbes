@@ -717,7 +717,9 @@ void main() {
     // original's audio-reactive amplitude. Octaves trimmed 6→4
     // for in-game cost; visuals stay close. Domain-warped in
     // worldPx so the pattern tiles seamlessly with the camera.
-    vec2 plungP = worldPx * 0.0010 + vec2(0.0, u_time * 0.08);
+    // 0.0050 instead of 0.0010 — user spec "scale the lung background
+    // by factor 0.2x" (features 5x smaller / more pattern detail).
+    vec2 plungP = worldPx * 0.0050 + vec2(0.0, u_time * 0.08);
     float breath = 0.55 + 0.20 * sin(u_time * 0.6);
     float n0 = bgFbm(plungP * 0.5);
     float n1 = bgFbm(plungP + 2.0 * n0);

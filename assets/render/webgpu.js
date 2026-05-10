@@ -1028,7 +1028,9 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
 
   // Lung — Smoke FBM port (Apache 2.0, FatumR). See WebGL2 comment.
   if (kind == 4) {
-    let plungP = worldPx * 0.0010 + vec2<f32>(0.0, time * 0.08);
+    // 0.0050 instead of 0.0010 — user spec "scale lung bg by 0.2x"
+    // (features 5x smaller / more pattern detail).
+    let plungP = worldPx * 0.0050 + vec2<f32>(0.0, time * 0.08);
     let breath = 0.55 + 0.20 * sin(time * 0.6);
     let n0 = bgFbm(plungP * 0.5);
     let n1 = bgFbm(plungP + vec2<f32>(2.0 * n0));
