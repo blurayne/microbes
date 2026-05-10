@@ -510,6 +510,8 @@ if (metaOutlineModeSel) {
   });
 }
 bindCheckbox('cartoon', 'cartoon');
+// HUD reacts within the next 250 ms throttle window, fast enough.
+bindCheckbox('compositionHud', 'compositionHud');
 
 // ----- Audio: music + SFX volume sliders, music on/off + next track -----
 import('./core/music.js').then(({ MusicPlayer }) => {
@@ -853,6 +855,35 @@ function updateFPS(dt, ts) {
   fpsEl.textContent = line;
 }
 
+// Composition HUD — top-right widget. Hidden when S.compositionHud
+// is off OR when there are no pathogens on the field (otherwise it'd
+// just say "Fully covered" forever during early sim, which is noise).
+// Throttled to ~4 updates / second by string-equality dedupe — DOM
+// stays untouched on frames with the same content.
+const compHudEl = document.getElementById('compositionHud');
+let _compHudThrottle = 0;
+let _compHudLast = '';
+function updateCompositionHud(ts) {
+  if (!compHudEl) return;
+  if (!S.compositionHud) { compHudEl.classList.remove('on'); return; }
+  if (ts - _compHudThrottle < 250) return;
+  _compHudThrottle = ts;
+  const status = sim.getCompositionStatus();
+  if (status.pathogens === 0) { compHudEl.classList.remove('on'); return; }
+  const lines = [`<div class="title">${T('counters_needed')}</div>`];
+  const entries = Object.entries(status.needed);
+  if (entries.length === 0) {
+    lines.push(`<div class="empty">${T('counters_covered')}</div>`);
+  } else {
+    for (const [type, count] of entries) {
+      lines.push(`<div class="item">+${count} · ${cellLabel(type)}</div>`);
+    }
+  }
+  const html = lines.join('');
+  if (html !== _compHudLast) { compHudEl.innerHTML = html; _compHudLast = html; }
+  compHudEl.classList.add('on');
+}
+
 function frame(ts) {
   if (!lastTs) lastTs = ts;
   const dt = Math.min(0.05, (ts - lastTs) / 1000);
@@ -880,6 +911,7 @@ function frame(ts) {
   renderer.endFrame();
 
   updateFPS(dt, ts);
+  updateCompositionHud(ts);
 
   requestAnimationFrame(frame);
 }

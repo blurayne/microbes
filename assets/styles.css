@@ -242,6 +242,39 @@ body.no-bad #help { bottom: 166px; }
 }
 #build.on { display: block; }
 
+/* Composition HUD — top-right widget listing heroes still needed
+ * to counter on-field pathogens. Hidden by default; shown when
+ * S.compositionHud is on AND there's at least one pathogen on
+ * the field (otherwise it's noise). */
+.composition-hud {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 9;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink);
+  background: #00000077;
+  border: 1px solid #ffffff22;
+  padding: 6px 10px;
+  border-radius: 8px;
+  pointer-events: none;
+  user-select: none;
+  text-shadow: 0 1px 2px #0008;
+  letter-spacing: 0.02em;
+  max-width: 240px;
+  display: none;
+}
+.composition-hud.on { display: block; }
+.composition-hud .title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+  margin-bottom: 3px;
+}
+.composition-hud .item { white-space: nowrap; }
+.composition-hud .empty { opacity: 0.7; font-style: italic; }
+
 #fps {
   position: fixed;
   top: 10px;

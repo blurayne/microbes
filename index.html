@@ -50,6 +50,7 @@
         </label>
         <label><input type="checkbox" id="allowBadGuys" /> <span data-i18n="allow_pathogens">Allow pathogens</span></label>
         <label><input type="checkbox" id="pinchRotation" /> <span data-i18n="pinch_rotation">Two-finger rotation</span></label>
+        <label><input type="checkbox" id="compositionHud" /> <span data-i18n="composition_hud">Composition HUD</span></label>
       </section>
 
       <section>
@@ -234,6 +235,12 @@
   </div>
 
   <div id="build" aria-hidden="true"></div>
+
+  <!-- Composition HUD: top-right widget that lists heroes still
+       needed to counter on-field pathogens. Visibility gated by
+       S.compositionHud (settings checkbox). Body content is
+       rebuilt each frame in app.js from sim.getCompositionStatus(). -->
+  <div id="compositionHud" class="composition-hud" aria-live="polite"></div>
 
   <script src="assets/build.js"></script>
   <script type="module" src="assets/app.js"></script>

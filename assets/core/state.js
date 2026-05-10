@@ -32,6 +32,10 @@ export const DEFAULTS = {
   // overlaid on the same physics, not separate code paths. So this
   // field declares the schema; only 'free' is wired today.
   gameMode: 'free',
+  // Composition HUD: top-right widget listing heroes still needed to
+  // counter the on-field pathogens. ON by default in Free Game so
+  // the player learns the matrix; toggle hides it for purists.
+  compositionHud: true,
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
@@ -159,6 +163,10 @@ export const LOCALES = {
     mode_free: 'Free Game',
     mode_campaign_soon: 'Campaign (soon)',
     mode_survival_soon: 'Survival (soon)',
+    composition_hud: 'Composition HUD',
+    counters_needed: 'Counters needed',
+    counters_covered: 'Fully covered',
+    no_pathogens: 'No pathogens',
     audio: 'Audio',
     music_enabled: 'Music',
     music_volume: 'Music volume',
@@ -253,6 +261,10 @@ export const LOCALES = {
     mode_free: 'Free Game',
     mode_campaign_soon: 'Kampagne (bald)',
     mode_survival_soon: 'Survival (bald)',
+    composition_hud: 'Aufstellungs-HUD',
+    counters_needed: 'Konter benötigt',
+    counters_covered: 'Voll abgedeckt',
+    no_pathogens: 'Keine Erreger',
     audio: 'Audio',
     music_enabled: 'Musik',
     music_volume: 'Musiklautstärke',
@@ -343,6 +355,10 @@ export const LOCALES = {
     mode_free: 'Juego libre',
     mode_campaign_soon: 'Campaña (pronto)',
     mode_survival_soon: 'Supervivencia (pronto)',
+    composition_hud: 'HUD de composición',
+    counters_needed: 'Contras necesarios',
+    counters_covered: 'Cubierto',
+    no_pathogens: 'Sin patógenos',
     audio: 'Audio',
     music_enabled: 'Música',
     music_volume: 'Volumen de música',
@@ -434,6 +450,10 @@ export const LOCALES = {
     mode_free: 'Frei spuin',
     mode_campaign_soon: 'Kampagne (boid)',
     mode_survival_soon: 'Survival (boid)',
+    composition_hud: 'Aufstöing-HUD',
+    counters_needed: 'Konter braucht ma',
+    counters_covered: 'Olls do',
+    no_pathogens: 'Koa Bazilln',
     audio: 'Tone',
     music_enabled: 'Musi',
     music_volume: 'Musi-Laudstärk',
@@ -524,6 +544,10 @@ export const LOCALES = {
     mode_free: 'Lusus liber',
     mode_campaign_soon: 'Expeditio (mox)',
     mode_survival_soon: 'Superstes (mox)',
+    composition_hud: 'HUD compositionis',
+    counters_needed: 'Repugnatores requiruntur',
+    counters_covered: 'Plene defensus',
+    no_pathogens: 'Nullae pestes',
     audio: 'Audio',
     music_enabled: 'Musica',
     music_volume: 'Volumen musicae',

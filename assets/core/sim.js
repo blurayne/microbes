@@ -10,7 +10,7 @@ import {
   CELL_RADIUS, BROWNIAN, MARGIN, BOND_DURATION, SPLIT_DURATION, HASH_CELL,
   pickRandomActiveType,
 } from './state.js';
-import { getRule, maxAttractRadius, defaultHp } from './sim-rules.js';
+import { getRule, maxAttractRadius, defaultHp, getBestCounter } from './sim-rules.js';
 
 // Push-apart impulse from finishSplit() ramps in linearly over this
 // duration so the new cells don't snap outward at the moment of
@@ -314,6 +314,42 @@ export class Sim {
   }
 
   // ---------- Swarm cohesion + spatial hash ----------
+  /**
+   * Composition snapshot for the HUD: which heroes are still
+   * "needed" to counter the on-field pathogens. For each pathogen
+   * type present, look up its best counter (sim-rules.getBestCounter)
+   * and accumulate one need per pathogen instance. Subtract the
+   * heroes of that type already present, and return what's left
+   * (always ≥ 0). When nothing's missing the returned object is
+   * empty — the HUD then renders a "fully covered" message.
+   *
+   * @returns {{ needed: Object<string, number>, pathogens: number }}
+   */
+  getCompositionStatus() {
+    const needed = Object.create(null);
+    const onField = Object.create(null);
+    let pathogens = 0;
+    for (const c of this.cells) {
+      if (c.state !== 'NORMAL') continue;
+      onField[c.type] = (onField[c.type] || 0) + 1;
+      if (c.category === 'bad') pathogens++;
+    }
+    for (const c of this.cells) {
+      if (c.state !== 'NORMAL' || c.category !== 'bad') continue;
+      const counter = getBestCounter(c.type);
+      if (!counter) continue;
+      needed[counter] = (needed[counter] || 0) + 1;
+    }
+    // Subtract heroes already present, drop entries that hit zero.
+    for (const heroType of Object.keys(needed)) {
+      const have = onField[heroType] || 0;
+      const deficit = needed[heroType] - have;
+      if (deficit <= 0) delete needed[heroType];
+      else needed[heroType] = deficit;
+    }
+    return { needed, pathogens };
+  }
+
   swarmCentroid(category) {
     let n = 0, sx = 0, sy = 0;
     for (const c of this.cells) {
