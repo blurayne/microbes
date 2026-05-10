@@ -990,12 +990,16 @@ uniform float u_time;
 uniform vec2 u_resolution;       // canvas drawing-buffer (W, H)
 uniform int u_cellCount;
 uniform vec3 u_cells[${RIPPLE_MAX}];   // (uvX, uvY, uvR_minAxis)
+uniform vec3 u_rippleParams;     // (density, reach, strength)
 out vec4 outColor;
 
 void main() {
   vec2 uv = v_uv;
   vec2 disp = vec2(0.0);
   float minAx = min(u_resolution.x, u_resolution.y);
+  float density  = max(u_rippleParams.x, 0.001);
+  float reach    = max(u_rippleParams.y, 0.001);
+  float strength = u_rippleParams.z;
   for (int i = 0; i < ${RIPPLE_MAX}; i++) {
     if (i >= u_cellCount) break;
     vec3 c = u_cells[i];
@@ -1003,18 +1007,18 @@ void main() {
     vec2 dvPx = dvUv * u_resolution;
     float dPx  = length(dvPx);
     float rPx  = max(c.z * minAx, 4.0);
-    if (dPx > rPx * 8.0) continue;
-    // Wavelength scales with cell radius — tighter rings on small
-    // cells, wider on big ones. Wave travels outward at ~1.5× λ/s.
-    float wavelen = rPx * 0.7;
+    // Cull radius scales with reach so high-reach values still pass.
+    if (dPx > rPx * 8.0 * reach) continue;
+    // density > 1 ⇒ shorter wavelength ⇒ more rings per cell radius.
+    float wavelen = rPx * 0.7 / density;
     float k = 6.28318 / wavelen;
     float wave = sin(dPx * k - u_time * (wavelen * 1.5) * k);
-    float falloff = exp(-dPx / (rPx * 4.0));
+    // reach < 1 ⇒ ripples decay closer to the cell.
+    float falloff = exp(-dPx / (rPx * 4.0 * reach));
     vec2 dirUv = dvUv / max(1e-4, length(dvUv));
     disp += dirUv * wave * falloff;
   }
-  // Convert cumulative displacement to UV space; ~6 px peak.
-  vec2 uvDisp = disp * (6.0 / minAx);
+  vec2 uvDisp = disp * (6.0 / minAx) * strength;
   vec3 bg = texture(u_bg, clamp(uv + uvDisp, 0.0, 1.0)).rgb;
   outColor = vec4(bg, 1.0);
 }
@@ -2438,6 +2442,7 @@ export class WebGL2Renderer extends RendererBase {
       res:       gl.getUniformLocation(prog, 'u_resolution'),
       cellCount: gl.getUniformLocation(prog, 'u_cellCount'),
       cells:     gl.getUniformLocation(prog, 'u_cells'),
+      params:    gl.getUniformLocation(prog, 'u_rippleParams'),
     };
     this._rippleCellsBuf = new Float32Array(RIPPLE_MAX * 3);
   }
@@ -2594,6 +2599,10 @@ export class WebGL2Renderer extends RendererBase {
       gl.uniform2f(this._rippleU.res, this.canvas.width, this.canvas.height);
       gl.uniform1i(this._rippleU.cellCount, cellCount);
       gl.uniform3fv(this._rippleU.cells, this._rippleCellsBuf);
+      gl.uniform3f(this._rippleU.params,
+                   S.rippleDensity ?? 1.5,
+                   S.rippleReach ?? 0.7,
+                   S.rippleStrength ?? 1.0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     } else if (useCaustics && this._causticProg) {
       // Switch to the default framebuffer + caustic post-pass.
