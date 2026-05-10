@@ -10,6 +10,7 @@ import {
   cellColors, currentTheme, currentBackground, currentHighlightColor, hexToRgba, frac,
 } from '../core/state.js';
 import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
+import { effectiveMouthKind } from '../core/sim-faces.js';
 import { RendererBase } from './renderer.js';
 
 /**
@@ -1049,7 +1050,8 @@ export class Canvas2DRenderer extends RendererBase {
       for (const s of shapes) {
         const c = s.cell;
         const cfg = FACE[c.type] || FACE.default;
-        if (!cfg.eyes && cfg.mouth === 'none') continue;
+        const mouthKind = effectiveMouthKind(c);
+        if (!cfg.eyes && mouthKind === 'none') continue;
 
         if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
         const blinking = (c.nextBlink - now) < 120 && (c.nextBlink - now) > 0;
@@ -1060,11 +1062,10 @@ export class Canvas2DRenderer extends RendererBase {
         const cx = s.x;
         const cy = s.y;
         const cr = s.r;
-        let lookX = c.vx, lookY = c.vy;
-        if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
-          lookX = c.alarmTarget.x - cx;
-          lookY = c.alarmTarget.y - cy;
-        }
+        // Smoothed look-at unit vector lerped per frame in sim.update
+        // (~0.15 s time constant). May drift slightly off the unit
+        // circle during transitions; the `lm` divisor renormalises.
+        const lookX = c.lookX, lookY = c.lookY;
         const lm = Math.hypot(lookX, lookY) || 1;
 
         ctx.save();
@@ -1117,22 +1118,22 @@ export class Canvas2DRenderer extends RendererBase {
           }
         }
 
-        if (cfg.mouth && cfg.mouth !== 'none') {
+        if (mouthKind && mouthKind !== 'none') {
           const mY = cy + cr * 0.18;
           const mW = cr * 0.34 * 1.2;
           const cc = cellColors(c);
           ctx.lineWidth = lw * 1.3;
           ctx.strokeStyle = cc.nucleus;
           ctx.fillStyle = cc.nucleus;
-          if (cfg.mouth === 'smile') {
+          if (mouthKind === 'smile') {
             ctx.beginPath();
             ctx.arc(cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI);
             ctx.stroke();
-          } else if (cfg.mouth === 'frown') {
+          } else if (mouthKind === 'frown') {
             ctx.beginPath();
             ctx.arc(cx, mY + mW * 0.6, mW, 1.12 * Math.PI, 1.88 * Math.PI);
             ctx.stroke();
-          } else if (cfg.mouth === 'snarl') {
+          } else if (mouthKind === 'snarl') {
             ctx.beginPath();
             const N = 5;
             for (let i = 0; i <= N; i++) {
@@ -1142,7 +1143,7 @@ export class Canvas2DRenderer extends RendererBase {
               else ctx.lineTo(x, y);
             }
             ctx.stroke();
-          } else if (cfg.mouth === 'fangs') {
+          } else if (mouthKind === 'fangs') {
             ctx.beginPath();
             ctx.ellipse(cx, mY, mW, mW * 0.45, 0, 0, Math.PI * 2);
             ctx.fill();
@@ -1159,7 +1160,7 @@ export class Canvas2DRenderer extends RendererBase {
             ctx.lineTo(cx + mW * 0.55, mY - mW * 0.20);
             ctx.closePath();
             ctx.fill();
-          } else if (cfg.mouth === 'tongue') {
+          } else if (mouthKind === 'tongue') {
             ctx.beginPath();
             ctx.ellipse(cx, mY, mW, mW * 0.40, 0, 0, Math.PI * 2);
             ctx.fill();
@@ -1168,7 +1169,7 @@ export class Canvas2DRenderer extends RendererBase {
             ctx.beginPath();
             ctx.ellipse(cx + wag, mY + mW * 0.30, mW * 0.32, mW * 0.22, 0, 0, Math.PI * 2);
             ctx.fill();
-          } else if (cfg.mouth === 'drool') {
+          } else if (mouthKind === 'drool') {
             ctx.beginPath();
             ctx.arc(cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI);
             ctx.stroke();

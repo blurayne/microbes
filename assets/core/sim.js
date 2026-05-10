@@ -131,6 +131,10 @@ export class Sim {
       wobbleSeed: Math.random() * 1000,
       wobbleFreq: 0.55 + Math.random() * 0.45,
       flash: 0,
+      mouthFlashKind: null,
+      mouthFlashTimer: 0,
+      lookX: 0,
+      lookY: 0,
       target: null,
       patrolTarget: null,
       patrolTimer: 0,
@@ -176,6 +180,8 @@ export class Sim {
       targetId: target.id,
       ownerId: owner.id,
     });
+    owner.mouthFlashKind = 'fangs';
+    owner.mouthFlashTimer = 0.30;
     // Optional event hook so app.js can play SFX without sim.js
     // having to import Audio. Owner is the firing B-cell; the
     // listener can read owner.x/y to decide an on-screen volume.
@@ -190,6 +196,8 @@ export class Sim {
     if (!Number.isFinite(cell.hp)) return;     // invulnerable (heroes)
     cell.hp -= amount;
     cell.flash = 0.4;
+    cell.mouthFlashKind = 'frown';
+    cell.mouthFlashTimer = 0.40;
     if (cell.hp <= 0) {
       cell.hp = 0;
       this.killCell(cell);
@@ -459,6 +467,29 @@ export class Sim {
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
       if (c.flash > 0) c.flash = Math.max(0, c.flash - dt * 2);
+      if (c.mouthFlashTimer > 0) {
+        c.mouthFlashTimer = Math.max(0, c.mouthFlashTimer - dt);
+        if (c.mouthFlashTimer === 0) c.mouthFlashKind = null;
+      }
+      // Eye-target smoothing. Desired direction is the alarm target
+      // if locked-on, else the velocity vector. Exp lerp with a 0.15 s
+      // time constant absorbs the alarmTarget snap on closer-enemy
+      // pickups so pupils drift instead of teleporting.
+      {
+        let dx, dy;
+        if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
+          dx = c.alarmTarget.x - c.x;
+          dy = c.alarmTarget.y - c.y;
+        } else {
+          dx = c.vx;
+          dy = c.vy;
+        }
+        const m = Math.hypot(dx, dy) || 1;
+        const tx = dx / m, ty = dy / m;
+        const k = 1 - Math.exp(-dt / 0.15);
+        c.lookX += (tx - c.lookX) * k;
+        c.lookY += (ty - c.lookY) * k;
+      }
 
       if (c.state === 'NORMAL') {
         if (S.randomSplit) {
