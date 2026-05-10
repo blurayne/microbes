@@ -24,14 +24,38 @@ export class FloatingText {
   //   damage   → pink ('-')        e.g. {text:'-3', kind:'damage'}
   //   heal     → green ('+')       e.g. {text:'+5', kind:'heal'}
   //   activate → cyan accent ('+') e.g. {text:'+1', kind:'activate'}
-  push({ x, y, text, kind }) {
+  // Optionally pass {hp, maxHp} to draw a 2 px HP bar below the
+  // text — fill width = hp / maxHp, fill colour interpolates green
+  // (100 %) → yellow → orange → red (≤ 20 %). Heroes (Infinity hp)
+  // skip the bar.
+  push({ x, y, text, kind, hp, maxHp }) {
     if (this.entries.length >= MAX_ENTRIES) {
       const oldest = this.entries.shift();
       oldest.el.remove();
     }
     const el = document.createElement('span');
     el.className = `ft-entry ft-${kind || 'damage'}`;
-    el.textContent = text;
+
+    const txt = document.createElement('span');
+    txt.className = 'ft-text';
+    txt.textContent = text;
+    el.appendChild(txt);
+
+    if (Number.isFinite(maxHp) && maxHp > 0 && Number.isFinite(hp)) {
+      const pct = Math.max(0, Math.min(1, hp / maxHp));
+      // 0 = red, 120 = green. Below 20 % stays solid red; above
+      // 20 % the hue interpolates linearly to green at 100 %.
+      const hue = Math.max(0, Math.min(120, (pct * 100 - 20) / 80 * 120));
+      const bar = document.createElement('span');
+      bar.className = 'ft-bar';
+      const fill = document.createElement('span');
+      fill.className = 'ft-bar-fill';
+      fill.style.width = (pct * 100).toFixed(1) + '%';
+      fill.style.background = `hsl(${hue.toFixed(0)} 80% 55%)`;
+      bar.appendChild(fill);
+      el.appendChild(bar);
+    }
+
     this.container.appendChild(el);
     this.entries.push({
       x, y, el, age: 0,

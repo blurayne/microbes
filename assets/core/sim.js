@@ -210,6 +210,7 @@ export class Sim {
       cell._dmgAccum -= n;
       if (this.onFloatingText) this.onFloatingText({
         x: cell.x, y: cell.y, text: `-${n}`, kind: 'damage',
+        hp: cell.hp, maxHp: cell.maxHp,
       });
     }
     if (fatal) {
