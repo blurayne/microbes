@@ -10,6 +10,7 @@ import {
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { Sim } from './core/sim.js';
+import { FloatingText } from './core/floating-text.js';
 import { getShapes, inView } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
@@ -94,6 +95,7 @@ function _hookDebugLogButtons() {
 
 // ---------- Sim + renderer ----------
 const sim = new Sim();
+const floatingText = new FloatingText(document.getElementById('floatingText'));
 
 async function tryWebGPU() {
   const r = new WebGPURenderer(canvas, sim);
@@ -656,6 +658,12 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
   const nextBtn = document.getElementById('musicNext');
   if (nextBtn) nextBtn.addEventListener('click', () => player.next());
 
+  // Floating combat text — sim emits {x, y, text, kind} on damage
+  // (kind:'damage', "-N") and on fresh activation (kind:'activate',
+  // "+1"). The manager owns its own DOM nodes inside #floatingText
+  // and gets ticked + rendered from the per-frame loop.
+  sim.onFloatingText = (e) => floatingText.push(e);
+
   // Antibody fire SFX. Random clip per shot; volume scaled to 70%
   // when the firing B-cell is outside the visible viewport so off-
   // screen events stay audible but don't drown the on-screen action.
@@ -1070,6 +1078,12 @@ function frame(ts) {
   renderer.drawSelection(shapes, t);
   if (S.showDebugField) renderer.drawDebug(shapes);
   renderer.endFrame();
+
+  // Floating combat text — tick the lifetimes (skipped while paused
+  // so labels freeze in place under the PAUSE overlay) and re-place
+  // every active label using the current camera transform.
+  if (!_paused) floatingText.tick(dt);
+  floatingText.render(sim);
 
   updateFPS(dt, ts);
   updateCompositionHud(ts);

@@ -198,7 +198,21 @@ export class Sim {
     cell.flash = 0.4;
     cell.mouthFlashKind = 'frown';
     cell.mouthFlashTimer = 0.40;
-    if (cell.hp <= 0) {
+    // Floating "-N" damage indicator. Per-pair DPS deals fractional
+    // amounts each tick (rule.dps * dt), which would spam the
+    // overlay with -0 labels — so we accumulate sub-1 hits per
+    // cell and emit only when the running total crosses an integer.
+    // The killing blow always emits regardless of accumulator state.
+    cell._dmgAccum = (cell._dmgAccum || 0) + amount;
+    const fatal = cell.hp <= 0;
+    if (fatal || cell._dmgAccum >= 1) {
+      const n = Math.max(1, Math.floor(cell._dmgAccum));
+      cell._dmgAccum -= n;
+      if (this.onFloatingText) this.onFloatingText({
+        x: cell.x, y: cell.y, text: `-${n}`, kind: 'damage',
+      });
+    }
+    if (fatal) {
       cell.hp = 0;
       this.killCell(cell);
     }
@@ -556,8 +570,15 @@ export class Sim {
                 }
               });
               if (enemy) {
+                // "+1" floating indicator on fresh activation only —
+                // re-acquiring the same target (or chaining to a new
+                // one while still alarmed) doesn't spam the overlay.
+                const wasIdle = !c.alarmTarget;
                 c.alarmTarget = enemy; c.alarmTimer = 1.6;
                 c.alarmRule = enemyRule;
+                if (wasIdle && this.onFloatingText) this.onFloatingText({
+                  x: c.x, y: c.y, text: '+1', kind: 'activate',
+                });
               }
             }
 
