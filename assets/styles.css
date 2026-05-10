@@ -354,6 +354,41 @@ body.show-build #fps.on { top: 32px; }
 #stage          { image-rendering: auto; }
 #stage.pixel    { image-rendering: pixelated; image-rendering: crisp-edges; }
 
+/* Floating combat text overlay — sits above the canvas, below the
+   scanlines + dialogs. Each .ft-entry is absolutely positioned at
+   the document origin and translated into place via CSS transform
+   from JS each frame (cheaper than top/left for high-frequency
+   updates). pointer-events:none so the labels never block clicks. */
+.floating-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  overflow: hidden;
+  contain: strict;
+}
+.ft-entry {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-block;
+  font: 700 18px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 6px #000c, 0 1px 2px #000;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+  will-change: transform, opacity;
+  /* The transform anchor we use from JS sets the label's TOP-LEFT
+     to the entity's screen position; the translate(-50%, -100%) here
+     centres horizontally + lifts above so labels read as "above the
+     cell" rather than "starting at the cell's top-left". */
+  translate: -50% -100%;
+}
+.ft-damage   { color: #ff6b9a; }
+.ft-heal     { color: #90ee90; }
+.ft-activate { color: #5ab8ff; }
+
 /* CRT-style scanline overlay above the canvas, below dialogs */
 #scanlines {
   position: fixed;
