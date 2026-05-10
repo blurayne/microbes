@@ -19,7 +19,9 @@ export const TRACKS = [
 export class MusicPlayer {
   constructor() {
     this._audio = null;
-    this._idx = 0;
+    // Start at the SECOND track (per user spec). Tracks loop in order
+    // anyway; this just affects which one plays first this session.
+    this._idx = 1 % Math.max(1, TRACKS.length);
     this._enabled = false;
     this._volume = 0.5;
     this._pendingPlay = false;

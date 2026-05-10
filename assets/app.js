@@ -19,6 +19,11 @@ import { getShapes, inView } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
 import { WebGPURenderer } from './render/webgpu.js';
+// Static import of TRACKS so the "Now playing" label can be set
+// synchronously at boot — the MusicPlayer + SfxPlayer modules still
+// load lazily through Promise.all() below (their classes are bigger
+// than the TRACKS constant and the live binding takes over from there).
+import { TRACKS as _MUSIC_TRACKS } from './core/music.js';
 
 // ---------- DOM ----------
 const canvas = document.getElementById('stage');
@@ -1208,6 +1213,17 @@ if (langSelect) {
   });
 }
 applyI18n();
+
+// Seed the "Now playing" label synchronously — the async music init
+// below replaces this with a live-updating subscription, but if that
+// promise hasn't resolved yet (or fails) the label still shows the
+// initial track instead of the literal "—" placeholder. Uses index 1
+// to mirror MusicPlayer's default _idx (starts at the second track).
+{
+  const trackLabelEl = document.getElementById('musicTrackLabel');
+  const firstTrack = _MUSIC_TRACKS[1 % Math.max(1, _MUSIC_TRACKS.length)];
+  if (trackLabelEl && firstTrack) trackLabelEl.textContent = firstTrack.label;
+}
 
 const cellGridEl = document.getElementById('cellGrid');
 const cellGridBadEl = document.getElementById('cellGridBad');
