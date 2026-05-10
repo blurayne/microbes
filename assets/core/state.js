@@ -20,7 +20,13 @@ export const DEFAULTS = {
   bgFlowSpeed: 0.55,
   outlinePx: 5,
   showDebugField: false,
-  theme: 'bloodstream',
+  // Visual style for the cell rendering itself. Was the lone "theme"
+  // setting until late 2026; renamed when the colour palette below was
+  // introduced as a separate "Interface color" setting.
+  theme: 'legacy',
+  // Colour palette tinting outlines + UI panel accent (was DEFAULTS.theme).
+  // Renamed to interfaceColor to free up "theme" for the cell-shader theme.
+  interfaceColor: 'bloodstream',
   activeTypes: ALL_CELL_KEYS.slice(),
   splitOnTap: false,
   randomSplit: false,
@@ -68,9 +74,18 @@ export const DEFAULTS = {
   renderer: 'webgpu',       // 'canvas2d' | 'webgl2' | 'webgpu'
 };
 
-const KNOWN_THEME_KEYS = [
+// Interface-color palettes (formerly known as "themes"). Tints the
+// outline + UI accent.
+const KNOWN_INTERFACE_COLOR_KEYS = [
   'bloodstream', 'cartoonNight', 'spectrum', 'lymphNode',
   'lung', 'aurora', 'underwater', 'lavaFire', 'reactor',
+];
+
+// Cell-shader themes — the new S.theme setting. 'legacy' renders
+// today's geometry unchanged; the other four port the corresponding
+// docs/shader-test.html compose-pass styles into the disk shader.
+const KNOWN_THEME_KEYS = [
+  'legacy', 'microscope', 'cartoon', 'kurzgesagt', 'classic',
 ];
 
 const VALID_RENDER_SCALES = [1, 0.5, 0.25, 0.125];
@@ -98,12 +113,22 @@ export function loadSettings() {
       parsed.activeTypes = [...DEFAULTS.activeTypes];
     }
     if (parsed.splitMode === 'fixedGrid') parsed.splitMode = 'bondDrift';
-    // Trim theme/background to the 8 + solid kept set. Existing users
-    // on a removed theme (petriDish, neonBloom, …) silently migrate
-    // to the new default on load.
+    // 2026 rename: S.theme used to hold the colour-palette key
+    // (bloodstream, aurora, …). Now S.theme holds the cell-shader
+    // theme (legacy/microscope/…) and S.interfaceColor holds the
+    // palette. If a saved settings blob still has a palette key in
+    // .theme, migrate it to .interfaceColor and reset .theme to
+    // 'legacy' so existing users see no visual change.
+    if (parsed.theme && KNOWN_INTERFACE_COLOR_KEYS.includes(parsed.theme)) {
+      if (!parsed.interfaceColor) parsed.interfaceColor = parsed.theme;
+      parsed.theme = 'legacy';
+    }
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
+    if (parsed.interfaceColor && !KNOWN_INTERFACE_COLOR_KEYS.includes(parsed.interfaceColor)) {
+      parsed.interfaceColor = DEFAULTS.interfaceColor;
+    }
     if (parsed.gameMode && !KNOWN_GAME_MODES.includes(parsed.gameMode)) parsed.gameMode = DEFAULTS.gameMode;
-    const validBackgrounds = ['solid', ...KNOWN_THEME_KEYS];
+    const validBackgrounds = ['solid', ...KNOWN_INTERFACE_COLOR_KEYS];
     if (!parsed.background || !validBackgrounds.includes(parsed.background)) {
       parsed.background = DEFAULTS.background;
     }
@@ -156,7 +181,9 @@ if (!S._langSet) {
 export const LOCALES = {
   en: {
     settings_title: 'Settings',
-    theme: 'Theme', background: 'Background', gameplay: 'Gameplay',
+    theme: 'Theme', interface_color: 'Interface color', background: 'Background', gameplay: 'Gameplay',
+    theme_legacy: 'Legacy (default)', theme_microscope: 'Microscope',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Classic',
     splitting: 'Splitting', population: 'Population',
     physics: 'Physics', look: 'Look',
     performance: 'Performance', language: 'Language',
@@ -256,7 +283,9 @@ export const LOCALES = {
   },
   de: {
     settings_title: 'Einstellungen',
-    theme: 'Thema', background: 'Hintergrund', gameplay: 'Spiel',
+    theme: 'Thema', interface_color: 'Schnittstellenfarbe', background: 'Hintergrund', gameplay: 'Spiel',
+    theme_legacy: 'Legacy (Standard)', theme_microscope: 'Mikroskop',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Klassisch',
     splitting: 'Teilung', population: 'Population',
     physics: 'Physik', look: 'Aussehen',
     performance: 'Leistung', language: 'Sprache',
@@ -352,7 +381,9 @@ export const LOCALES = {
   },
   es: {
     settings_title: 'Ajustes',
-    theme: 'Tema', background: 'Fondo', gameplay: 'Juego',
+    theme: 'Tema', interface_color: 'Color de interfaz', background: 'Fondo', gameplay: 'Juego',
+    theme_legacy: 'Legacy (predeterminado)', theme_microscope: 'Microscopio',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Clásico',
     splitting: 'División', population: 'Población',
     physics: 'Física', look: 'Estilo',
     performance: 'Rendimiento', language: 'Idioma',
@@ -449,7 +480,9 @@ export const LOCALES = {
   bar: {
     // Bayrisch / Boarisch — translated from the German entries.
     settings_title: 'Eistellunga',
-    theme: 'Thema', background: 'Hintagrund', gameplay: 'Spui',
+    theme: 'Thema', interface_color: 'Schnittstelln-Farb', background: 'Hintagrund', gameplay: 'Spui',
+    theme_legacy: 'Legacy (Standard)', theme_microscope: 'Mikroskop',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Klassisch',
     splitting: 'Teilung', population: 'Population',
     physics: 'Physik', look: 'Ausschaung',
     performance: 'Leistung', language: 'Sproch',
@@ -548,7 +581,9 @@ export const LOCALES = {
     // deutschen Übersetzung abgeleitet, leicht lesbar fürs Auge
     // standarddeutsch geübter Leser.
     settings_title: 'Eistellunge',
-    theme: 'Thema', background: 'Hintergrund', gameplay: 'Spiel',
+    theme: 'Thema', interface_color: 'Schnittstellefarb', background: 'Hintergrund', gameplay: 'Spiel',
+    theme_legacy: 'Legacy (Standard)', theme_microscope: 'Mikroskop',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Klassisch',
     splitting: 'Teilung', population: 'Population',
     physics: 'Physik', look: 'Aussehe',
     performance: 'Leistung', language: 'Sprooch',
@@ -647,7 +682,9 @@ export const LOCALES = {
     // weicher als Hessisch, mit eigenem Klang ("klää", "habbe"),
     // weiter gut lesbar fürs Standarddeutsche.
     settings_title: 'Eischtellunge',
-    theme: 'Thema', background: 'Hintergrund', gameplay: 'Schpiel',
+    theme: 'Thema', interface_color: 'Schnittschtellefarb', background: 'Hintergrund', gameplay: 'Schpiel',
+    theme_legacy: 'Legacy (Schtandard)', theme_microscope: 'Mikroschkop',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Klassisch',
     splitting: 'Teilung', population: 'Population',
     physics: 'Physik', look: 'Aussehe',
     performance: 'Leischtung', language: 'Sproch',
@@ -743,7 +780,9 @@ export const LOCALES = {
   },
   latin: {
     settings_title: 'Configuratio',
-    theme: 'Tema', background: 'Tergum', gameplay: 'Ludus',
+    theme: 'Tema', interface_color: 'Color interfaciei', background: 'Tergum', gameplay: 'Ludus',
+    theme_legacy: 'Legacy (defalta)', theme_microscope: 'Microscopium',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Classicus',
     splitting: 'Divisio', population: 'Populatio',
     physics: 'Physica', look: 'Aspectus',
     performance: 'Celeritas', language: 'Lingua',
@@ -948,8 +987,16 @@ export const THEMES = {
   },
 };
 
+// Returns the active interface-colour palette object (was the old
+// currentTheme() before S.theme was repurposed for the cell shader).
+export function currentInterfaceColor() {
+  return THEMES[S.interfaceColor] || THEMES[S.theme] || THEMES.bloodstream;
+}
+
+// Backwards-compat alias for callers that read the palette via the
+// old name. New code should call currentInterfaceColor() directly.
 export function currentTheme() {
-  return THEMES[S.theme] || THEMES.bloodstream;
+  return currentInterfaceColor();
 }
 
 // Effective highlight colour for selection visuals. When the user toggle is
@@ -1023,7 +1070,7 @@ export const BACKGROUNDS = (() => {
 })();
 
 export function currentBackground() {
-  return BACKGROUNDS[S.background] || BACKGROUNDS[S.theme] || BACKGROUNDS.solid;
+  return BACKGROUNDS[S.background] || BACKGROUNDS[S.interfaceColor] || BACKGROUNDS.solid;
 }
 
 // ---------- Cell types ----------

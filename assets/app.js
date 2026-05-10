@@ -588,24 +588,39 @@ function applyThemeToCss(theme) {
   document.documentElement.style.setProperty('--accent', theme.ui.panelAccent);
 }
 
-const themeSelect = document.getElementById('themeSelect');
+// Interface-colour palette dropdown (renamed from themeSelect in
+// late 2026 when S.theme was repurposed for the cell-shader theme).
+const interfaceColorSelect = document.getElementById('interfaceColorSelect');
 for (const [key, t] of Object.entries(THEMES)) {
   const opt = document.createElement('option');
   opt.value = key;
-  // Append the theme's accent colour in parens so users can scan by hue.
+  // Append the palette's accent colour in parens so users can scan by hue.
   const accent = (t.ui && t.ui.panelAccent) || '';
   opt.textContent = accent ? `${t.label} (${colorNameFor(accent)})` : t.label;
-  themeSelect.appendChild(opt);
+  interfaceColorSelect.appendChild(opt);
 }
-themeSelect.value = S.theme in THEMES ? S.theme : 'petriDish';
+interfaceColorSelect.value = S.interfaceColor in THEMES ? S.interfaceColor : 'bloodstream';
 applyThemeToCss(currentTheme());
-themeSelect.addEventListener('change', () => {
-  if (THEMES[themeSelect.value]) {
-    S.theme = themeSelect.value;
+interfaceColorSelect.addEventListener('change', () => {
+  if (THEMES[interfaceColorSelect.value]) {
+    S.interfaceColor = interfaceColorSelect.value;
     saveSettings();
     applyThemeToCss(currentTheme());
   }
 });
+
+// Cell-shader theme dropdown (the new S.theme). Five options:
+// legacy / microscope / cartoon / kurzgesagt / classic. Per-frame
+// uniform read in webgl2.js + webgpu.js disk shaders; canvas2d
+// stays in legacy regardless of S.theme.
+const themeSelect = document.getElementById('themeSelect');
+if (themeSelect) {
+  themeSelect.value = ['legacy','microscope','cartoon','kurzgesagt','classic'].includes(S.theme) ? S.theme : 'legacy';
+  themeSelect.addEventListener('change', () => {
+    S.theme = themeSelect.value;
+    saveSettings();
+  });
+}
 
 function bgAccent(b) {
   if (Array.isArray(b.spotColors) && b.spotColors[0]) return b.spotColors[0];
@@ -623,7 +638,7 @@ if (bgSelect) {
     opt.textContent = name ? `${lbl} (${name})` : lbl;
     bgSelect.appendChild(opt);
   }
-  bgSelect.value = (S.background in BACKGROUNDS) ? S.background : (S.theme in BACKGROUNDS ? S.theme : 'solid');
+  bgSelect.value = (S.background in BACKGROUNDS) ? S.background : (S.interfaceColor in BACKGROUNDS ? S.interfaceColor : 'solid');
   bgSelect.addEventListener('change', () => {
     if (BACKGROUNDS[bgSelect.value]) {
       S.background = bgSelect.value;

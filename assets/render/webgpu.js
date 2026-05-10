@@ -49,6 +49,13 @@ const MOUTH_KIND_FLOAT = {
   none: 0, smile: 1, frown: 2, snarl: 3, fangs: 4, tongue: 5, drool: 6,
 };
 
+// Cell-shader theme key → integer for the disk WGSL fs_main. Mirrors
+// KNOWN_THEME_KEYS in core/state.js + the same map in webgl2.js.
+// Unknown values fall back to 0 (legacy) so a stale localStorage entry
+// never breaks rendering.
+const _WGPU_THEME_IDS = { legacy: 0, microscope: 1, cartoon: 2, kurzgesagt: 3, classic: 4 };
+function _wgpuThemeId(key) { return _WGPU_THEME_IDS[key] || 0; }
+
 // ---------- Shaders (WGSL) ----------
 // Combined vertex + fragment in one module — identical pixel output to
 // webgl2.js's VERT_DISK + FRAG_DISK. Inline comments cross-reference
@@ -61,7 +68,9 @@ struct U {
   misc: vec4<f32>,
   // (highlightR, highlightG, highlightB, borderThickness)
   highlight: vec4<f32>,
-  // (rotation-radians, _, _, _) — applied in vs_main between scale + translate
+  // (rotation-radians, theme, _, _) — rotation applied in vs_main between
+  // scale + translate; theme = cell-shader theme id (0 legacy / 1 microscope /
+  // 2 cartoon / 3 kurzgesagt / 4 classic). Read in fs_main only.
   cameraRot: vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> u: U;
@@ -251,11 +260,31 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let nucGlint = max(0.0, 0.18 - distance(in.uv, vec2<f32>(-0.10, -0.13))) * 4.0;
   let nucColor = mix(in.nucleus, vec3<f32>(1.0), vec3<f32>(clamp(nucGlint, 0.0, 0.35)));
 
-  var col = cyto;
+  // Theme switch (Phase 1) — same shape as webgl2 FRAG_DISK. Legacy
+  // (0) keeps today's behaviour exactly.
+  let theme = i32(round(u.cameraRot.y));
+  var themedCyto = cyto;
+  var themedOutline = in.cytoBot * 0.55;
+  if (theme == 2) {
+    // cartoon · saturated body, thick black outline
+    themedCyto = clamp(cyto * 1.25, vec3<f32>(0.0), vec3<f32>(1.0));
+    themedOutline = vec3<f32>(0.0);
+  } else if (theme == 3) {
+    themedCyto = in.cytoBot;                     // kurzgesagt — flat fill
+    themedOutline = vec3<f32>(0.88, 0.85, 0.78); // pale rim
+  } else if (theme == 4) {
+    themedOutline = vec3<f32>(0.04, 0.02, 0.08); // classic — game-style dark
+  } else if (theme == 1) {
+    themedOutline = vec3<f32>(0.10, 0.04, 0.12); // microscope — H&E purple
+  }
+  var col = themedCyto;
   col = mix(col, nucColor, vec3<f32>(nucleusMask));
-  // Border colour: 0.55 × cytoBot — darker than the previous 0.80 so a
-  // bolder rim reads with more contrast against the body fill.
-  col = mix(col, in.cytoBot * 0.55, vec3<f32>(clamp(outlineMask, 0.0, 1.0)));
+  col = mix(col, themedOutline, vec3<f32>(clamp(outlineMask, 0.0, 1.0)));
+  if (theme == 3) {
+    let r2 = dot(in.uv, in.uv);
+    let halo = pow(clamp(1.0 - r2, 0.0, 1.0), 1.5) * 0.45;
+    col = col + in.cytoBot * halo;
+  }
 
   // Tap flash — c.flash decays in Sim.update(); fade across 200 ms.
   let flashA = clamp(in.outline.a / 0.2, 0.0, 1.0) * 0.6;
@@ -2515,7 +2544,10 @@ export class WebGPURenderer extends RendererBase {
       u[8] = hl[0]; u[9] = hl[1]; u[10] = hl[2];
       u[11] = (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0;
       u[12] = cam.rotation || 0;
-      // u[13..15] padding
+      // u[13] cell-shader theme id (0 legacy, 1 microscope, 2 cartoon,
+      // 3 kurzgesagt, 4 classic) — read by fs_main as u.cameraRot.y.
+      u[13] = _wgpuThemeId(S.theme);
+      // u[14..15] padding
       device.queue.writeBuffer(this._uniformBuffer, 0, u.buffer, u.byteOffset, u.byteLength);
 
       const pass = this._frameEncoder.beginRenderPass({
