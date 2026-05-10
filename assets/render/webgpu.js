@@ -319,17 +319,22 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   // earlier in fs_main where bodyR branches on the same value.)
   var themedCyto = cyto;
   var themedOutline = in.cytoBot * 0.55;
-  if (theme == 2) {
-    // cartoon · saturated body, thick black outline
-    themedCyto = clamp(cyto * 1.25, vec3<f32>(0.0), vec3<f32>(1.0));
+  if (theme == 1) {
+    // microscope — H&E pink/violet wash on cyto + dark purple membrane
+    themedCyto = mix(cyto, vec3<f32>(0.95, 0.65, 0.85), vec3<f32>(0.30));
+    themedOutline = vec3<f32>(0.18, 0.06, 0.22);
+  } else if (theme == 2) {
+    themedCyto = clamp(cyto * 1.30, vec3<f32>(0.0), vec3<f32>(1.0));
     themedOutline = vec3<f32>(0.0);
   } else if (theme == 3) {
-    themedCyto = in.cytoBot;                     // kurzgesagt — flat fill
-    themedOutline = vec3<f32>(0.88, 0.85, 0.78); // pale rim
+    themedCyto = in.cytoBot;
+    themedOutline = vec3<f32>(0.88, 0.85, 0.78);
   } else if (theme == 4) {
-    themedOutline = vec3<f32>(0.04, 0.02, 0.08); // classic — game-style dark
-  } else if (theme == 1) {
-    themedOutline = vec3<f32>(0.10, 0.04, 0.12); // microscope — H&E purple
+    // classic — top-left highlight + dark rim, canvas2d-style gloss
+    let hl = smoothstep(0.55, 0.0, distance(in.uv, vec2<f32>(-0.30, 0.30)));
+    let lift = clamp(cyto * 1.55 + vec3<f32>(0.08), vec3<f32>(0.0), vec3<f32>(1.0));
+    themedCyto = mix(cyto, lift, vec3<f32>(hl));
+    themedOutline = vec3<f32>(0.04, 0.02, 0.08);
   }
   var col = themedCyto;
   col = mix(col, nucColor, vec3<f32>(nucleusMask));
@@ -2632,12 +2637,7 @@ export class WebGPURenderer extends RendererBase {
       u[12] = cam.rotation || 0;
       // u[13] cell-shader theme id (0 legacy, 1 microscope, 2 cartoon,
       // 3 kurzgesagt, 4 classic) — read by fs_main as u.cameraRot.y.
-      const _tid = _wgpuThemeId(S.theme);
-      if (_tid !== this._lastThemeId) {
-        this._lastThemeId = _tid;
-        console.info('[microbes] disk theme set (webgpu): S.theme=' + S.theme + ' id=' + _tid);
-      }
-      u[13] = _tid;
+      u[13] = _wgpuThemeId(S.theme);
       // u[14..15] padding
       device.queue.writeBuffer(this._uniformBuffer, 0, u.buffer, u.byteOffset, u.byteLength);
 

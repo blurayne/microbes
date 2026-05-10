@@ -382,8 +382,12 @@ const fabs = [gearBtn, helpBtn, paletteBtn, paletteBadBtn, reloadBtn, pauseBtn].
 // Pause state. Frame loop skips sim.update when _paused; the music
 // player (assigned later by the music import block) is muted in
 // parallel without touching S.musicEnabled. Pause state is transient
-// — not persisted across reloads.
+// — not persisted across reloads. _pauseFreezeTs holds the rAF ts
+// captured at pause-onset; while paused, every renderer call gets
+// that frozen value so shader u_time stops advancing too (background
+// fbm, virus capsid pulse, kurzgesagt halo, etc. all freeze).
 let _paused = false;
+let _pauseFreezeTs = null;
 let _musicPlayer = null;
 function setPaused(p) {
   _paused = !!p;
@@ -722,7 +726,6 @@ if (themeSelect) {
   themeSelect.addEventListener('change', () => {
     S.theme = themeSelect.value;
     saveSettings();
-    console.info('[microbes] theme dropdown → S.theme=' + S.theme);
   });
 }
 
@@ -1029,8 +1032,19 @@ function updateCompositionHud(ts) {
 }
 
 function frame(ts) {
+  // Pause: freeze ts at the moment pause started so shader u_time stops
+  // advancing too. Renderer + sim see the frozen value; lastTs is held
+  // at the frozen ts, then re-anchored on resume so dt doesn't blow up.
+  if (_paused) {
+    if (_pauseFreezeTs == null) _pauseFreezeTs = ts;
+    ts = _pauseFreezeTs;
+    lastTs = ts;
+  } else if (_pauseFreezeTs != null) {
+    lastTs = ts;
+    _pauseFreezeTs = null;
+  }
   if (!lastTs) lastTs = ts;
-  const dt = Math.min(0.05, (ts - lastTs) / 1000);
+  const dt = _paused ? 0 : Math.min(0.05, (ts - lastTs) / 1000);
   lastTs = ts;
 
   // Skip simulation when paused; the renderer still runs so the
