@@ -144,6 +144,34 @@ fn isSelected(k: f32) -> i32 { return i32(((k + 0.5) / 256.0) % 16.0); }
 fn isHollow(k: f32) -> i32 { return i32(((k + 0.5) / 4096.0) % 2.0); }
 fn testKind(k: f32) -> i32 { return i32(((k + 0.5) / 8192.0) % 32.0); }
 
+// Lightweight value-noise + 4-octave fbm + capsule SDF. Mirrors
+// FRAG_DISK helpers; same numerical formula as shader-test.
+fn cellHash(p: vec2<f32>) -> f32 {
+  return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+}
+fn cellNoise(p: vec2<f32>) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(cellHash(i),                     cellHash(i + vec2<f32>(1.0, 0.0)), u.x),
+    mix(cellHash(i + vec2<f32>(0.0, 1.0)), cellHash(i + vec2<f32>(1.0, 1.0)), u.x),
+    u.y);
+}
+fn cellFbm(pIn: vec2<f32>) -> f32 {
+  var v: f32 = 0.0;
+  var a: f32 = 0.5;
+  var p = pIn;
+  for (var i: i32 = 0; i < 4; i = i + 1) { v = v + a * cellNoise(p); p = p * 2.03; a = a * 0.5; }
+  return v;
+}
+fn cellCapsule(p: vec2<f32>, ca: vec2<f32>, cb: vec2<f32>, r: f32) -> f32 {
+  let pa = p - ca;
+  let ba = cb - ca;
+  let h  = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
+
 fn bodyScale(uv: vec2<f32>, kindF: f32, ph: vec4<f32>, time: f32, wobbleAmp: f32) -> f32 {
   let kind = bodyKind(kindF);
   let ang = atan2(uv.y, uv.x);
@@ -282,6 +310,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let topLift = max(0.0, 0.55 - distance(in.uv, vec2<f32>(-0.30, -0.40))) * 0.65;
   cyto = mix(cyto, in.cytoTop, vec3<f32>(topLift));
 
+  // Non-legacy themes: shader-test cyto texturing — granular fbm
+  // subtracted, sheets fbm added, b-cell ER stripes if testKind
+  // == 4. Mirrors WebGL2 FRAG_DISK.
+  if (theme != 0) {
+    let granular = cellFbm(in.uv * 22.0 + vec2<f32>(time * 0.02, 0.0));
+    cyto = cyto - vec3<f32>(0.10, 0.07, 0.08) * granular;
+    let sheets = cellFbm(in.uv * 6.0 - vec2<f32>(time * 0.03, time * 0.02));
+    cyto = cyto + vec3<f32>(0.08, 0.04, 0.05) * (sheets - 0.5);
+    if (testKind(in.kind) == 4) {
+      let er = sin(in.uv.x * 14.0 + in.uv.y * 6.0 + time * 0.4) * 0.5 + 0.5;
+      cyto = cyto + vec3<f32>(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
+    }
+  }
+
   // Donut-hole darkening for cells flagged bodyHollow (RBCs).
   if (isHollow(in.kind) == 1) {
     let holeT = 1.0 - smoothstep(0.0, 0.45, length(in.uv));
@@ -366,6 +408,34 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     } else if (tk == 20) {
       let glow = pow(smoothstep(1.05, 0.80, d), 2.0) * smoothstep(0.55, 0.85, d);
       col = col + vec3<f32>(0.55, 0.30, 0.85) * glow;
+    }
+  }
+
+  // Mitochondria orbits — 8 capsules drifting around the nucleus.
+  // Skipped for prokaryotes / virus / spore / anucleate / toxin
+  // (matches shader-test's nMito gate).
+  if (theme != 0 && d < bodyR) {
+    let tk3 = testKind(in.kind);
+    let noMito = (tk3 == 5 || tk3 == 6 || tk3 == 8 || tk3 == 13
+               || tk3 == 16 || tk3 == 17 || tk3 == 20);
+    if (!noMito) {
+      var mito: f32 = 1e9;
+      for (var i: i32 = 0; i < 8; i = i + 1) {
+        let fi = f32(i);
+        let baseA = fi * 0.7853 + time * 0.08;
+        let radM  = 0.40 + 0.05 * sin(fi * 1.7);
+        let centre = vec2<f32>(cos(baseA), sin(baseA)) * radM
+                   + vec2<f32>(0.015 * sin(time * 1.3 + fi),
+                               0.015 * cos(time * 1.1 + fi * 2.0));
+        let dir = vec2<f32>(cos(baseA + 1.5708), sin(baseA + 1.5708));
+        let capLen: f32 = 0.045;
+        let dCap = cellCapsule(in.uv,
+                               centre - dir * capLen,
+                               centre + dir * capLen, 0.018);
+        mito = min(mito, dCap);
+      }
+      let mitoMask = smoothstep(0.004, -0.004, mito);
+      col = mix(col, vec3<f32>(0.95, 0.55, 0.30), vec3<f32>(mitoMask * 0.55));
     }
   }
 
