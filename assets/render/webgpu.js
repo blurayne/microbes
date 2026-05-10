@@ -312,14 +312,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
   // Non-legacy themes: shader-test cyto texturing — granular fbm
   // subtracted, sheets fbm added, b-cell ER stripes if testKind
-  // == 4. Mirrors WebGL2 FRAG_DISK.
+  // == 4. Per-cell phase + seed shift the fbm domain + ER phase so
+  // every cell renders a unique cyto pattern. Mirrors WebGL2 FRAG_DISK.
   if (theme != 0) {
-    let granular = cellFbm(in.uv * 22.0 + vec2<f32>(time * 0.02, 0.0));
+    let cellOff = vec2<f32>(in.phase.y * 1.31, in.phase.y * 0.83 + in.phase.x);
+    let granular = cellFbm(in.uv * 22.0 + cellOff * 7.0
+                           + vec2<f32>(time * 0.02, 0.0));
     cyto = cyto - vec3<f32>(0.10, 0.07, 0.08) * granular;
-    let sheets = cellFbm(in.uv * 6.0 - vec2<f32>(time * 0.03, time * 0.02));
+    let sheets = cellFbm(in.uv * 6.0 + cellOff * 2.5
+                         - vec2<f32>(time * 0.03, time * 0.02));
     cyto = cyto + vec3<f32>(0.08, 0.04, 0.05) * (sheets - 0.5);
     if (testKind(in.kind) == 4) {
-      let er = sin(in.uv.x * 14.0 + in.uv.y * 6.0 + time * 0.4) * 0.5 + 0.5;
+      let er = sin(in.uv.x * 14.0 + in.uv.y * 6.0
+                   + time * 0.4 + in.phase.x) * 0.5 + 0.5;
       cyto = cyto + vec3<f32>(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
     }
   }
@@ -394,15 +399,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
       let bicon = smoothstep(0.45, 0.10, d);
       col = mix(col, col * 0.45, vec3<f32>(bicon * insideMask));
     } else if (tk == 5) {
-      let h = 0.5 + 0.5 * cos(in.uv.x * 16.0) * cos(in.uv.y * 16.0);
+      // virus — per-cell phase rotates the hex lattice so adjacent
+      // virions don't tile.
+      let ca = cos(in.phase.x); let sa = sin(in.phase.x);
+      let latUv = vec2<f32>(ca * in.uv.x - sa * in.uv.y,
+                            sa * in.uv.x + ca * in.uv.y);
+      let h = 0.5 + 0.5 * cos(latUv.x * 16.0) * cos(latUv.y * 16.0);
       col = col + vec3<f32>(0.30, 0.20, 0.45) * pow(h, 6.0) * insideMask;
     } else if (tk == 11) {
       let ang = atan2(in.uv.y, in.uv.x);
-      let t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + time * 0.20), 14.0);
+      let t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + time * 0.20 + in.phase.x), 14.0);
       col = col + in.cytoBot * t6 * 0.25 * insideMask;
     } else if (tk == 18) {
       let ang = atan2(in.uv.y, in.uv.x);
-      let lines = pow(abs(cos(ang * 1.5 + time * 0.10)), 50.0);
+      let lines = pow(abs(cos(ang * 1.5 + time * 0.10 + in.phase.x)), 50.0);
       let ring  = smoothstep(1.05, 0.80, d) * smoothstep(0.45, 0.65, d);
       col = mix(col, vec3<f32>(0.20, 0.30, 0.05), vec3<f32>(lines * ring * 0.7));
     } else if (tk == 20) {
@@ -422,11 +432,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
       var mito: f32 = 1e9;
       for (var i: i32 = 0; i < 8; i = i + 1) {
         let fi = f32(i);
-        let baseA = fi * 0.7853 + time * 0.08;
-        let radM  = 0.40 + 0.05 * sin(fi * 1.7);
+        // Per-cell phase rotates the orbit; per-cell seed jitters
+        // each capsule's radius + jitter phase.
+        let baseA = fi * 0.7853 + time * 0.08 + in.phase.x;
+        let radM  = 0.40 + 0.05 * sin(fi * 1.7 + in.phase.y * 0.21);
         let centre = vec2<f32>(cos(baseA), sin(baseA)) * radM
-                   + vec2<f32>(0.015 * sin(time * 1.3 + fi),
-                               0.015 * cos(time * 1.1 + fi * 2.0));
+                   + vec2<f32>(0.015 * sin(time * 1.3 + fi + in.phase.y),
+                               0.015 * cos(time * 1.1 + fi * 2.0 + in.phase.y * 0.7));
         let dir = vec2<f32>(cos(baseA + 1.5708), sin(baseA + 1.5708));
         let capLen: f32 = 0.045;
         let dCap = cellCapsule(in.uv,
@@ -486,15 +498,18 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     else if (tk4 == 20) { vesCol = vec3<f32>(1.00, 0.90, 1.00); }
     if (vesCount > 0) {
       var ves: f32 = 1e9;
+      // Per-cell seed shifts every vesicle's phase so granule
+      // arrangement is unique to each cell.
+      let vSeed = in.phase.y;
       for (var j: i32 = 0; j < 16; j = j + 1) {
         if (j >= vesCount) { break; }
         let fj = f32(j);
         let pos = vec2<f32>(
-          0.42 * sin(fj * 1.91 + time * (0.18 + 0.03 * fj)),
-          0.42 * cos(fj * 2.37 + time * (0.21 + 0.02 * fj))
+          0.42 * sin(fj * 1.91 + vSeed * 0.71 + time * (0.18 + 0.03 * fj)),
+          0.42 * cos(fj * 2.37 + vSeed * 0.93 + time * (0.21 + 0.02 * fj))
         );
-        let jit = vec2<f32>(0.008 * sin(time * 3.0 + fj * 7.0),
-                            0.008 * cos(time * 2.6 + fj * 5.0));
+        let jit = vec2<f32>(0.008 * sin(time * 3.0 + fj * 7.0 + vSeed),
+                            0.008 * cos(time * 2.6 + fj * 5.0 + vSeed * 1.3));
         ves = min(ves, length(in.uv - pos - jit) - vesRadius);
       }
       let vesMask = smoothstep(0.003, -0.003, ves);

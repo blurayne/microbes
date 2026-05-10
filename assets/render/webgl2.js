@@ -315,14 +315,21 @@ void main() {
   // added (organelle-density variation). B-cell rough ER stripes
   // when testKind == 4. Identical numerical formula to shader-
   // test's fs_main; kAmp / wobble already match by PR-B.1.
+  // The per-cell seed (v_phase.y) and phase (v_phase.x) shift the
+  // fbm domain + ER phase so every cell of the same type renders a
+  // distinct cyto pattern (instead of all looking identical).
   if (themeId != 0) {
-    float granular = cellFbm(v_uv * 22.0 + vec2(u_time * 0.02, 0.0));
+    vec2 cellOff = vec2(v_phase.y * 1.31, v_phase.y * 0.83 + v_phase.x);
+    float granular = cellFbm(v_uv * 22.0 + cellOff * 7.0
+                             + vec2(u_time * 0.02, 0.0));
     cyto -= vec3(0.10, 0.07, 0.08) * granular;
-    float sheets = cellFbm(v_uv * 6.0 - vec2(u_time * 0.03, u_time * 0.02));
+    float sheets = cellFbm(v_uv * 6.0 + cellOff * 2.5
+                           - vec2(u_time * 0.03, u_time * 0.02));
     cyto += vec3(0.08, 0.04, 0.05) * (sheets - 0.5);
     if (testKind() == 4) {
       // b-cell — diagonal rough-ER striping
-      float er = sin(v_uv.x * 14.0 + v_uv.y * 6.0 + u_time * 0.4) * 0.5 + 0.5;
+      float er = sin(v_uv.x * 14.0 + v_uv.y * 6.0
+                     + u_time * 0.4 + v_phase.x) * 0.5 + 0.5;
       cyto += vec3(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
     }
   }
@@ -407,18 +414,22 @@ void main() {
       float bicon = smoothstep(0.45, 0.10, d);
       col = mix(col, col * 0.45, bicon * insideMask);
     } else if (tk == 5) {
-      // virus — bright hex lattice tinted on the body.
-      float h = 0.5 + 0.5 * cos(v_uv.x * 16.0) * cos(v_uv.y * 16.0);
+      // virus — bright hex lattice tinted on the body. Per-cell
+      // phase rotates the lattice so adjacent virions don't tile.
+      float ca = cos(v_phase.x), sa = sin(v_phase.x);
+      vec2 latUv = vec2(ca * v_uv.x - sa * v_uv.y,
+                        sa * v_uv.x + ca * v_uv.y);
+      float h = 0.5 + 0.5 * cos(latUv.x * 16.0) * cos(latUv.y * 16.0);
       col += vec3(0.30, 0.20, 0.45) * pow(h, 6.0) * insideMask;
     } else if (tk == 11) {
       // dendritic — accentuate the tendril rim with a faint cyto glow.
       float ang = atan(v_uv.y, v_uv.x);
-      float t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + u_time * 0.20), 14.0);
+      float t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + u_time * 0.20 + v_phase.x), 14.0);
       col += v_cytoBot * t6 * 0.25 * insideMask;
     } else if (tk == 18) {
       // slime — faint dark hyphal threads at the rim.
       float ang = atan(v_uv.y, v_uv.x);
-      float lines = pow(abs(cos(ang * 1.5 + u_time * 0.10)), 50.0);
+      float lines = pow(abs(cos(ang * 1.5 + u_time * 0.10 + v_phase.x)), 50.0);
       float ring  = smoothstep(1.05, 0.80, d) * smoothstep(0.45, 0.65, d);
       col = mix(col, vec3(0.20, 0.30, 0.05), lines * ring * 0.7);
     } else if (tk == 20) {
@@ -439,11 +450,14 @@ void main() {
       float mito = 1e9;
       for (int i = 0; i < 8; i++) {
         float fi = float(i);
-        float baseA = fi * 0.7853 + u_time * 0.08;
-        float radM  = 0.40 + 0.05 * sin(fi * 1.7);
+        // Per-cell phase rotates the orbit; per-cell seed jitters
+        // each capsule's radius + jitter phase so two same-type
+        // cells don't show identical mito layouts.
+        float baseA = fi * 0.7853 + u_time * 0.08 + v_phase.x;
+        float radM  = 0.40 + 0.05 * sin(fi * 1.7 + v_phase.y * 0.21);
         vec2 centre = vec2(cos(baseA), sin(baseA)) * radM
-                    + vec2(0.015 * sin(u_time * 1.3 + fi),
-                           0.015 * cos(u_time * 1.1 + fi * 2.0));
+                    + vec2(0.015 * sin(u_time * 1.3 + fi + v_phase.y),
+                           0.015 * cos(u_time * 1.1 + fi * 2.0 + v_phase.y * 0.7));
         vec2 dir = vec2(cos(baseA + 1.5708), sin(baseA + 1.5708));
         float capLen = 0.045;
         float dCap = cellCapsule(v_uv, centre - dir * capLen,
@@ -506,15 +520,18 @@ void main() {
     else if (tk4 == 20) vesCol = vec3(1.00, 0.90, 1.00);
     if (vesCount > 0) {
       float ves = 1e9;
+      // Per-cell seed shifts the angular phase + drift speed of every
+      // vesicle so each cell's granule arrangement is unique.
+      float vSeed = v_phase.y;
       for (int j = 0; j < 16; j++) {
         if (j >= vesCount) break;
         float fj = float(j);
         vec2 pos = vec2(
-          0.42 * sin(fj * 1.91 + u_time * (0.18 + 0.03 * fj)),
-          0.42 * cos(fj * 2.37 + u_time * (0.21 + 0.02 * fj))
+          0.42 * sin(fj * 1.91 + vSeed * 0.71 + u_time * (0.18 + 0.03 * fj)),
+          0.42 * cos(fj * 2.37 + vSeed * 0.93 + u_time * (0.21 + 0.02 * fj))
         );
-        vec2 jit = vec2(0.008 * sin(u_time * 3.0 + fj * 7.0),
-                        0.008 * cos(u_time * 2.6 + fj * 5.0));
+        vec2 jit = vec2(0.008 * sin(u_time * 3.0 + fj * 7.0 + vSeed),
+                        0.008 * cos(u_time * 2.6 + fj * 5.0 + vSeed * 1.3));
         ves = min(ves, length(v_uv - pos - jit) - vesRadius);
       }
       float vesMask = smoothstep(0.003, -0.003, ves);
