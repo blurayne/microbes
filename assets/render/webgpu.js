@@ -280,13 +280,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     else if (tk == 12) { kAmp = 0.30; }
     else if (tk == 14) { kAmp = 0.25; }
     else if (tk == 15) { kAmp = 0.35; }
+    // Wobble + testShape pick up the per-cell freq sign + phase so
+    // split children diverge and so same-type cells don't wobble in
+    // lockstep. Mirrors WebGL2 FRAG_DISK.
+    let dirW = sign(in.phase.z + 1e-6);
+    let tt   = time * dirW;
+    let phi  = in.phase.x;
     var wob = kAmp * (
-      0.045 * sin(ang * 5.0  + time * 0.60) +
-      0.025 * sin(ang * 9.0  - time * 0.40) +
-      0.015 * sin(ang * 17.0 + time * 1.10)
+      0.045 * sin(ang * 5.0  + tt * 0.60 + phi) +
+      0.025 * sin(ang * 9.0  - tt * 0.40 + phi * 1.31) +
+      0.015 * sin(ang * 17.0 + tt * 1.10 + phi * 0.71)
     );
     wob = wob * max(0.001, wobbleAmp * in.phase.w);
-    bodyR = testShape(in.uv, in.kind, time) + wob;
+    bodyR = testShape(in.uv, in.kind, tt) + wob;
   }
   let sdf = d - bodyR;
   let sel = isSelected(in.kind);
