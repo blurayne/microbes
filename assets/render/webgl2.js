@@ -275,16 +275,26 @@ void main() {
     else if (tk == 12) kAmp = 0.30;    // basophil
     else if (tk == 14) kAmp = 0.25;    // t-cell
     else if (tk == 15) kAmp = 0.35;    // eosinophil
+    // Wobble + testShape pick up the per-cell freq sign so split-
+    // children inheriting the parent's seed+phase visibly diverge
+    // (wobble runs the opposite direction on one sibling). The
+    // legacy bodyScale path already responded to freq sign; this
+    // adds the same behaviour to microscope / cartoon / kurzgesagt /
+    // classic. The phase offset v_phase.x rides into each sin too
+    // so even at t = 0 siblings don't start exactly aligned.
+    float dir   = sign(v_phase.z + 1e-6);
+    float tt    = u_time * dir;
+    float phi   = v_phase.x;
     float wob = kAmp * (
-      0.045 * sin(ang * 5.0  + u_time * 0.60) +
-      0.025 * sin(ang * 9.0  - u_time * 0.40) +
-      0.015 * sin(ang * 17.0 + u_time * 1.10)
+      0.045 * sin(ang * 5.0  + tt * 0.60 + phi) +
+      0.025 * sin(ang * 9.0  - tt * 0.40 + phi * 1.31) +
+      0.015 * sin(ang * 17.0 + tt * 1.10 + phi * 0.71)
     );
     // Pull through u_wobbleAmp + per-cell wobbleMul so the user's
     // settings slider + per-cell variation (Sim.makeCell) still
     // dampen / amplify on top of the kind-specific amp.
     wob *= max(0.001, u_wobbleAmp * v_phase.w);
-    bodyR = testShape(v_uv, u_time) + wob;
+    bodyR = testShape(v_uv, tt) + wob;
   }
   float sdf = d - bodyR;
   int sel = isSelected();
