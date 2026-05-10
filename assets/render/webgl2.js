@@ -649,24 +649,36 @@ void main() {
   }
 
   // Drifting red-blood-cell silhouettes — bloodstream theme flair.
-  // 22 ellipses with darker centre dot. Anchored in world space so they
-  // pan + zoom with the camera (matches Canvas2D's drawBackground
-  // behaviour where RBCs are drawn inside the camera transform).
+  // World-tiled so the density stays constant as the camera zooms
+  // out instead of stretching ~22 silhouettes across the whole
+  // (now-larger) viewport. For the fragment's worldPx we sample a
+  // 3x3 neighbourhood of 600x600 tiles; each tile spawns 4 RBCs
+  // at hash-stable positions + a small per-cell drift so the
+  // field still looks alive. Total: 36 ellipse tests per fragment
+  // (was 22 — comparable cost) but density is camera-independent.
   if (u_rbc == 1) {
-    for (int i = 0; i < 22; i++) {
-      float seed = float(i) * 1.31;
-      float fx = mod(float(i) / 22.0 + 0.06 * sin(u_time * 0.25 + seed), 1.0);
-      float fy = mod(fract(seed * 0.7) + u_time * 0.15 + float(i) * 0.13, 1.0);
-      // Centre in world coords — matches Canvas2D's px = fx * W.
-      vec2 cWorld = vec2(fx, fy) * u_viewport;
-      // Radius in world px — matches Canvas2D's 18..34 px.
-      float rWorld = 18.0 + 16.0 * fract(seed * 0.21);
-      vec2 dEll = (worldPx - cWorld) / vec2(rWorld, rWorld * 0.78);
-      float ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
-      col = mix(col, vec3(1.0, 0.35, 0.35), ellA);
-      float dDot = length(worldPx - cWorld) / (rWorld * 0.32);
-      float dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
-      col = mix(col, vec3(0.47, 0.08, 0.08), dotA);
+    const float TS = 600.0;            // world px per tile
+    vec2 tIdx = floor(worldPx / TS);
+    for (int oy = -1; oy <= 1; oy++) {
+      for (int ox = -1; ox <= 1; ox++) {
+        vec2 cell = tIdx + vec2(float(ox), float(oy));
+        float h0 = bgHash(cell);
+        for (int k = 0; k < 4; k++) {
+          float kSeed = h0 * 6.28 + float(k) * 1.31;
+          // Stable in-tile centre + slow per-cell drift in world px.
+          vec2 inTile = vec2(fract(kSeed * 1.7), fract(kSeed * 2.3)) * TS;
+          vec2 cWorld = cell * TS + inTile
+                      + vec2(40.0 * sin(u_time * 0.25 + kSeed),
+                             40.0 * cos(u_time * 0.18 + kSeed));
+          float rWorld = 18.0 + 16.0 * fract(kSeed * 0.41);
+          vec2 dEll = (worldPx - cWorld) / vec2(rWorld, rWorld * 0.78);
+          float ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
+          col = mix(col, vec3(1.0, 0.35, 0.35), ellA);
+          float dDot = length(worldPx - cWorld) / (rWorld * 0.32);
+          float dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
+          col = mix(col, vec3(0.47, 0.08, 0.08), dotA);
+        }
+      }
     }
   }
 
