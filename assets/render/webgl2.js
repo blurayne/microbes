@@ -76,6 +76,7 @@ void main() {
 //   0=round  1=lobed  2=rippled  3=oblong  4=pseudopod  5=star
 const FRAG_DISK = `#version 300 es
 precision highp float;
+precision highp int;
 in vec2 v_uv;
 in float v_kind;
 in vec4 v_phase;        // (phase, seed, freq, wobbleMul)
