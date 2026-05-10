@@ -469,7 +469,8 @@ function setPaused(p) {
   // the user has to interact with the overlay to resume (no
   // accidental side-clicks behind the blur).
   document.body.classList.toggle('is-paused', _paused);
-  if (_musicPlayer) _musicPlayer.setEnabled(_paused ? false : !!S.musicEnabled);
+  // Music plays when not paused AND the user hasn't muted via volume = 0.
+  if (_musicPlayer) _musicPlayer.setEnabled(!_paused && (S.musicVolume || 0) > 0);
 }
 if (pauseBtn) {
   pauseBtn.addEventListener('click', (e) => {
@@ -818,9 +819,10 @@ const SFX_OFFSCREEN_SCALE = 0.8;
 Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ MusicPlayer }, { SfxPlayer }]) => {
   const player = new MusicPlayer();
   player.setVolume(S.musicVolume);
-  player.setEnabled(!!S.musicEnabled);
-  // Expose to the pause handler so toggling pause can mute the music
-  // without changing the user's S.musicEnabled preference.
+  // Music plays whenever volume > 0 — the dedicated on/off checkbox
+  // was removed (the slider is the only control). Pause-state still
+  // calls setEnabled(false) to silence music while the game is paused.
+  player.setEnabled((S.musicVolume || 0) > 0);
   _musicPlayer = player;
   if (_paused) player.setEnabled(false);
 
@@ -834,11 +836,24 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
   // user has clicked once.
   document.addEventListener('pointerdown', () => player.retryIfPending(), { once: false });
 
-  bindCheckbox('musicEnabled', 'musicEnabled', (on) => player.setEnabled(on));
+  // "Now playing" line in settings — updates on every next() + the
+  // first setEnabled(true).
+  const trackLabelEl = document.getElementById('musicTrackLabel');
+  function setTrackLabel(label) {
+    if (trackLabelEl) trackLabelEl.textContent = label || '—';
+  }
+  player.onTrackChange = setTrackLabel;
+  setTrackLabel(player.getCurrentLabel());
+
   bindRange('musicVolume', 'musicVolume', 'musicVolumeVal', v => Math.round(v * 100) + '%');
   bindRange('sfxVolume',   'sfxVolume',   'sfxVolumeVal',   v => Math.round(v * 100) + '%');
   const musicVolEl = document.getElementById('musicVolume');
-  if (musicVolEl) musicVolEl.addEventListener('input', () => player.setVolume(parseFloat(musicVolEl.value)));
+  if (musicVolEl) musicVolEl.addEventListener('input', () => {
+    const v = parseFloat(musicVolEl.value);
+    player.setVolume(v);
+    // Crossing zero re-arms / silences the player.
+    player.setEnabled(v > 0 && !_paused);
+  });
   const sfxVolEl = document.getElementById('sfxVolume');
   if (sfxVolEl) sfxVolEl.addEventListener('input', () => sfx.setVolume(parseFloat(sfxVolEl.value)));
   const nextBtn = document.getElementById('musicNext');
@@ -886,11 +901,13 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
 }).catch((err) => {
   console.warn('Audio modules failed to load:', err);
 });
-// FPS toggle controls whether the fps number is rendered; the
-// renderer label is always shown alongside (or alone when fps is off).
-// The #fps overlay is now always visible — updateFPS() picks the
-// content per S.showFPS.
-bindCheckbox('showFPS', 'showFPS');
+// FPS toggle gates the whole overlay (fps number + renderer label).
+// When off, nothing shows; when on, "15fps (webgpu)" — renderer
+// always comes along for the ride.
+bindCheckbox('showFPS', 'showFPS', (on) => {
+  const el = document.getElementById('fps');
+  if (el) el.classList.toggle('on', !!on);
+});
 function applyBuildInfoVis(on) {
   const el = document.getElementById('build');
   if (el) el.classList.toggle('on', !!on);
@@ -1257,22 +1274,17 @@ const fpsBuf = [];
 const fpsEl = document.getElementById('fps');
 
 function updateFPS(dt, ts) {
-  if (!fpsEl) return;
+  if (!S.showFPS || !fpsEl) return;
   fpsBuf.push(dt);
   if (fpsBuf.length > 60) fpsBuf.shift();
-  // Refresh at most ~4× per second so the text doesn't flicker.
   if (Math.floor(ts / 250) === Math.floor((ts - dt * 1000) / 250)) return;
-  const info = (renderer && typeof renderer.info === 'string') ? renderer.info : '';
-  if (!S.showFPS) {
-    // Renderer only — no parens, plain token (e.g. "webgpu").
-    fpsEl.textContent = info;
-    return;
-  }
   let sum = 0;
   for (const v of fpsBuf) sum += v;
   const avg = sum / fpsBuf.length;
   const fps = avg > 0 ? Math.round(1 / avg) : 0;
-  // Compact form per user spec: "15fps (webgpu)".
+  const info = (renderer && typeof renderer.info === 'string') ? renderer.info : '';
+  // "15fps (webgpu)" — renderer is always part of the overlay when
+  // it's visible at all (user spec).
   fpsEl.textContent = info ? `${fps}fps (${info})` : `${fps}fps`;
 }
 

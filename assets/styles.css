@@ -391,6 +391,20 @@ body.is-paused #aboutDialog {
   border-radius: 8px;
   cursor: pointer;
 }
+
+/* "Now playing" line above the music-volume slider. Label dim,
+   track name punchy in the active accent. */
+.settings-panel .music-now {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #d8d0c8aa;
+}
+.settings-panel .music-now-label { color: #d8d0c8aa; }
+.settings-panel #musicTrackLabel {
+  color: var(--accent);
+  font-weight: 600;
+}
 .about-btn:hover { background: #ffffff14; }
 
 .about-body { padding: 4px 0 8px; line-height: 1.55; }
@@ -493,9 +507,10 @@ body.is-paused #aboutDialog {
   padding: 3px 8px;
   border-radius: 6px;
   text-shadow: 0 1px 2px #000a;
-  display: block;
+  display: none;
 }
-body.show-build #fps { top: 32px; }
+#fps.on { display: block; }
+body.show-build #fps.on { top: 32px; }
 
 /* Render-scale upscaling: pixel mode shows crisp blocks instead of bilinear smoothing */
 #stage          { image-rendering: auto; }
