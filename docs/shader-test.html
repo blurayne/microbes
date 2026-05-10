@@ -665,8 +665,20 @@
       grid-template-columns: 1fr;
       grid-template-rows: 64px 50vh 1fr;
     }
+    /* When the source aside is collapsed it leaves the grid via
+       position:absolute, so the second 1fr row that the expanded
+       layout reserves for it becomes a tall BLACK GAP between the
+       viewport and the bottom-pinned strip. Collapse → single
+       1fr row so the viewport fills everything below the header. */
+    .layout.src-collapsed {
+      grid-template-rows: 64px 1fr;
+    }
     aside { border-left: none; border-top: 1px solid var(--line); }
     .controls { width: 180px; padding: 12px; }
+    /* Zoom slider redundant on mobile — wheel + pinch already
+       drive the same value. Hide it to free vertical real estate
+       in the cramped controls panel. */
+    .ctrl-zoom { display: none; }
   }
 </style>
 </head>
@@ -766,7 +778,7 @@
           <span>caustics overlay</span>
         </label>
       </div>
-      <div class="ctrl">
+      <div class="ctrl ctrl-zoom">
         <label><span>zoom</span><span id="zoom-val">1.00</span></label>
         <input id="zoom" type="range" min="0.5" max="2.5" step="0.01" value="1.0"/>
       </div>
@@ -2461,11 +2473,24 @@ canvas.addEventListener('pointerdown', (e) => {
     const [a, b] = [..._ptrs.values()];
     _pinchStart = {
       d0: Math.hypot(a.x - b.x, a.y - b.y) || 1,
-      r0: params.cellRadius,
+      z0: params.zoom,
     };
     _dragStart = null;   // pinch overrides drag
   }
 });
+
+// Set the viewport zoom from a gesture (wheel / pinch). Clamps to
+// the slider's [0.5..2.5] range and mirrors the value into the
+// slider DOM so the on-screen control + the live render stay in
+// lockstep regardless of which input the user touched last.
+function setZoomFromGesture(z) {
+  const v = Math.max(0.5, Math.min(2.5, z));
+  params.zoom = v;
+  const slider = $('zoom');
+  const vEl    = $('zoom-val');
+  if (slider) slider.value = v.toFixed(2);
+  if (vEl)    vEl.textContent = v.toFixed(2);
+}
 
 canvas.addEventListener('pointermove', (e) => {
   if (!_ptrs.has(e.pointerId)) return;
@@ -2473,7 +2498,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (_ptrs.size === 2 && _pinchStart) {
     const [a, b] = [..._ptrs.values()];
     const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
-    params.cellRadius = Math.max(0.3, Math.min(3.0, _pinchStart.r0 * (d / _pinchStart.d0)));
+    setZoomFromGesture(_pinchStart.z0 * (d / _pinchStart.d0));
     return;
   }
   if (_dragStart && e.pointerId === _dragStart.ptrId) {
@@ -2494,9 +2519,7 @@ canvas.addEventListener('pointercancel', _endPointer);
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  params.cellRadius = Math.max(0.3, Math.min(3.0,
-    params.cellRadius * (1 - e.deltaY * 0.001)
-  ));
+  setZoomFromGesture(params.zoom * (1 - e.deltaY * 0.001));
 }, { passive: false });
 
 // inject shader sources into the side panel --------------------------------
