@@ -770,6 +770,7 @@
           <option value="3">brain · neural network</option>
           <option value="4">bone marrow · trabecular</option>
           <option value="5">red cells · voronoi</option>
+          <option value="6">black · isolation</option>
         </select>
       </div>
       <div class="ctrl">
@@ -1144,6 +1145,11 @@ fn nucleusSdf(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
 // its palette by the active theme so the cell on top reads
 // cohesively.
 fn envBackground(uv: vec2<f32>, kind: i32, theme: i32, t: f32) -> vec3<f32> {
+  // kind 6 — flat black. Useful for isolating the cell silhouette
+  // when debugging shader changes; nothing in this branch can ever
+  // tint the cytoplasm/membrane/etc through the bg compositing path.
+  if (kind == 6) { return vec3<f32>(0.0); }
+
   if (kind == 1) {
     // lung · smoke — adapted from "Smoke" by Roman Bobniev / FatumR
     // (Apache 2.0, https://www.shadertoy.com/view/ldBSDd). Layered
@@ -1877,6 +1883,9 @@ float nucleusSdf(vec2 uv, int kind, float t) {
 
 // envBackground — five Kurzgesagt-style environments. Mirrors WGSL.
 vec3 envBackground(vec2 uv, int kind, int theme, float t) {
+  // kind 6 — flat black. Mirrors WGSL.
+  if (kind == 6) return vec3(0.0);
+
   if (kind == 1) {
     // lung · smoke — mirrors WGSL. Apache 2.0, FatumR.
     float v = smoke_complex((uv + vec2(0.5)) * 1.0, t);
@@ -2361,18 +2370,18 @@ const __consoleBuf = (() => {
   return { push, clear, render };
 })();
 {
-  const orig = {
-    log:   console.log.bind(console),
-    info:  console.info.bind(console),
-    warn:  console.warn.bind(console),
-    error: console.error.bind(console),
-    debug: console.debug ? console.debug.bind(console) : console.log.bind(console),
-  };
-  console.log   = (...a) => { __consoleBuf.push('log',   a); orig.log(...a);   };
-  console.info  = (...a) => { __consoleBuf.push('info',  a); orig.info(...a);  };
-  console.warn  = (...a) => { __consoleBuf.push('warn',  a); orig.warn(...a);  };
-  console.error = (...a) => { __consoleBuf.push('error', a); orig.error(...a); };
-  console.debug = (...a) => { __consoleBuf.push('log',   a); orig.debug(...a); };
+  // Per user spec: console output should ONLY show in the in-page
+  // Console tab — not also pass through to the native browser
+  // console / DevTools. Drop the orig.* passthrough so there's a
+  // single canonical home for log lines (the #src-console pane).
+  // The native DevTools console will still show framework-emitted
+  // entries (e.g. WebGPU validation errors that fire outside our
+  // wrapper) so this isn't a complete blackout.
+  console.log   = (...a) => __consoleBuf.push('log',   a);
+  console.info  = (...a) => __consoleBuf.push('info',  a);
+  console.warn  = (...a) => __consoleBuf.push('warn',  a);
+  console.error = (...a) => __consoleBuf.push('error', a);
+  console.debug = (...a) => __consoleBuf.push('log',   a);
   // Capture uncaught errors + promise rejections.
   window.addEventListener('error', (e) => {
     __consoleBuf.push('error', [e.message, `at ${e.filename}:${e.lineno}:${e.colno}`]);
