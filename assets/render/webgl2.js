@@ -1540,10 +1540,17 @@ void main() {
   vec2 d = v_uv - mc;
 
   if (mouthKind == 1 || mouthKind == 6) {
-    // SMILE (or DROOL — base smile)
-    float arc = arcA(v_uv, vec2(0.0, mouthY - mouthW * 0.3), mouthW, 0.06, 0.12 * 3.14159, 0.88 * 3.14159);
-    col = mix(col, v_mouthCol, arc);
-    a = max(a, arc);
+    // SMILE (or DROOL — base smile). Filled circular segment below
+    // the chord — reads as a solid "U" mouth at every zoom level
+    // (the previous thin-arc stroke aliased to dot-pairs at small
+    // sizes; user wants every cell/pathogen to draw a solid mouth).
+    vec2 sc = vec2(0.0, mouthY - mouthW * 0.3);
+    float chordY = sc.y + mouthW * sin(0.12 * 3.14159);
+    float discMask = 1.0 - sstep(mouthW * 0.95, mouthW, length(v_uv - sc));
+    float chordMask = sstep(chordY - 0.005, chordY + 0.005, v_uv.y);
+    float fill = discMask * chordMask;
+    col = mix(col, v_mouthCol, fill);
+    a = max(a, fill);
     if (mouthKind == 6) {
       // Drool drip — small ellipse below the smile, animates over time.
       float dripPhase = fract(u_time * 0.6 + phase);
@@ -1554,22 +1561,27 @@ void main() {
       a = max(a, dripA);
     }
   } else if (mouthKind == 2) {
-    // FROWN
-    float arc = arcA(v_uv, vec2(0.0, mouthY + mouthW * 0.6), mouthW, 0.06, 1.12 * 3.14159, 1.88 * 3.14159);
-    col = mix(col, v_mouthCol, arc);
-    a = max(a, arc);
+    // FROWN — filled circular segment above the chord (mirror of smile).
+    vec2 fc = vec2(0.0, mouthY + mouthW * 0.6);
+    float chordY = fc.y - mouthW * sin(0.12 * 3.14159);
+    float discMask = 1.0 - sstep(mouthW * 0.95, mouthW, length(v_uv - fc));
+    float chordMask = 1.0 - sstep(chordY - 0.005, chordY + 0.005, v_uv.y);
+    float fill = discMask * chordMask;
+    col = mix(col, v_mouthCol, fill);
+    a = max(a, fill);
   } else if (mouthKind == 3) {
-    // SNARL — zig-zag teeth (5 segments)
-    // Distance from each segment, kept loose since GLSL line-segment SDF is verbose.
-    // Approximate with a thin band that follows y = mouthY + (i%2)*0.18*mouthW
-    float xrel = (v_uv.x - 0.0) / mouthW;
+    // SNARL — solid filled band with a zig-zag bottom edge that
+    // reads as teeth. The band stretches from xrel ∈ [-1, 1].
+    float xrel = v_uv.x / mouthW;
     if (abs(xrel) < 1.0) {
       float seg = floor((xrel + 1.0) * 2.5);
-      float yTarget = mouthY + (mod(seg, 2.0) < 0.5 ? 0.0 : mouthW * 0.18);
-      float dy = abs(v_uv.y - yTarget);
-      float zigA = 1.0 - sstep(0.02, 0.04, dy);
-      col = mix(col, v_mouthCol, zigA);
-      a = max(a, zigA);
+      float zigBot = mouthY + (mod(seg, 2.0) < 0.5 ? mouthW * 0.20 : mouthW * 0.04);
+      float topY = mouthY - mouthW * 0.18;
+      float topMask = sstep(topY - 0.005, topY + 0.005, v_uv.y);
+      float botMask = 1.0 - sstep(zigBot - 0.005, zigBot + 0.005, v_uv.y);
+      float fill = topMask * botMask;
+      col = mix(col, v_mouthCol, fill);
+      a = max(a, fill);
     }
   } else if (mouthKind == 4) {
     // FANGS — open mouth ellipse + two white triangles
