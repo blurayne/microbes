@@ -52,9 +52,40 @@ html, body {
 #palette    { bottom: 116px; font-size: 22px; }
 #paletteBad { bottom: 166px; font-size: 22px; background: #c72020; color: #fff; }
 #help       { bottom: 216px; }
+#pause      { bottom: 266px; font-size: 22px; }
 body.no-bad #paletteBad,
 body.no-bad #paletteBadDialog { display: none; }
-body.no-bad #help { bottom: 166px; }
+body.no-bad #help  { bottom: 166px; }
+body.no-bad #pause { bottom: 216px; }
+#pause[aria-pressed="true"] {
+  background: #ffd166;
+  color: #1a0a00;
+}
+
+/* Pause overlay — dims the play area + shows "PAUSE" centred. */
+.pause-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 8;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+.pause-overlay.shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+.pause-overlay .pause-text {
+  font: 700 96px/1 system-ui, sans-serif;
+  letter-spacing: 0.15em;
+  color: #fff;
+  text-shadow: 0 0 30px #000c, 0 0 6px #000;
+  user-select: none;
+  -webkit-user-select: none;
+}
 .cell-grid-section { margin-bottom: 14px; }
 .cell-grid-section > h3 {
   margin: 0 0 6px;
