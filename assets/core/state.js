@@ -79,8 +79,15 @@ export const DEFAULTS = {
 // Interface-color palettes (formerly known as "themes"). Tints the
 // outline + UI accent.
 const KNOWN_INTERFACE_COLOR_KEYS = [
-  'bloodstream', 'cartoonNight', 'spectrum', 'lymphNode',
-  'lung', 'aurora', 'underwater', 'lavaFire', 'reactor',
+  // Existing (kept for save-file compat; labels in THEMES updated).
+  // Aurora + Underwater dropped per user spec; saved settings on
+  // those keys reset to DEFAULTS.interfaceColor via the validation
+  // in loadSettings.
+  'bloodstream', 'bloodflow', 'cellShadow',
+  'cartoonNight', 'spectrum', 'lymphNode',
+  'lung', 'lavaFire', 'reactor',
+  // 2026 additions — five new palettes covering common gaps:
+  'dracula', 'boneMarrow', 'mitochondria', 'neuron', 'bile',
 ];
 
 // Cell-shader themes — the new S.theme setting. 'legacy' renders
@@ -995,72 +1002,91 @@ export function cellDesc(typeKey) {
 // shaders in webgl2.js / webgpu.js (kind values 4..7); canvas2d falls
 // back to flat / gradient base colours for those.
 export const THEMES = {
+  // Labels follow the "Name (colour)" convention so the user can
+  // pick by both the in-app accent name and the dominant tone.
   bloodstream: {
-    label: 'Bloodstream',
+    label: 'Bloodstream (crimson)',
     bg: { kind: 'gradient', topColor: '#5b101a', botColor: '#1d0306', spotColor: 'rgba(255,90,100,0.18)', spotCount: 6, vignette: 0.45, rbcSilhouettes: true },
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#ff6b6b' },
   },
   bloodflow: {
-    // Port of shader-test's "bloodflow" (was 'bloodstream · default'):
-    // fbm-tinted base + per-theme RBC drift, no plasma wash. Visually
-    // distinct from the game's original 'bloodstream' (which keeps
-    // the gradient + tiled RBCs + plasma look).
-    label: 'Bloodflow',
+    label: 'Bloodflow (vermilion)',
     bg: { kind: 'bloodflow', topColor: '#3a0a12', botColor: '#0e0205', vignette: 0.30 },
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#d63333' },
   },
   cellShadow: {
-    // Port of shader-test's "cell shadow · voronoi" (was 'red cells'):
-    // smooth-min Voronoi field with animated point positions, deep
-    // red palette. CC BY-NC-SA 3.0 — see About dialog.
-    label: 'Cell shadow',
+    label: 'Cell Shadow (red)',
     bg: { kind: 'cell-shadow', base: '#3a060e', vignette: 0.35 },
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#c83246' },
   },
   cartoonNight: {
-    label: 'Cartoon Night',
+    label: 'Cosmic Soup (navy)',
     bg: { kind: 'flat', base: '#0c1a3a', spotColors: ['#ff7ab8','#ffb84d','#5fe3d2','#ff5d6e'], spotCount: 6, vignette: 0.30 },
     outline: { color: '#04081a', defaultPx: 5 },
     ui: { panelAccent: '#5fe3d2' },
   },
   spectrum: {
-    label: 'Spectrum',
+    label: 'Spectrum (rainbow)',
     bg: { kind: 'flat', base: '#000000', spotColors: ['#ff003c','#ff8a00','#ffd600','#3ecf6c','#3da6ff','#a855f7'], spotCount: 6, vignette: 0.30 },
     outline: { color: '#000000', defaultPx: 4 },
     ui: { panelAccent: '#a855f7' },
   },
   lymphNode: {
-    label: 'Lymph Node',
+    label: 'Lymph Node (violet)',
     bg: { kind: 'gradient', topColor: '#2a0e3a', botColor: '#0a0410', spotColor: 'rgba(160,120,200,0.15)', spotCount: 5, vignette: 0.40 },
     outline: { color: '#0a0410', defaultPx: 4 },
     ui: { panelAccent: '#bd93e2' },
   },
   lung: {
-    label: 'Lung',
+    label: 'Lung (smoke)',
     bg: { kind: 'lung', base: '#1a1118', topColor: '#3a1c2c', botColor: '#0a0610', spotCount: 0, vignette: 0.40 },
     outline: { color: '#02080f', defaultPx: 4 },
     ui: { panelAccent: '#ff9aa8' },
   },
-  aurora: {
-    label: 'Aurora',
-    bg: { kind: 'aurora', base: '#03081a', topColor: '#03081a', botColor: '#000000', spotCount: 0, vignette: 0.40 },
-    outline: { color: '#000000', defaultPx: 3 },
-    ui: { panelAccent: '#3ecf6c' },
-  },
-  underwater: {
-    label: 'Underwater',
-    bg: { kind: 'underwater', base: '#031022', topColor: '#06243a', botColor: '#020815', spotCount: 0, vignette: 0.35 },
-    outline: { color: '#02101e', defaultPx: 3 },
-    ui: { panelAccent: '#5cd6ff' },
-  },
   lavaFire: {
-    label: 'Lava / Fire',
+    label: 'Magma (orange)',
     bg: { kind: 'lava', base: '#1a0402', topColor: '#3b0a05', botColor: '#0a0202', spotCount: 0, vignette: 0.50 },
     outline: { color: '#1a0606', defaultPx: 4 },
     ui: { panelAccent: '#ff5a00' },
+  },
+  // ── Five new palettes (2026) — common themes the project lacked.
+  dracula: {
+    // Iconic Dracula colour scheme: dark slate base, purple accent.
+    label: 'Dracula (purple)',
+    bg: { kind: 'gradient', topColor: '#282a36', botColor: '#1a1b25', spotColors: ['#bd93f9','#ff79c6','#8be9fd'], spotCount: 5, vignette: 0.35 },
+    outline: { color: '#11121a', defaultPx: 4 },
+    ui: { panelAccent: '#bd93f9' },
+  },
+  boneMarrow: {
+    // Pale cream + tan — bone-marrow / cancellous-bone aesthetic.
+    label: 'Bone Marrow (cream)',
+    bg: { kind: 'flat', base: '#e9dcb8', spotColors: ['#c9a87a','#b0905e','#937444'], spotCount: 5, vignette: 0.20 },
+    outline: { color: '#5a432a', defaultPx: 3 },
+    ui: { panelAccent: '#b0905e' },
+  },
+  mitochondria: {
+    // Warm amber on deep brown — mitochondrial inner-membrane palette.
+    label: 'Mitochondria (amber)',
+    bg: { kind: 'gradient', topColor: '#3a1c0a', botColor: '#100602', spotColor: 'rgba(255,160,60,0.20)', spotCount: 6, vignette: 0.40 },
+    outline: { color: '#1c0a02', defaultPx: 4 },
+    ui: { panelAccent: '#ffa040' },
+  },
+  neuron: {
+    // Electric blue on near-black — synapse / action-potential feel.
+    label: 'Neuron (electric blue)',
+    bg: { kind: 'gradient', topColor: '#0a1830', botColor: '#020610', spotColor: 'rgba(80,180,255,0.22)', spotCount: 5, vignette: 0.40 },
+    outline: { color: '#020610', defaultPx: 3 },
+    ui: { panelAccent: '#50b4ff' },
+  },
+  bile: {
+    // Chartreuse on deep olive — bile / gallbladder palette.
+    label: 'Bile (chartreuse)',
+    bg: { kind: 'gradient', topColor: '#1c2810', botColor: '#080c04', spotColor: 'rgba(180,220,80,0.18)', spotCount: 4, vignette: 0.35 },
+    outline: { color: '#080c04', defaultPx: 4 },
+    ui: { panelAccent: '#b4dc50' },
   },
   // Gray-Scott reaction-diffusion. The renderer maintains two
   // half-resolution ping-pong textures, runs N step iterations per
@@ -1068,7 +1094,7 @@ export const THEMES = {
   // seed discs every ~10 s. WebGL2 + WebGPU implement; canvas2d falls
   // back to the base colour. See .claude/plan/04-reactor-bg.md.
   reactor: {
-    label: 'Reactor',
+    label: 'Reactor (acid green)',
     bg: { kind: 'reactor', base: '#02060a', spotCount: 0, vignette: 0.40 },
     outline: { color: '#0a1816', defaultPx: 4 },
     ui: { panelAccent: '#7eff8a' },
