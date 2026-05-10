@@ -494,6 +494,29 @@ if (metaOutlineModeSel) {
   });
 }
 bindCheckbox('cartoon', 'cartoon');
+
+// ----- Audio: music + SFX volume sliders, music on/off + next track -----
+import('./core/music.js').then(({ MusicPlayer }) => {
+  const player = new MusicPlayer();
+  player.setVolume(S.musicVolume);
+  player.setEnabled(!!S.musicEnabled);
+
+  // Browser autoplay policies: a play() before any user gesture
+  // gets rejected. Hook the very next pointerdown to retry.
+  document.addEventListener('pointerdown', () => player.retryIfPending(), { once: false });
+
+  bindCheckbox('musicEnabled', 'musicEnabled', (on) => player.setEnabled(on));
+  bindRange('musicVolume', 'musicVolume', 'musicVolumeVal', v => Math.round(v * 100) + '%');
+  bindRange('sfxVolume',   'sfxVolume',   'sfxVolumeVal',   v => Math.round(v * 100) + '%');
+  // setVolume reflects slider changes onto the player; bindRange already
+  // writes to S.musicVolume + saves, so we only need the live hookup.
+  const musicVolEl = document.getElementById('musicVolume');
+  if (musicVolEl) musicVolEl.addEventListener('input', () => player.setVolume(parseFloat(musicVolEl.value)));
+  const nextBtn = document.getElementById('musicNext');
+  if (nextBtn) nextBtn.addEventListener('click', () => player.next());
+}).catch((err) => {
+  console.warn('Music module failed to load:', err);
+});
 bindCheckbox('showFPS', 'showFPS', (on) => {
   const el = document.getElementById('fps');
   if (el) el.classList.toggle('on', !!on);
