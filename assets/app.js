@@ -698,10 +698,6 @@ if (metaOutlineModeSel) {
 bindCheckbox('cartoon', 'cartoon');
 // HUD reacts within the next 250 ms throttle window, fast enough.
 bindCheckbox('compositionHud', 'compositionHud');
-// Virus 3D shader experiment (Plan #2). Toggle is read by webgl2.js
-// per frame when packing the disk-instance kindAsFloat — no listener
-// hook needed; the next render frame picks up the new value.
-bindCheckbox('virusShader3D', 'virusShader3D');
 
 // Caustics-overlay toggle. Renderer reads S.causticsOverlay each
 // frame inside drawBackground; no listener hook needed — the next
@@ -876,7 +872,8 @@ const interfaceColorSelect = document.getElementById('interfaceColorSelect');
 for (const [key, a] of Object.entries(INTERFACE_ACCENTS)) {
   const opt = document.createElement('option');
   opt.value = key;
-  opt.textContent = a.label;
+  // Localised name; English `a.label` is the safety net.
+  opt.textContent = T('ic_' + key) || a.label;
   interfaceColorSelect.appendChild(opt);
 }
 interfaceColorSelect.value = S.interfaceColor in INTERFACE_ACCENTS ? S.interfaceColor : 'pink';
@@ -929,10 +926,10 @@ function populateBgSelect(el) {
   for (const [key, b] of Object.entries(BACKGROUNDS)) {
     const opt = document.createElement('option');
     opt.value = key;
-    const lbl = b.label || key;
-    const accent = bgAccent(b);
-    const name = accent ? colorNameFor(accent) : '';
-    opt.textContent = name ? `${lbl} (${name})` : lbl;
+    // Localised label per BG; the colour-in-parens lives inside the
+    // i18n string (e.g. "Bloodstream (crimson)" / "Blutstrom (Karmin)")
+    // so the dropdown shows ONE colour token, not two stacked.
+    opt.textContent = T('bg_' + key) || b.label || key;
     el.appendChild(opt);
   }
   el.value = (S.background in BACKGROUNDS) ? S.background : (S.interfaceColor in BACKGROUNDS ? S.interfaceColor : 'solid');
@@ -1103,7 +1100,7 @@ const langSelect = document.getElementById('langSelect');
 if (langSelect) {
   const langs = [
     ['en','English'], ['de','Deutsch'], ['es','Español'],
-    ['bar','Bayrisch'], ['hes','Hessisch'], ['rhe','Rheinhessisch'],
+    ['bar','Bayrisch'], ['hes','Hessisch'], ['mainz','Mainzerisch'],
     ['latin','Latina'],
   ];
   for (const [k, label] of langs) {
@@ -1120,6 +1117,27 @@ if (langSelect) {
     renderHelpList();
     renderPaletteGrid();
     renderPaletteBadGrid();
+    // Re-localise the BG and interface-color dropdown options. The
+    // <select> values stay valid across locales (we key by const
+    // background-id / accent-id), only the visible textContent changes.
+    if (interfaceColorSelect) {
+      const cur = interfaceColorSelect.value;
+      interfaceColorSelect.innerHTML = '';
+      for (const [key, a] of Object.entries(INTERFACE_ACCENTS)) {
+        const opt = document.createElement('option');
+        opt.value = key;
+        opt.textContent = T('ic_' + key) || a.label;
+        interfaceColorSelect.appendChild(opt);
+      }
+      interfaceColorSelect.value = cur;
+    }
+    for (const sel of [bgSelect, bgSelectInline]) {
+      if (!sel) continue;
+      const cur = sel.value;
+      sel.innerHTML = '';
+      populateBgSelect(sel);
+      sel.value = cur;
+    }
   });
 }
 applyI18n();

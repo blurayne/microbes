@@ -37,7 +37,13 @@ html, body {
   height: 44px;
   border-radius: 50%;
   border: 2px solid #000;
-  background: var(--accent);
+  /* 50%-transparent themed bg + backdrop blur — glassy chrome that
+     keeps the accent identity while letting the scene shimmer
+     through. The accent colour is mixed with transparent so the
+     blur reveals the bg under each FAB. */
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
   color: var(--accent-ink);
   display: grid;
   place-items: center;
@@ -523,7 +529,9 @@ body.show-build #fps.on { top: 32px; }
   transform: translateX(-50%);
   font: 600 11px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   letter-spacing: 0.04em;
-  color: var(--ring-color, #fff);
+  /* Always white for legibility against the dark per-tag background;
+     the ring colour stays per-cell-type. */
+  color: #fff;
   text-shadow: 0 0 4px #000c, 0 1px 2px #000;
   white-space: nowrap;
   padding: 2px 6px;
@@ -761,8 +769,11 @@ body.adding #stage    { cursor: crosshair; }
   border: 2px solid #000;
   /* Themed bg + accent-ink icon → monochrome glyph on the active
      theme colour. Active state pops via filter, not a colour swap,
-     so the contrast contract is preserved. */
-  background: var(--accent);
+     so the contrast contract is preserved. 50% transparent + blur
+     for the glassmorphism look shared with the FAB stack. */
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
   color: var(--accent-ink);
   display: grid;
   place-items: center;
