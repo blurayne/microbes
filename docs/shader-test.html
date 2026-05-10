@@ -1340,7 +1340,12 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   // centre + aspect-correct (viewport space)
   var uv = (frag.xy - 0.5 * res) / min(res.x, res.y);
   uv.y = -uv.y;
-  uv = uv * U.zoom;
+  // Divide so a HIGHER zoom value makes the cell BIGGER (natural
+  // direction: pinch-spread zooms in, wheel-up zooms in, slider-
+  // right zooms in). Was multiplication in earlier revisions; the
+  // wheel + pinch unification in PR #84 made the inverted direction
+  // visible to the user (PR-level commentary in commit message).
+  uv = uv / max(U.zoom, 0.01);
 
   // Cell-local UV — translates by user drag, scales by user pinch.
   // All cell-body computations (membrane SDF, nucleus, granules,
@@ -2053,7 +2058,8 @@ void main() {
   int bgKind = int(floor(u_bgKind + 0.5));
 
   vec2 uv = (gl_FragCoord.xy - 0.5 * res) / min(res.x, res.y);
-  uv *= u_zoom;
+  // Divide so HIGHER zoom = BIGGER cell. See WGSL comment.
+  uv /= max(u_zoom, 0.01);
 
   // Cell-local UV — drag offset + pinch radius. See WGSL comment.
   vec2 uvCell = (uv - vec2(u_cellOffsetX, u_cellOffsetY)) / max(u_cellRadius, 0.01);
