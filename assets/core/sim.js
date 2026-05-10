@@ -235,13 +235,38 @@ export class Sim {
     }
   }
 
+  // Quiet eviction: pop the oldest cell (= front of the array) so
+  // a new spawn / split can succeed at the cap. No particle burst,
+  // no SFX — recycling is a UX courtesy, not a kill.
+  _recycleOldest(except) {
+    for (let i = 0; i < this.cells.length; i++) {
+      const c = this.cells[i];
+      if (c === except) continue;
+      this.cells.splice(i, 1);
+      this.selectedCells.delete(c);
+      if (typeof console !== 'undefined') {
+        try { console.info('[sim] cap reached, recycled oldest', c.type); } catch {}
+      }
+      return;
+    }
+  }
+
   // ---------- Splitting ----------
   beginSplit(cell) {
     if (cell.state !== 'NORMAL') return;
-    if (this.cells.length >= S.maxCells) {
-      cell.flash = 0.5;
-      cell.splitTimer = this.rollSplitTimer(cell.type) * 0.5;
-      return;
+    // At cap, recycle an unrelated old cell so split can proceed
+    // instead of silently failing. The parent cell itself is
+    // protected so the split mechanic is never confused.
+    while (this.cells.length >= S.maxCells) {
+      const before = this.cells.length;
+      this._recycleOldest(cell);
+      if (this.cells.length === before) {
+        // No recyclable cell (cap == 1 + parent). Fall back to the
+        // pre-existing pulse-and-skip behaviour rather than wedging.
+        cell.flash = 0.5;
+        cell.splitTimer = this.rollSplitTimer(cell.type) * 0.5;
+        return;
+      }
     }
     cell.state = 'SPLITTING';
     cell.splitProgress = 0;
@@ -785,7 +810,14 @@ export class Sim {
   }
 
   spawnAtWorld(typeKey, wx, wy) {
-    if (this.cells.length >= S.maxCells) return null;
+    // At the maxCells cap, recycle the oldest cell instead of
+    // refusing — user intent is "place this thing here", so silently
+    // sacrificing an old cell preserves that contract. Pre-cap fix
+    // surfaced as "click does nothing" once auto-split filled the
+    // pool to 1024 (see settings → Debug log for [sim] cap entries).
+    while (this.cells.length >= S.maxCells) {
+      this._recycleOldest();
+    }
     const jitter = CELL_RADIUS * 0.2;
     const c = this.makeCell(
       wx + (Math.random() - 0.5) * jitter,
