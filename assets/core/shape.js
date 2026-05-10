@@ -71,9 +71,20 @@ export function shapeVertex(s, theta, t) {
 }
 
 // Frustum-cull a circle in world space against a viewport in screen space.
+// Mirrors the forward transform in `Sim.worldToScreen` so a rotated camera
+// culls correctly: screen = R(θ) · (world · scale) + (tx, ty). Without
+// this rotation step, cells whose un-rotated screen position fell outside
+// [0, W] × [0, H] were incorrectly culled even when their actual rotated
+// position was on-canvas — the body vanished while the nucleus (drawn via
+// withCameraCtx without an inView check) stayed visible. Reduces to the
+// original `x*scale + t` math when rotation === 0.
 export function inView(x, y, r, camera, W, H) {
-  const sx = x * camera.scale + camera.tx;
-  const sy = y * camera.scale + camera.ty;
+  const co = Math.cos(camera.rotation || 0);
+  const si = Math.sin(camera.rotation || 0);
+  const wsx = x * camera.scale;
+  const wsy = y * camera.scale;
+  const sx = co * wsx - si * wsy + camera.tx;
+  const sy = si * wsx + co * wsy + camera.ty;
   const sr = (r + 12) * camera.scale;
   return sx + sr >= 0 && sx - sr <= W && sy + sr >= 0 && sy - sr <= H;
 }
