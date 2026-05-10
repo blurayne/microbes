@@ -870,6 +870,11 @@ function frame(ts) {
   // the initial clear).
   renderer.drawCells(shapes, t, ts);
   renderer.drawParticles(sim.particles, t, ts);
+  // Antibodies share the particle pipeline — they live just long
+  // enough that drawParticles' fade-by-life-ratio behaves as a
+  // gentle dim near the projectile's expiry. See sim.js
+  // ANTIBODY_* constants for emit cadence + travel speed.
+  renderer.drawParticles(sim.antibodies, t, ts);
   renderer.drawSelection(shapes, t);
   if (S.showDebugField) renderer.drawDebug(shapes);
   renderer.endFrame();

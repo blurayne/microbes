@@ -17,6 +17,16 @@ import { getRule, maxAttractRadius, defaultHp } from './sim-rules.js';
 // transition. 0.30 s reads as "soft drift apart" without delaying the
 // physics noticeably.
 const SPLIT_IMPULSE_FADE_S = 0.30;
+// B-cell antibody system. Cooldown gates emit cadence, speed sets the
+// projectile travel rate, lifetime caps how far they go before
+// despawning, and damage is applied once on hit. Tuned so a single
+// B-cell takes ~6-8 hits to kill a virus (defaultHp=58, damage 8 →
+// 7-8 hits ÷ 1 emit per 1.4s ≈ 11s to kill).
+const ANTIBODY_COOLDOWN_S = 1.4;
+const ANTIBODY_SPEED      = 220;
+const ANTIBODY_LIFE_S     = 2.4;
+const ANTIBODY_DAMAGE     = 8;
+const ANTIBODY_RADIUS     = 3;
 
 export class Sim {
   constructor() {
@@ -39,6 +49,15 @@ export class Sim {
      * via drawParticles().
      */
     this.particles = [];
+    /**
+     * Antibody projectiles emitted by B-cells. Linear motion (no damping)
+     * with a target reference; on hit, applies ANTIBODY_DAMAGE to the
+     * target and the projectile disappears. Rendered through the same
+     * `drawParticles` pipeline each renderer already supports — the
+     * shape is `{ x, y, vx, vy, r, color, life, maxLife }` plus the
+     * antibody-specific `targetId` for hit-tracking.
+     */
+    this.antibodies = [];
 
     // Input scratch — mutated by app.js's input handlers.
     /** @type {null|{cell, dx, dy, started, downX, downY, samples }} */
@@ -120,10 +139,43 @@ export class Sim {
       category: (CELL_TYPES[t] && CELL_TYPES[t].category) || 'good',
       hp: defaultHp(t),
       maxHp: defaultHp(t),
+      // B-cell antibody emit cooldown (seconds). Counts down each
+      // frame; emits when ≤0 and an alarm target exists. Stays at 0
+      // for non-bcell types — checked alongside the type guard.
+      _antibodyCd: 0,
       nextBlink: (typeof performance !== 'undefined' ? performance.now() : 0)
         + 1500 + Math.random() * 4500,
       _colors: (CELL_TYPES[t] || CELL_TYPES.neutrophil).colors,
     };
+  }
+
+  // Lookup by id. Linear scan over `cells` — fine at the project's
+  // hard cap of 1024 and called only from antibody hit-checks (one
+  // lookup per active antibody per frame, typically <20 antibodies).
+  _cellById(id) {
+    for (const c of this.cells) if (c.id === id) return c;
+    return null;
+  }
+
+  // Spawn an antibody from `owner` toward `target`'s current
+  // position. Velocity is fixed-magnitude in that direction; the
+  // antibody flies in a straight line and dies on hit or expiry.
+  _emitAntibody(owner, target) {
+    const dx = target.x - owner.x, dy = target.y - owner.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const cc = (CELL_TYPES[owner.type] && CELL_TYPES[owner.type].colors) || {};
+    this.antibodies.push({
+      x: owner.x + (dx / d) * owner.r * 1.05,
+      y: owner.y + (dy / d) * owner.r * 1.05,
+      vx: (dx / d) * ANTIBODY_SPEED,
+      vy: (dy / d) * ANTIBODY_SPEED,
+      r: ANTIBODY_RADIUS,
+      color: cc.accent || '#ffe14a',
+      life: ANTIBODY_LIFE_S,
+      maxLife: ANTIBODY_LIFE_S,
+      targetId: target.id,
+      ownerId: owner.id,
+    });
   }
 
   // Subtract HP from a cell. Triggers the killCell death + particle
@@ -332,6 +384,31 @@ export class Sim {
       }
     }
 
+    // Antibody projectiles. Linear motion (no damping), back-to-front
+    // sweep so we can splice on hit / expiry. Hit detection just
+    // checks distance to the cached target; if the target is gone,
+    // the antibody flies on until life runs out.
+    if (this.antibodies.length > 0) {
+      for (let i = this.antibodies.length - 1; i >= 0; i--) {
+        const a = this.antibodies[i];
+        a.x += a.vx * dt;
+        a.y += a.vy * dt;
+        a.life -= dt;
+        let hit = false;
+        if (a.targetId != null) {
+          const target = this._cellById(a.targetId);
+          if (target && target.state === 'NORMAL') {
+            const dx = target.x - a.x, dy = target.y - a.y;
+            if (dx * dx + dy * dy < (target.r + a.r) * (target.r + a.r)) {
+              this._applyDamage(target, ANTIBODY_DAMAGE);
+              hit = true;
+            }
+          }
+        }
+        if (hit || a.life <= 0) this.antibodies.splice(i, 1);
+      }
+    }
+
     const centroidGood = this.swarmCentroid('good');
     const centroidBad  = this.swarmCentroid('bad');
     this.rebuildSpatialGrid();
@@ -360,6 +437,18 @@ export class Sim {
           const sm = S.speedMul || 1;
 
           if (c.alarmTimer > 0) c.alarmTimer = Math.max(0, c.alarmTimer - dt);
+
+          // B-cell antibody emit. Tick the cooldown for every cell
+          // (cheap; non-bcell types never reach the emit branch
+          // below) and emit when an alarm target is in attract
+          // range. The alarmRule was set up by the matrix-driven
+          // alarm picker — we don't need to re-resolve it.
+          if (c._antibodyCd > 0) c._antibodyCd = Math.max(0, c._antibodyCd - dt);
+          if (c.type === 'bcell' && c._antibodyCd === 0
+              && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
+            this._emitAntibody(c, c.alarmTarget);
+            c._antibodyCd = ANTIBODY_COOLDOWN_S;
+          }
 
           let goalX = 0, goalY = 0, accel = 0, maxV = 0, hasGoal = false;
 
@@ -591,6 +680,7 @@ export class Sim {
     this.selectedCells.clear();
     this.targetMarker = null;
     this.particles.length = 0;
+    this.antibodies.length = 0;
     const c = this.makeCell(this.W / 2, this.H / 2);
     this.cells.push(c);
   }
