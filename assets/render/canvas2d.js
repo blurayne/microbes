@@ -1153,23 +1153,33 @@ export class Canvas2DRenderer extends RendererBase {
           ctx.strokeStyle = cc.nucleus;
           ctx.fillStyle = cc.nucleus;
           if (mouthKind === 'smile') {
+            // Solid filled circular segment below the chord (the
+            // arc + closePath connects the chord). Reads as a U.
             ctx.beginPath();
             ctx.arc(cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI);
-            ctx.stroke();
+            ctx.closePath();
+            ctx.fill();
           } else if (mouthKind === 'frown') {
+            // Solid filled segment above the chord (∩).
             ctx.beginPath();
             ctx.arc(cx, mY + mW * 0.6, mW, 1.12 * Math.PI, 1.88 * Math.PI);
-            ctx.stroke();
+            ctx.closePath();
+            ctx.fill();
           } else if (mouthKind === 'snarl') {
+            // Solid filled band with a zig-zag bottom edge for
+            // teeth — top straight, bottom bobs between two heights.
             ctx.beginPath();
             const N = 5;
-            for (let i = 0; i <= N; i++) {
+            const topY = mY - mW * 0.18;
+            ctx.moveTo(cx - mW, topY);
+            ctx.lineTo(cx + mW, topY);
+            for (let i = N; i >= 0; i--) {
               const x = cx - mW + (2 * mW) * (i / N);
-              const y = mY + (i % 2 === 0 ? 0 : mW * 0.18);
-              if (i === 0) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
+              const y = mY + (i % 2 === 0 ? mW * 0.20 : mW * 0.04);
+              ctx.lineTo(x, y);
             }
-            ctx.stroke();
+            ctx.closePath();
+            ctx.fill();
           } else if (mouthKind === 'fangs') {
             ctx.beginPath();
             ctx.ellipse(cx, mY, mW, mW * 0.45, 0, 0, Math.PI * 2);
@@ -1197,9 +1207,11 @@ export class Canvas2DRenderer extends RendererBase {
             ctx.ellipse(cx + wag, mY + mW * 0.30, mW * 0.32, mW * 0.22, 0, 0, Math.PI * 2);
             ctx.fill();
           } else if (mouthKind === 'drool') {
+            // Solid base smile + drool drip below.
             ctx.beginPath();
             ctx.arc(cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI);
-            ctx.stroke();
+            ctx.closePath();
+            ctx.fill();
             const dripPhase = ((t * 0.6 + c.phase) % 1);
             const dripY = mY + mW * 0.25 + dripPhase * mW * 0.8;
             const dripA = 1 - dripPhase;

@@ -1577,14 +1577,15 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
   let d = uv - mc;
 
   if (mouthKind == 1 || mouthKind == 6) {
-    // SMILE (or DROOL — base smile). Stroke bumped from 0.04 to
-    // 0.06 so the arc survives at small screen sizes (was
-    // sub-pixel on dendritic / other zoomed-out cells and aliased
-    // into a pair of endpoint dots — user-visible bug).
-    let arc = arcA(uv, vec2<f32>(0.0, mouthY - mouthW * 0.3), mouthW, 0.06,
-      0.12 * PI, 0.88 * PI, blur);
-    col = mix(col, in.mouthCol, arc);
-    a = max(a, arc);
+    // SMILE (or DROOL — base smile). Filled circular segment below
+    // the chord — solid mouth at every zoom level.
+    let sc = vec2<f32>(0.0, mouthY - mouthW * 0.3);
+    let chordY = sc.y + mouthW * sin(0.12 * PI);
+    let discMask = 1.0 - sstep(mouthW * 0.95, mouthW, length(uv - sc), blur);
+    let chordMask = sstep(chordY - 0.005, chordY + 0.005, uv.y, blur);
+    let fill = discMask * chordMask;
+    col = mix(col, in.mouthCol, fill);
+    a = max(a, fill);
     if (mouthKind == 6) {
       let dripPhase = fract(time * 0.6 + phase);
       let dripC = vec2<f32>(mouthW * 0.25, mouthY + mouthW * 0.25 + dripPhase * mouthW * 0.8);
@@ -1594,22 +1595,27 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
       a = max(a, dripA);
     }
   } else if (mouthKind == 2) {
-    // FROWN — stroke bumped 0.04 → 0.06 (same anti-alias fix as smile)
-    let arc = arcA(uv, vec2<f32>(0.0, mouthY + mouthW * 0.6), mouthW, 0.06,
-      1.12 * PI, 1.88 * PI, blur);
-    col = mix(col, in.mouthCol, arc);
-    a = max(a, arc);
+    // FROWN — filled circular segment above the chord (mirror of smile).
+    let fc = vec2<f32>(0.0, mouthY + mouthW * 0.6);
+    let chordY = fc.y - mouthW * sin(0.12 * PI);
+    let discMask = 1.0 - sstep(mouthW * 0.95, mouthW, length(uv - fc), blur);
+    let chordMask = 1.0 - sstep(chordY - 0.005, chordY + 0.005, uv.y, blur);
+    let fill = discMask * chordMask;
+    col = mix(col, in.mouthCol, fill);
+    a = max(a, fill);
   } else if (mouthKind == 3) {
-    // SNARL — 5-segment zig-zag teeth.
+    // SNARL — solid filled band with a zig-zag bottom edge.
     let xrel = uv.x / max(mouthW, 0.001);
     if (abs(xrel) < 1.0) {
       let seg = floor((xrel + 1.0) * 2.5);
       let segMod = seg - 2.0 * floor(seg * 0.5);
-      let yTarget = mouthY + select(0.0, mouthW * 0.18, segMod >= 0.5);
-      let dy = abs(uv.y - yTarget);
-      let zigA = 1.0 - sstep(0.02, 0.04, dy, blur);
-      col = mix(col, in.mouthCol, zigA);
-      a = max(a, zigA);
+      let zigBot = mouthY + select(mouthW * 0.04, mouthW * 0.20, segMod < 0.5);
+      let topY = mouthY - mouthW * 0.18;
+      let topMask = sstep(topY - 0.005, topY + 0.005, uv.y, blur);
+      let botMask = 1.0 - sstep(zigBot - 0.005, zigBot + 0.005, uv.y, blur);
+      let fill = topMask * botMask;
+      col = mix(col, in.mouthCol, fill);
+      a = max(a, fill);
     }
   } else if (mouthKind == 4) {
     // FANGS — open ellipse + two white wedges.
