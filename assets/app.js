@@ -11,6 +11,8 @@ import {
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { Sim } from './core/sim.js';
+import { CELL_RELATIONS } from './core/cell-relations.js';
+import { defaultHp, getRule } from './core/sim-rules.js';
 import { FloatingText } from './core/floating-text.js';
 import { CellTagOverlay } from './core/cell-tag.js';
 import { SpawnBanner } from './core/spawn-banner.js';
@@ -463,9 +465,15 @@ canvas.addEventListener('wheel', (ev) => {
 // ---------- Settings UI ----------
 const settingsEl = document.getElementById('settings');
 const gearBtn = document.getElementById('gear');
-const helpDialog = document.getElementById('helpDialog');
+// helpDialog markup was removed late 2026 — the help content (cell
+// list with descriptions + relations) is now the list view of the
+// unified addDialog. ?-FAB just opens addDialog forced to list view.
 const aboutDialog = document.getElementById('aboutDialog');
 const addDialog = document.getElementById('addDialog');
+// Back-compat: parts of the code still reference helpDialog. Make it
+// an alias for addDialog so closeAll() / outside-click logic keeps
+// working without an audit of every call site.
+const helpDialog = addDialog;
 // Compatibility shims so the rest of the file's references to
 // `paletteDialog` / `paletteBadDialog` keep pointing somewhere
 // sensible — they're now both views into the same merged dialog.
@@ -555,7 +563,9 @@ window.addEventListener('keydown', (e) => {
   e.preventDefault();
   setPaused(!_paused);
 });
-const allDialogs = [settingsEl, helpDialog, addDialog, aboutDialog].filter(Boolean);
+// helpDialog now aliases addDialog (the unified dialog); the Set
+// dedupes that so closeAll() doesn't iterate the same element twice.
+const allDialogs = [...new Set([settingsEl, helpDialog, addDialog, aboutDialog].filter(Boolean))];
 const aboutBtn = document.getElementById('aboutBtn');
 if (aboutBtn) aboutBtn.addEventListener('click', () => openOnly(aboutDialog));
 _hookDebugLogButtons();
@@ -576,8 +586,14 @@ function closeAll() {
 gearBtn.addEventListener('click', () => {
   settingsEl.classList.contains('hidden') ? openOnly(settingsEl) : closeAll();
 });
+// ? FAB → unified dialog forced to list view (the legacy help dialog
+// was merged into addDialog as its list mode).
 if (helpBtn) helpBtn.addEventListener('click', () => {
-  helpDialog.classList.contains('hidden') ? openOnly(helpDialog) : closeAll();
+  if (addDialog.classList.contains('hidden')) {
+    setAddDialogView('list');
+    renderAddDialogContents();
+    openOnly(addDialog);
+  } else closeAll();
 });
 // Render BOTH grids when the dialog opens (cells always, pathogens
 // only when S.allowBadGuys). Also toggles the pathogens section
@@ -591,6 +607,26 @@ function renderAddDialogContents() {
   if (pathTitle) pathTitle.hidden = !showBad;
   if (pathGrid)  pathGrid.hidden  = !showBad;
   if (showBad) renderPaletteBadGrid();
+  renderHelpList();   // populate the list view in the same dialog
+}
+
+// View-mode toggle (grid ↔ list) lives in the addDialog header. Both
+// modes share the same dialog; CSS class on the dialog switches body
+// visibility. Persist the mode in S.addDialogView; ?-FAB forces list.
+function setAddDialogView(view) {
+  const v = (view === 'list') ? 'list' : 'grid';
+  S.addDialogView = v;
+  saveSettings();
+  addDialog.classList.toggle('is-view-grid', v === 'grid');
+  addDialog.classList.toggle('is-view-list', v === 'list');
+  for (const btn of addDialog.querySelectorAll('.view-toggle-btn')) {
+    btn.setAttribute('aria-selected', String(btn.dataset.view === v));
+  }
+}
+// Apply the saved view on boot + wire toggle clicks.
+setAddDialogView(S.addDialogView);
+for (const btn of addDialog.querySelectorAll('.view-toggle-btn')) {
+  btn.addEventListener('click', () => setAddDialogView(btn.dataset.view));
 }
 
 if (paletteBtn) paletteBtn.addEventListener('click', () => {
@@ -600,14 +636,8 @@ if (paletteBtn) paletteBtn.addEventListener('click', () => {
   } else closeAll();
 });
 
-function gotoHelp(ev) {
-  if (ev) ev.preventDefault();
-  openOnly(helpDialog);
-}
-const p2h = document.getElementById('paletteToHelp');
-if (p2h) p2h.addEventListener('click', gotoHelp);
-const pb2h = document.getElementById('paletteBadToHelp');
-if (pb2h) pb2h.addEventListener('click', gotoHelp);
+// `paletteToHelp` / `paletteBadToHelp` are gone from the markup —
+// the segmented view-toggle in the dialog header replaces them.
 
 if (reloadBtn) reloadBtn.addEventListener('click', () => {
   const u = new URL(location.href);
@@ -659,6 +689,7 @@ function bindRange(id, key, valId, fmt, onChange) {
   });
 }
 bindRange('autoSplitSeconds', 'autoSplitSeconds', 'autoVal', v => v.toFixed(0) + 's');
+bindRange('maxCells', 'maxCells', 'maxCellsVal', v => v.toFixed(0));
 bindRange('bgFlowSpeed', 'bgFlowSpeed', 'bgVal', v => v.toFixed(2) + '×');
 bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
 bindRange('membraneIntensity', 'membraneIntensity', 'membraneVal', v => v.toFixed(2));
@@ -1150,6 +1181,12 @@ if (rendererSel) {
 }
 
 // ---------- Palette + help dialog list rendering ----------
+// HP label for a cell — finite int for pathogens, ∞ for heroes.
+function _hpLabel(key) {
+  const v = defaultHp(key);
+  return Number.isFinite(v) ? String(v) : '∞';
+}
+
 function makeTile(key) {
   const tile = document.createElement('button');
   tile.className = 'cell-tile';
@@ -1161,6 +1198,11 @@ function makeTile(key) {
   const span = document.createElement('span');
   span.textContent = cellLabel(key);
   tile.appendChild(span);
+  // HP line so the user sees how durable each cell is at a glance.
+  const hp = document.createElement('small');
+  hp.className = 'cell-tile-hp';
+  hp.textContent = `♥ ${_hpLabel(key)}`;
+  tile.appendChild(hp);
   tile.addEventListener('click', () => {
     enterAddMode(key);
     closeAll();
@@ -1183,6 +1225,49 @@ function appendGridSection(parent, title, entries) {
   parent.appendChild(section);
 }
 
+// One row of relations chips (Allies / Prey / Foes). Each chip shows
+// the other cell's HP. For prey, also shows this cell's DPS against
+// it ("⚔ 8"); for foes, the inverse (their DPS against us).
+function appendRelationsRow(parent, labelKey, keys, kind, viewerKey) {
+  const row = document.createElement('div');
+  row.className = 'cell-list-relations-row';
+  const lbl = document.createElement('span');
+  lbl.className = 'cell-list-relations-label';
+  lbl.textContent = T(labelKey) || labelKey;
+  row.appendChild(lbl);
+  const list = document.createElement('span');
+  list.className = 'cell-list-relations-list';
+  if (!keys || !keys.length) {
+    const empty = document.createElement('span');
+    empty.className = 'empty';
+    empty.textContent = '—';
+    list.appendChild(empty);
+  } else {
+    for (const k of keys) {
+      const cfg = CELL_TYPES[k];
+      if (!cfg) continue;
+      const chip = document.createElement('span');
+      chip.className = 'cell-list-relations-chip';
+      chip.style.setProperty('--chip-color', (cfg.colors && cfg.colors.accent) || '#6663');
+      const hp = _hpLabel(k);
+      let attack = null;
+      if (kind === 'prey') {
+        const r = getRule(viewerKey, k);
+        if (r && r.dps > 0) attack = r.dps;
+      } else if (kind === 'foes') {
+        const r = getRule(k, viewerKey);
+        if (r && r.dps > 0) attack = r.dps;
+      }
+      const parts = [cellLabel(k), `♥${hp}`];
+      if (attack != null) parts.push(`⚔${attack}`);
+      chip.textContent = parts.join(' ');
+      list.appendChild(chip);
+    }
+  }
+  row.appendChild(list);
+  parent.appendChild(row);
+}
+
 function appendHelpSection(parent, title, entries) {
   if (!entries.length) return;
   const section = document.createElement('li');
@@ -1194,6 +1279,8 @@ function appendHelpSection(parent, title, entries) {
   for (const [key] of entries) {
     const row = document.createElement('div');
     row.className = 'cell-list-row';
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
     const cv = document.createElement('canvas');
     cv.width = 96;
     cv.height = 96;
@@ -1206,8 +1293,28 @@ function appendHelpSection(parent, title, entries) {
     span.textContent = cellDesc(key);
     text.appendChild(b);
     text.appendChild(span);
+    // Friends / Prey / Foes — each rendered as one line of chips.
+    // Chips show prey/foe HP + this cell's DPS against them.
+    const rel = CELL_RELATIONS[key];
+    if (rel) {
+      const relsBox = document.createElement('div');
+      relsBox.className = 'cell-list-relations';
+      appendRelationsRow(relsBox, 'spawn_banner_friends', rel.friends, 'friends', key);
+      appendRelationsRow(relsBox, 'spawn_banner_prey',    rel.prey,    'prey',    key);
+      appendRelationsRow(relsBox, 'spawn_banner_foes',    rel.foes,    'foes',    key);
+      text.appendChild(relsBox);
+    }
     row.appendChild(cv);
     row.appendChild(text);
+    // Click → enter add mode (the list view IS the add dialog now).
+    const activate = () => {
+      enterAddMode(key);
+      closeAll();
+    };
+    row.addEventListener('click', activate);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); }
+    });
     section.appendChild(row);
     renderCellPreview(cv, key);
   }
