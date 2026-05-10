@@ -452,12 +452,22 @@ if (pauseOverlay) {
     if (_paused) setPaused(false);
   });
 }
-// Keyboard: Space resumes (also pauses if not already paused so
-// the key is symmetric). Ignored when typing in an input.
+// Keyboard: Space resumes / pauses (symmetric toggle). Ignored
+// when typing in an input — AND skipped when any dialog is open
+// (settings / help / add / about). The latter prevents the
+// stuck-pause bug: dialog z-index sits above the pause overlay,
+// so a stray Space-press would silently pause the game with no
+// way out except finding the bare overlay area.
 window.addEventListener('keydown', (e) => {
   if (e.code !== 'Space') return;
   const t = e.target;
   if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  const anyDialogOpen =
+    (settingsEl && !settingsEl.classList.contains('hidden')) ||
+    (helpDialog && !helpDialog.classList.contains('hidden')) ||
+    (addDialog && !addDialog.classList.contains('hidden')) ||
+    (aboutDialog && !aboutDialog.classList.contains('hidden'));
+  if (anyDialogOpen) return;
   e.preventDefault();
   setPaused(!_paused);
 });
