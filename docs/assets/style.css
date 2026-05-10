@@ -802,5 +802,12 @@
      <main class="container">; the project's chapter HTML uses
      .frame as the inner column. */
   .frame { margin-left: 240px; }
+
+  /* The mkdocs default theme's top navbar (.navbar.fixed-top) is
+     redundant once the sidebar covers chapter navigation — hide it
+     and reclaim the body's reserved top padding so the main column
+     sits flush at the viewport top. */
+  .navbar.fixed-top { display: none; }
+  body { padding-top: 0 !important; }
 }
 
