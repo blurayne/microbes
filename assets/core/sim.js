@@ -212,6 +212,9 @@ export class Sim {
         x: cell.x, y: cell.y, text: `-${n}`, kind: 'damage',
         hp: cell.hp, maxHp: cell.maxHp,
       });
+      // Generic damage hook — app.js plays the per-type damage SFX
+      // (e.g. virus-hit when type === 'virus').
+      if (this.onDamage) this.onDamage({ x: cell.x, y: cell.y, type: cell.type, amount: n });
     }
     if (fatal) {
       cell.hp = 0;
