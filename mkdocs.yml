@@ -19,6 +19,7 @@ extra_css:
 extra_javascript:
   - https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js
   - assets/mermaid-init.js
+  - assets/sidebar.js
 
 # Use a minimal theme so the inline HTML in each chapter file
 # (.chapter / .tier-group / .cell-card / .chapter-header etc.) carries
@@ -40,6 +41,7 @@ nav:
   - 10 · Schadens-Matrix: ch10-schaden.md
   - 11 · Physik & Magnetismus: ch11-physik.md
   - 12 · Briefing & Konter-Quickref: ch12-briefing.md
+  - 13 · Anhang · Beziehungsdiagramm: ch13-anhang.md
 
 # Allow inline HTML (chapter files are mostly raw HTML blocks).
 markdown_extensions:
