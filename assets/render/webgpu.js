@@ -1028,9 +1028,8 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
 
   // Lung — Smoke FBM port (Apache 2.0, FatumR). See WebGL2 comment.
   if (kind == 4) {
-    // 0.0050 instead of 0.0010 — user spec "scale lung bg by 0.2x"
-    // (features 5x smaller / more pattern detail).
-    let plungP = worldPx * 0.0050 + vec2<f32>(0.0, time * 0.08);
+    // 0.00714 — re-tuned to 0.7× current (was 0.0050).
+    let plungP = worldPx * 0.00714 + vec2<f32>(0.0, time * 0.08);
     let breath = 0.55 + 0.20 * sin(time * 0.6);
     let n0 = bgFbm(plungP * 0.5);
     let n1 = bgFbm(plungP + vec2<f32>(2.0 * n0));
@@ -1044,7 +1043,8 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
 
   // ---- Bloodflow (kind 9): shader-test bloodflow default port. ----
   if (kind == 9) {
-    let bfP = worldPx * 0.0012 + vec2<f32>(time * 0.04, time * 0.03);
+    // 0.012 — bloodflow 0.1× (features 10× smaller than original).
+    let bfP = worldPx * 0.012 + vec2<f32>(time * 0.04, time * 0.03);
     let bfN = bgFbm(bfP);
     let bfRbc = bgFbm(worldPx * 0.0030 + vec2<f32>(0.0, time * 0.15));
     var bfBase = mix(vec3<f32>(0.18, 0.03, 0.05), vec3<f32>(0.42, 0.06, 0.08), vec3<f32>(bfN));

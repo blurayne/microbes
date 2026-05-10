@@ -717,9 +717,10 @@ void main() {
     // original's audio-reactive amplitude. Octaves trimmed 6→4
     // for in-game cost; visuals stay close. Domain-warped in
     // worldPx so the pattern tiles seamlessly with the camera.
-    // 0.0050 instead of 0.0010 — user spec "scale the lung background
-    // by factor 0.2x" (features 5x smaller / more pattern detail).
-    vec2 plungP = worldPx * 0.0050 + vec2(0.0, u_time * 0.08);
+    // 0.00714 — user re-tuned the lung to 0.7× current (was 0.0050
+    // after the original "0.2× scale" step). Features visibly bigger
+    // than the prior tweak, still finer than the initial 0.0010.
+    vec2 plungP = worldPx * 0.00714 + vec2(0.0, u_time * 0.08);
     float breath = 0.55 + 0.20 * sin(u_time * 0.6);
     float n0 = bgFbm(plungP * 0.5);
     float n1 = bgFbm(plungP + 2.0 * n0);
@@ -736,7 +737,10 @@ void main() {
   //      Distinct from the game's gradient+tile bloodstream (kind
   //      0 path), this one keeps the shader-test aesthetic. ----
   if (u_kind == 9) {
-    vec2 bf_p = worldPx * 0.0012 + vec2(u_time * 0.04, u_time * 0.03);
+    // 0.012 — user spec "scale bloodflow by 0.1x" (features 10x
+    // smaller than original 0.0012; far denser pattern across the
+    // viewport).
+    vec2 bf_p = worldPx * 0.012 + vec2(u_time * 0.04, u_time * 0.03);
     float bf_n = bgFbm(bf_p);
     float bf_rbc = bgFbm(worldPx * 0.0030 + vec2(0.0, u_time * 0.15));
     vec3 bf_base = mix(vec3(0.18, 0.03, 0.05), vec3(0.42, 0.06, 0.08), bf_n);
