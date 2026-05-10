@@ -525,6 +525,7 @@
           <option value="2">heart · striated muscle</option>
           <option value="3">brain · neural network</option>
           <option value="4">bone marrow · trabecular</option>
+          <option value="5">red cells · voronoi</option>
         </select>
       </div>
       <div class="ctrl">
@@ -863,20 +864,50 @@ fn envBackground(uv: vec2<f32>, kind: i32, theme: i32, t: f32) -> vec3<f32> {
     return mix(base, stripe, stripes);
   }
   if (kind == 3) {
-    // brain — radial dendrites + synapse dots
-    let ang = atan2(uv.y, uv.x);
-    let r = length(uv);
-    let dendrite = pow(abs(cos(ang * 3.0 + r * 4.0)), 30.0) * smoothstep(0.0, 0.8, r);
-    var ink  = vec3<f32>(0.05, 0.06, 0.12);
-    var line = vec3<f32>(0.45, 0.50, 0.65);
-    if (theme == 1) { ink = vec3<f32>(0.20, 0.25, 0.40); line = vec3<f32>(0.85, 0.90, 0.95); }
-    if (theme == 2) { ink = vec3<f32>(0.05, 0.05, 0.22); line = vec3<f32>(0.65, 0.80, 1.00); }
-    if (theme == 3) { ink = vec3<f32>(0.18, 0.20, 0.28); line = vec3<f32>(0.50, 0.55, 0.65); }
-    var col = mix(ink, line, dendrite * 0.6);
-    let s1 = smoothstep(0.025, 0.0, length(uv - vec2<f32>( 0.55,  0.30)));
-    let s2 = smoothstep(0.025, 0.0, length(uv - vec2<f32>(-0.40,  0.50)));
-    let s3 = smoothstep(0.025, 0.0, length(uv - vec2<f32>( 0.20, -0.55)));
-    return col + line * (s1 + s2 + s3) * 0.7;
+    // brain — "Star Nest" by Pablo Roman Andrioli, MIT licence,
+    // https://www.shadertoy.com/view/XlfGRj. Volumetric folded-fractal
+    // raymarch — reads as a dense neural / synapse network. Loop
+    // counts trimmed (volsteps 12, iterations 12) from the original
+    // (20, 17) for mobile cost; visuals stay close.
+    let zoom = 0.800;
+    let tile = 0.850;
+    let formuparam = 0.53;
+    let stepsize = 0.10;
+    let brightness = 0.0015;
+    let darkmatter = 0.300;
+    let distfading = 0.730;
+    let saturation = 0.850;
+    var dir = vec3<f32>(uv * zoom, 1.0);
+    let time2 = t * 0.010 + 0.25;
+    var from = vec3<f32>(1.0, 0.5, 0.5) + vec3<f32>(time2 * 2.0, time2, -2.0);
+    var s: f32 = 0.10;
+    var fade: f32 = 1.0;
+    var v: vec3<f32> = vec3<f32>(0.0);
+    for (var r: i32 = 0; r < 12; r = r + 1) {
+      var p = from + s * dir * 0.5;
+      p = abs(vec3<f32>(tile) - ((p % vec3<f32>(tile * 2.0)) + vec3<f32>(tile * 2.0)) % vec3<f32>(tile * 2.0));
+      var pa: f32 = 0.0;
+      var a: f32 = 0.0;
+      for (var i: i32 = 0; i < 12; i = i + 1) {
+        p = abs(p) / dot(p, p) - vec3<f32>(formuparam);
+        a = a + abs(length(p) - pa);
+        pa = length(p);
+      }
+      let dm = max(0.0, darkmatter - a * a * 0.001);
+      a = a * a * a;
+      if (r > 4) { fade = fade * (1.0 - dm); }
+      v = v + vec3<f32>(fade);
+      v = v + vec3<f32>(s, s * s, s * s * s * s) * a * brightness * fade;
+      fade = fade * distfading;
+      s = s + stepsize;
+    }
+    let lv = length(v);
+    v = mix(vec3<f32>(lv), v, vec3<f32>(saturation));
+    var col = v * 0.01;
+    if (theme == 1) { col = clamp(col * 1.6, vec3<f32>(0.0), vec3<f32>(1.0)); }
+    if (theme == 2) { col = mix(col, vec3<f32>(0.20, 0.10, 0.45), 0.25); }
+    if (theme == 3) { col = clamp(col * 0.85 + vec3<f32>(0.04, 0.04, 0.07), vec3<f32>(0.0), vec3<f32>(1.0)); }
+    return col;
   }
   if (kind == 4) {
     // bone marrow — Voronoi-style trabeculae (single ring of neighbours)
@@ -899,6 +930,35 @@ fn envBackground(uv: vec2<f32>, kind: i32, theme: i32, t: f32) -> vec3<f32> {
     if (theme == 2) { marrow = vec3<f32>(0.78, 0.70, 0.45); bone = vec3<f32>(0.30, 0.10, 0.40); }
     if (theme == 3) { marrow = vec3<f32>(0.65, 0.55, 0.40); bone = vec3<f32>(0.30, 0.20, 0.15); }
     return mix(bone, marrow, trab);
+  }
+  if (kind == 5) {
+    // red cells · voronoi — adapted from "Red Cells I" by Shadertoy
+    // user wrasm (https://www.shadertoy.com/view/WlfGDM, CC BY-NC-SA 3.0).
+    // Smooth-min Voronoi over a 3x3 neighbour grid with animated point
+    // positions; the highlight peak per cell reads as a flowing
+    // erythrocyte field. Per-theme palette modulation as elsewhere.
+    let st = uv * 5.0;
+    let cell_pos   = floor(st);
+    let cell_coord = fract(st);
+    var sum: f32 = 0.0;
+    for (var ix: i32 = -1; ix <= 1; ix = ix + 1) {
+      for (var iy: i32 = -1; iy <= 1; iy = iy + 1) {
+        let nb = vec2<f32>(f32(ix), f32(iy));
+        let h0 = hash(cell_pos + nb);
+        let h1 = hash(cell_pos + nb + vec2<f32>(17.3, 41.7));
+        let nb_seed = vec2<f32>(h0, h1);
+        let nb_pos  = 0.5 + 0.5 * sin(t * 0.4 + nb_seed * 6.0);
+        let diff = (nb + nb_pos) - cell_coord;
+        sum = sum + exp(-32.0 * dot(diff, diff));
+      }
+    }
+    let v = -(1.0 / 32.0) * log(max(sum, 1e-6));
+    let intensity = 0.03 / pow(max(1.2 - sqrt(max(v, 0.0)), 0.05), 3.0);
+    var base = vec3<f32>(200.0/255.0, 50.0/255.0, 69.0/255.0);
+    if (theme == 1) { base = vec3<f32>(0.95, 0.30, 0.30); }   // cartoon
+    if (theme == 2) { base = vec3<f32>(0.55, 0.10, 0.20); }   // kurzgesagt
+    if (theme == 3) { base = vec3<f32>(0.65, 0.25, 0.30); }   // classic
+    return clamp(base * intensity, vec3<f32>(0.0), vec3<f32>(2.0));
   }
   // kind == 0 — bloodstream (default).
   let n   = fbm(uv * 3.0 + vec2<f32>(t * 0.04, t * 0.03));
@@ -1450,19 +1510,49 @@ vec3 envBackground(vec2 uv, int kind, int theme, float t) {
     return mix(base, stripe, stripes);
   }
   if (kind == 3) {
-    float ang = atan(uv.y, uv.x);
-    float r = length(uv);
-    float dendrite = pow(abs(cos(ang * 3.0 + r * 4.0)), 30.0) * smoothstep(0.0, 0.8, r);
-    vec3 ink  = vec3(0.05, 0.06, 0.12);
-    vec3 line = vec3(0.45, 0.50, 0.65);
-    if (theme == 1) { ink = vec3(0.20, 0.25, 0.40); line = vec3(0.85, 0.90, 0.95); }
-    if (theme == 2) { ink = vec3(0.05, 0.05, 0.22); line = vec3(0.65, 0.80, 1.00); }
-    if (theme == 3) { ink = vec3(0.18, 0.20, 0.28); line = vec3(0.50, 0.55, 0.65); }
-    vec3 col = mix(ink, line, dendrite * 0.6);
-    float s1 = smoothstep(0.025, 0.0, length(uv - vec2( 0.55,  0.30)));
-    float s2 = smoothstep(0.025, 0.0, length(uv - vec2(-0.40,  0.50)));
-    float s3 = smoothstep(0.025, 0.0, length(uv - vec2( 0.20, -0.55)));
-    return col + line * (s1 + s2 + s3) * 0.7;
+    // brain — "Star Nest" by Pablo Roman Andrioli, MIT licence,
+    // https://www.shadertoy.com/view/XlfGRj. Volumetric folded-fractal
+    // raymarch — reads as a dense neural / synapse network. Loop
+    // counts trimmed (volsteps 12, iterations 12) from the original
+    // (20, 17) for mobile cost; visuals stay close.
+    float zoom = 0.800;
+    float tile_ = 0.850;
+    float formuparam = 0.53;
+    float stepsize = 0.10;
+    float brightness = 0.0015;
+    float darkmatter = 0.300;
+    float distfading = 0.730;
+    float saturation = 0.850;
+    vec3 dir = vec3(uv * zoom, 1.0);
+    float time2 = t * 0.010 + 0.25;
+    vec3 from = vec3(1.0, 0.5, 0.5) + vec3(time2 * 2.0, time2, -2.0);
+    float s_ = 0.10;
+    float fade = 1.0;
+    vec3 v_ = vec3(0.0);
+    for (int r2 = 0; r2 < 12; r2++) {
+      vec3 p = from + s_ * dir * 0.5;
+      p = abs(vec3(tile_) - mod(p, vec3(tile_ * 2.0)));
+      float pa = 0.0;
+      float a = 0.0;
+      for (int i = 0; i < 12; i++) {
+        p = abs(p) / dot(p, p) - vec3(formuparam);
+        a += abs(length(p) - pa);
+        pa = length(p);
+      }
+      float dm = max(0.0, darkmatter - a * a * 0.001);
+      a = a * a * a;
+      if (r2 > 4) fade *= 1.0 - dm;
+      v_ += vec3(fade);
+      v_ += vec3(s_, s_ * s_, s_ * s_ * s_ * s_) * a * brightness * fade;
+      fade *= distfading;
+      s_ += stepsize;
+    }
+    v_ = mix(vec3(length(v_)), v_, vec3(saturation));
+    vec3 col = v_ * 0.01;
+    if (theme == 1) col = clamp(col * 1.6, 0.0, 1.0);
+    if (theme == 2) col = mix(col, vec3(0.20, 0.10, 0.45), 0.25);
+    if (theme == 3) col = clamp(col * 0.85 + vec3(0.04, 0.04, 0.07), 0.0, 1.0);
+    return col;
   }
   if (kind == 4) {
     vec2 g = uv * 4.0;
@@ -1484,6 +1574,33 @@ vec3 envBackground(vec2 uv, int kind, int theme, float t) {
     if (theme == 2) { marrow = vec3(0.78, 0.70, 0.45); bone = vec3(0.30, 0.10, 0.40); }
     if (theme == 3) { marrow = vec3(0.65, 0.55, 0.40); bone = vec3(0.30, 0.20, 0.15); }
     return mix(bone, marrow, trab);
+  }
+  if (kind == 5) {
+    // red cells · voronoi — adapted from "Red Cells I" by Shadertoy
+    // user wrasm (https://www.shadertoy.com/view/WlfGDM, CC BY-NC-SA 3.0).
+    // Smooth-min Voronoi with animated point positions.
+    vec2 st = uv * 5.0;
+    vec2 cell_pos   = floor(st);
+    vec2 cell_coord = fract(st);
+    float sum = 0.0;
+    for (int ix = -1; ix <= 1; ix++) {
+      for (int iy = -1; iy <= 1; iy++) {
+        vec2 nb = vec2(float(ix), float(iy));
+        float h0 = hash(cell_pos + nb);
+        float h1 = hash(cell_pos + nb + vec2(17.3, 41.7));
+        vec2 nb_seed = vec2(h0, h1);
+        vec2 nb_pos  = 0.5 + 0.5 * sin(t * 0.4 + nb_seed * 6.0);
+        vec2 diff = (nb + nb_pos) - cell_coord;
+        sum += exp(-32.0 * dot(diff, diff));
+      }
+    }
+    float v = -(1.0 / 32.0) * log(max(sum, 1e-6));
+    float intensity = 0.03 / pow(max(1.2 - sqrt(max(v, 0.0)), 0.05), 3.0);
+    vec3 base = vec3(200.0/255.0, 50.0/255.0, 69.0/255.0);
+    if (theme == 1) base = vec3(0.95, 0.30, 0.30);
+    if (theme == 2) base = vec3(0.55, 0.10, 0.20);
+    if (theme == 3) base = vec3(0.65, 0.25, 0.30);
+    return clamp(base * intensity, 0.0, 2.0);
   }
   // bloodstream (default)
   float n   = fbm(uv * 3.0 + vec2(t * 0.04, t * 0.03));
