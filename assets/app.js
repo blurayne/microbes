@@ -550,16 +550,18 @@ document.addEventListener('pointerdown', (e) => {
   closeAll();
 }, true);
 
-function bindRange(id, key, valId, fmt) {
+function bindRange(id, key, valId, fmt, onChange) {
   const el = document.getElementById(id);
   const out = valId ? document.getElementById(valId) : null;
   el.value = S[key];
   if (out) out.textContent = fmt(S[key]);
+  if (onChange) onChange(S[key]);
   el.addEventListener('input', () => {
     const v = parseFloat(el.value);
     S[key] = v;
     if (out) out.textContent = fmt(v);
     saveSettings();
+    if (onChange) onChange(v);
     if (key === 'autoSplitSeconds') {
       for (const c of sim.cells) {
         if (c.state === 'NORMAL' && c.splitTimer > S.autoSplitSeconds * 1.5) {
@@ -892,7 +894,11 @@ function applyUpscaleMode() {
   canvas.classList.toggle('pixel', S.upscaleMode === 'pixel');
 }
 function applyScanlines() {
-  document.body.classList.toggle('scanlines', !!S.scanlines);
+  // alpha 0 → overlay hidden via the body class; > 0 → set the
+  // CSS custom prop so the overlay renders at that strength.
+  const a = Math.max(0, Math.min(1, Number(S.scanlinesAlpha) || 0));
+  document.body.classList.toggle('scanlines', a > 0);
+  document.documentElement.style.setProperty('--scanlines-alpha', a.toFixed(3));
 }
 applyUpscaleMode();
 applyScanlines();
@@ -918,7 +924,9 @@ if (upscaleEl) {
     applyUpscaleMode();
   });
 }
-bindCheckbox('scanlinesToggle', 'scanlines', applyScanlines);
+bindRange('scanlinesAlpha', 'scanlinesAlpha', 'scanlinesVal',
+          v => v <= 0 ? 'off' : v.toFixed(2),
+          applyScanlines);
 
 // Renderer engine — fundamental change, easiest to handle by reloading.
 const rendererSel = document.getElementById('rendererEngine');
