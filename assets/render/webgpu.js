@@ -407,12 +407,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
       let h = 0.5 + 0.5 * cos(latUv.x * 16.0) * cos(latUv.y * 16.0);
       col = col + vec3<f32>(0.30, 0.20, 0.45) * pow(h, 6.0) * insideMask;
     } else if (tk == 11) {
+      // Tendril rotation follows sign(freq) — split-siblings rotate
+      // opposite ways from the same starting phase.
+      let dirT = sign(in.phase.z + 1e-6);
       let ang = atan2(in.uv.y, in.uv.x);
-      let t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + time * 0.20 + in.phase.x), 14.0);
+      let t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + time * 0.20 * dirT + in.phase.x), 14.0);
       col = col + in.cytoBot * t6 * 0.25 * insideMask;
     } else if (tk == 18) {
+      let dirH = sign(in.phase.z + 1e-6);
       let ang = atan2(in.uv.y, in.uv.x);
-      let lines = pow(abs(cos(ang * 1.5 + time * 0.10 + in.phase.x)), 50.0);
+      let lines = pow(abs(cos(ang * 1.5 + time * 0.10 * dirH + in.phase.x)), 50.0);
       let ring  = smoothstep(1.05, 0.80, d) * smoothstep(0.45, 0.65, d);
       col = mix(col, vec3<f32>(0.20, 0.30, 0.05), vec3<f32>(lines * ring * 0.7));
     } else if (tk == 20) {
@@ -430,11 +434,13 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
                || tk3 == 16 || tk3 == 17 || tk3 == 20);
     if (!noMito) {
       var mito: f32 = 1e9;
+      // Orbit direction = sign(freq): split-siblings inherit the
+      // parent's phase + seed but their freqs have opposite signs,
+      // so their mito orbits spin opposite ways from the same start.
+      let orbitDir = sign(in.phase.z + 1e-6);
       for (var i: i32 = 0; i < 8; i = i + 1) {
         let fi = f32(i);
-        // Per-cell phase rotates the orbit; per-cell seed jitters
-        // each capsule's radius + jitter phase.
-        let baseA = fi * 0.7853 + time * 0.08 + in.phase.x;
+        let baseA = fi * 0.7853 + time * 0.08 * orbitDir + in.phase.x;
         let radM  = 0.40 + 0.05 * sin(fi * 1.7 + in.phase.y * 0.21);
         let centre = vec2<f32>(cos(baseA), sin(baseA)) * radM
                    + vec2<f32>(0.015 * sin(time * 1.3 + fi + in.phase.y),
@@ -499,17 +505,19 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     if (vesCount > 0) {
       var ves: f32 = 1e9;
       // Per-cell seed shifts every vesicle's phase so granule
-      // arrangement is unique to each cell.
+      // arrangement is unique to each cell. Drift direction follows
+      // sign(freq) — split-siblings diverge in opposite rotation.
       let vSeed = in.phase.y;
+      let vDir  = sign(in.phase.z + 1e-6);
       for (var j: i32 = 0; j < 16; j = j + 1) {
         if (j >= vesCount) { break; }
         let fj = f32(j);
         let pos = vec2<f32>(
-          0.42 * sin(fj * 1.91 + vSeed * 0.71 + time * (0.18 + 0.03 * fj)),
-          0.42 * cos(fj * 2.37 + vSeed * 0.93 + time * (0.21 + 0.02 * fj))
+          0.42 * sin(fj * 1.91 + vSeed * 0.71 + time * (0.18 + 0.03 * fj) * vDir),
+          0.42 * cos(fj * 2.37 + vSeed * 0.93 + time * (0.21 + 0.02 * fj) * vDir)
         );
-        let jit = vec2<f32>(0.008 * sin(time * 3.0 + fj * 7.0 + vSeed),
-                            0.008 * cos(time * 2.6 + fj * 5.0 + vSeed * 1.3));
+        let jit = vec2<f32>(0.008 * sin(time * 3.0 * vDir + fj * 7.0 + vSeed),
+                            0.008 * cos(time * 2.6 * vDir + fj * 5.0 + vSeed * 1.3));
         ves = min(ves, length(in.uv - pos - jit) - vesRadius);
       }
       let vesMask = smoothstep(0.003, -0.003, ves);
