@@ -45,6 +45,17 @@ export const DEFAULTS = {
   cellTypeOverlay: false,   // eye-toggle: per-cell ring + text label identifying the cell type. HTML overlay above the canvas; renderer-agnostic.
   causticsOverlay: false,   // water-turbulence post-process applied on top of the rendered background. WebGL2 + WebGPU only; Canvas2D is a no-op.
   liquidRipples: false,     // bg post-process: each on-screen cell radiates concentric ripples that distort the background — reads as cells moving through liquid. WebGL2 + WebGPU only; Canvas2D is a no-op.
+  // Scope of the ripple distortion. 'scene' (default) distorts the
+  // whole rendered scene (bg + cells + particles + antibodies);
+  // 'bg' restricts it to the background layer only — cells render
+  // crisply on top, ripples only show in the liquid around them.
+  rippleScope: 'scene',
+  // Caustics tint — modulates the green/teal cast added on top of
+  // the rendered scene. Defaults reproduce the historical (0, 1.35,
+  // 0.5) bias; lower values toward 0 fade toward neutral white.
+  causticTintR: 0.0,
+  causticTintG: 1.35,
+  causticTintB: 0.5,
   // Liquid-ripples knobs. All three are visible in the settings panel
   // only while S.liquidRipples is on. They feed straight into the
   // ripple shader's per-cell uniforms (see _rippleCollectCells + UBO).
@@ -198,6 +209,8 @@ export function loadSettings() {
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
     const validMetaOutlineModes = ['edge', 'sdf', 'polygon'];
     if (!validMetaOutlineModes.includes(parsed.metaOutlineMode)) parsed.metaOutlineMode = DEFAULTS.metaOutlineMode;
+    const validRippleScopes = ['scene', 'bg'];
+    if (!validRippleScopes.includes(parsed.rippleScope)) parsed.rippleScope = DEFAULTS.rippleScope;
     // 2026-05: user explicitly asked for the split outline to follow
     // the actual rendered metaball shape. 'edge' mode traces the
     // blurred-mask 0.5 contour, which IS the rendered blob silhouette
@@ -284,6 +297,12 @@ export const LOCALES = {
     ripple_density: 'Wave density',
     ripple_reach: 'Wave reach',
     ripple_strength: 'Wave strength',
+    ripple_scope: 'Wave scope',
+    ripple_scope_scene: 'Whole scene',
+    ripple_scope_bg: 'Background only',
+    caustic_tint_r: 'Tint R',
+    caustic_tint_g: 'Tint G',
+    caustic_tint_b: 'Tint B',
     cell_type_overlay: 'Show cell types',
     counters_needed: 'Counters needed',
     counters_covered: 'Fully covered',
