@@ -968,21 +968,30 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   // with darker centre dot. Anchored in world space so they pan + zoom
   // with the camera (matches Canvas2D's drawBackground behaviour where
   // RBCs are drawn inside the camera transform).
+  // World-tiled RBC silhouettes — see WebGL2 comment. 3x3 neighbour
+  // tiles × 4 RBCs each = 36 ellipse tests per fragment.
   if (rbcOn == 1) {
-    for (var i: i32 = 0; i < 22; i = i + 1) {
-      let seed = f32(i) * 1.31;
-      let fx = fract(f32(i) / 22.0 + 0.06 * sin(time * 0.25 + seed));
-      let fy = fract(fract(seed * 0.7) + time * 0.15 + f32(i) * 0.13);
-      // Centre in world coords — matches Canvas2D's px = fx * W.
-      let cWorld = vec2<f32>(fx, fy) * viewport;
-      // Radius in world px — matches Canvas2D's 18..34 px.
-      let rWorld = 18.0 + 16.0 * fract(seed * 0.21);
-      let dEll = (worldPx - cWorld) / vec2<f32>(rWorld, rWorld * 0.78);
-      let ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
-      col = mix(col, vec3<f32>(1.0, 0.35, 0.35), ellA);
-      let dDot = length(worldPx - cWorld) / (rWorld * 0.32);
-      let dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
-      col = mix(col, vec3<f32>(0.47, 0.08, 0.08), dotA);
+    let TS: f32 = 600.0;
+    let tIdx = floor(worldPx / TS);
+    for (var oy: i32 = -1; oy <= 1; oy = oy + 1) {
+      for (var ox: i32 = -1; ox <= 1; ox = ox + 1) {
+        let cell = tIdx + vec2<f32>(f32(ox), f32(oy));
+        let h0 = bgHash(cell);
+        for (var k: i32 = 0; k < 4; k = k + 1) {
+          let kSeed = h0 * 6.28 + f32(k) * 1.31;
+          let inTile = vec2<f32>(fract(kSeed * 1.7), fract(kSeed * 2.3)) * TS;
+          let cWorld = cell * TS + inTile
+                     + vec2<f32>(40.0 * sin(time * 0.25 + kSeed),
+                                 40.0 * cos(time * 0.18 + kSeed));
+          let rWorld = 18.0 + 16.0 * fract(kSeed * 0.41);
+          let dEll = (worldPx - cWorld) / vec2<f32>(rWorld, rWorld * 0.78);
+          let ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
+          col = mix(col, vec3<f32>(1.0, 0.35, 0.35), ellA);
+          let dDot = length(worldPx - cWorld) / (rWorld * 0.32);
+          let dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
+          col = mix(col, vec3<f32>(0.47, 0.08, 0.08), dotA);
+        }
+      }
     }
   }
 

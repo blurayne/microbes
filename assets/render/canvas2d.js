@@ -146,27 +146,53 @@ export class Canvas2DRenderer extends RendererBase {
     }
 
     if (bg.rbcSilhouettes) {
+      // World-tiled RBC silhouettes — mirror of the WebGL2 / WebGPU
+      // tiled bg pass. As you zoom out, more tiles become visible
+      // and density stays constant. We iterate exactly the tile
+      // range that overlaps the visible world rectangle (computed
+      // above as wx/wy/ww/wh inside the camera-transformed ctx),
+      // expanded by one tile each side so RBCs that straddle the
+      // viewport edge still render.
       ctx.save();
       const t2 = ts * 0.00025 * S.bgFlowSpeed;
-      const N = 22;
+      const TS = 600;
+      const tx0 = Math.floor(wx / TS) - 1;
+      const ty0 = Math.floor(wy / TS) - 1;
+      const tx1 = Math.ceil((wx + ww) / TS) + 1;
+      const ty1 = Math.ceil((wy + wh) / TS) + 1;
       ctx.lineWidth = 1.4 / cam.scale;
-      for (let i = 0; i < N; i++) {
-        const seed = i * 1.31;
-        const fx = ((i / N) + 0.06 * Math.sin(t2 + seed)) % 1;
-        const fy = (frac(seed * 0.7 + t2 * 0.6 + i * 0.13)) % 1;
-        const px = fx * W;
-        const py = fy * H;
-        const r = 18 + 16 * frac(seed * 0.21);
-        ctx.fillStyle = 'rgba(255,90,90,0.10)';
-        ctx.strokeStyle = 'rgba(255,140,140,0.18)';
-        ctx.beginPath();
-        ctx.ellipse(px, py, r, r * 0.78, seed, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = 'rgba(120,20,20,0.18)';
-        ctx.beginPath();
-        ctx.arc(px, py, r * 0.32, 0, Math.PI * 2);
-        ctx.fill();
+      // Same hash as bgHash() in the GPU shaders so the silhouette
+      // layout matches between renderers.
+      const bgHash = (x, y) => {
+        let px = (x * 123.34) - Math.floor(x * 123.34);
+        let py = (y * 345.45) - Math.floor(y * 345.45);
+        const dot = px * px + py * py + 34.345;
+        px += dot; py += dot;
+        const v = px * py;
+        return v - Math.floor(v);
+      };
+      for (let ty = ty0; ty <= ty1; ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const h0 = bgHash(tx, ty) * 6.28;
+          for (let k = 0; k < 4; k++) {
+            const kSeed = h0 + k * 1.31;
+            const inX = frac(kSeed * 1.7) * TS;
+            const inY = frac(kSeed * 2.3) * TS;
+            const px = tx * TS + inX + 40 * Math.sin(t2 * 1000 * 0.00025 + kSeed);
+            const py = ty * TS + inY + 40 * Math.cos(t2 * 1000 * 0.00018 + kSeed);
+            const r = 18 + 16 * frac(kSeed * 0.41);
+            ctx.fillStyle = 'rgba(255,90,90,0.10)';
+            ctx.strokeStyle = 'rgba(255,140,140,0.18)';
+            ctx.beginPath();
+            ctx.ellipse(px, py, r, r * 0.78, kSeed, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(120,20,20,0.18)';
+            ctx.beginPath();
+            ctx.arc(px, py, r * 0.32, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
       }
       ctx.restore();
     }
