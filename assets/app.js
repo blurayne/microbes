@@ -11,6 +11,7 @@ import {
 } from './core/state.js';
 import { Sim } from './core/sim.js';
 import { FloatingText } from './core/floating-text.js';
+import { CellTagOverlay } from './core/cell-tag.js';
 import { getShapes, inView } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
@@ -96,6 +97,7 @@ function _hookDebugLogButtons() {
 // ---------- Sim + renderer ----------
 const sim = new Sim();
 const floatingText = new FloatingText(document.getElementById('floatingText'));
+const cellTags = new CellTagOverlay(document.getElementById('cellTagLayer'));
 
 async function tryWebGPU() {
   const r = new WebGPURenderer(canvas, sim);
@@ -378,8 +380,23 @@ const paletteBtn = document.getElementById('palette');
 const paletteBadBtn = document.getElementById('paletteBad');
 const reloadBtn = document.getElementById('reload');
 const pauseBtn = document.getElementById('pause');
+const eyeBtn = document.getElementById('eyeToggle');
 const pauseOverlay = document.getElementById('pauseOverlay');
-const fabs = [gearBtn, helpBtn, paletteBtn, paletteBadBtn, reloadBtn, pauseBtn].filter(Boolean);
+const fabs = [gearBtn, helpBtn, paletteBtn, paletteBadBtn, reloadBtn, pauseBtn, eyeBtn].filter(Boolean);
+
+// Eye-toggle: flips S.cellTypeOverlay. Persists in settings; the
+// per-frame cellTags.render() pass reads S directly so no listener
+// hook is needed — just keep the aria-pressed attr in sync for
+// styling + accessibility.
+if (eyeBtn) {
+  const syncEye = () => eyeBtn.setAttribute('aria-pressed', String(!!S.cellTypeOverlay));
+  syncEye();
+  eyeBtn.addEventListener('click', () => {
+    S.cellTypeOverlay = !S.cellTypeOverlay;
+    saveSettings();
+    syncEye();
+  });
+}
 
 // Pause state. Frame loop skips sim.update when _paused; the music
 // player (assigned later by the music import block) is muted in
@@ -1114,6 +1131,11 @@ function frame(ts) {
   // every active label using the current camera transform.
   if (!_paused) floatingText.tick(dt);
   floatingText.render(sim);
+
+  // Cell-type overlay (S.cellTypeOverlay / eye-toggle FAB). Always
+  // render — even paused — so the labels stay glued to entities
+  // that the user is inspecting under the PAUSE overlay.
+  cellTags.render(sim);
 
   updateFPS(dt, ts);
   updateCompositionHud(ts);
