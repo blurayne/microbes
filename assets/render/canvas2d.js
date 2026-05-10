@@ -1149,6 +1149,7 @@ export class Canvas2DRenderer extends RendererBase {
           const mW = cr * 0.34 * 1.2;
           const cc = cellColors(c);
           ctx.lineWidth = lw * 1.3;
+          ctx.lineCap = 'round';   // soft endpoints (matches GPU shader's smoothstep fix)
           ctx.strokeStyle = cc.nucleus;
           ctx.fillStyle = cc.nucleus;
           if (mouthKind === 'smile') {
