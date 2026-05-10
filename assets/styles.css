@@ -247,6 +247,46 @@ body.is-paused #aboutDialog {
   border-top: 1px solid var(--line);
   padding: 12px 0;
 }
+
+/* Collapsible fieldsets — every settings group is a <details>
+   element. Start state on each is set via the `open` attribute
+   in markup. Summary acts as the section header (replaces the
+   previous <h3>); content lives below. Caret rotates on open. */
+.settings-section {
+  border-top: 1px solid var(--line);
+  padding: 8px 0;
+}
+.settings-section > summary {
+  margin: 0 0 0 0;
+  padding: 4px 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #ffd0d8aa;
+  cursor: pointer;
+  list-style: none;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.settings-section > summary::-webkit-details-marker { display: none; }
+.settings-section > summary::after {
+  content: '›';
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%) rotate(0deg);
+  font-size: 18px;
+  color: var(--ink-dim, var(--ink));
+  transition: transform 180ms ease;
+}
+.settings-section[open] > summary::after {
+  transform: translateY(-50%) rotate(90deg);
+}
+.settings-section[open] > summary {
+  margin-bottom: 6px;
+  color: var(--accent);
+}
 .settings-panel h3 {
   margin: 0 0 8px;
   font-size: 12px;

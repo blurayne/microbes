@@ -25,13 +25,13 @@
         <button type="button" class="close" data-close aria-label="Close">&times;</button>
       </header>
 
-      <section>
-        <h3 data-i18n="language">Language</h3>
+      <details class="settings-section" open>
+        <summary data-i18n="language">Language</summary>
         <select id="langSelect"></select>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="theme">Theme</h3>
+      <details class="settings-section" open>
+        <summary data-i18n="theme">Theme</summary>
         <select id="themeSelect">
           <option value="legacy"     data-i18n="theme_legacy">Legacy (default)</option>
           <option value="microscope" data-i18n="theme_microscope">Microscope</option>
@@ -39,20 +39,20 @@
           <option value="kurzgesagt" data-i18n="theme_kurzgesagt">Kurzgesagt</option>
           <option value="classic"    data-i18n="theme_classic">Classic</option>
         </select>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="interface_color">Interface color</h3>
+      <details class="settings-section">
+        <summary data-i18n="interface_color">Interface color</summary>
         <select id="interfaceColorSelect"></select>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="background">Background</h3>
+      <details class="settings-section">
+        <summary data-i18n="background">Background</summary>
         <select id="bgSelect"></select>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="gameplay">Gameplay</h3>
+      <details class="settings-section" open>
+        <summary data-i18n="gameplay">Gameplay</summary>
         <label><span data-i18n="game_mode">Game mode</span>
           <select id="gameMode">
             <option value="free"     data-i18n="mode_free">Free Game</option>
@@ -66,10 +66,10 @@
         <label><input type="checkbox" id="virusShader3D" /> <span data-i18n="virus_shader_3d">Virus 3D shader (experimental)</span></label>
         <label><input type="checkbox" id="causticsToggle" /> <span data-i18n="caustics_overlay">Caustics overlay</span></label>
         <label><input type="checkbox" id="fullscreenToggle" /> <span data-i18n="fullscreen">Fullscreen</span></label>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="splitting">Splitting</h3>
+      <details class="settings-section">
+        <summary data-i18n="splitting">Splitting</summary>
         <label><input type="checkbox" id="randomSplit" /> <span data-i18n="random_split">Random splitting</span></label>
         <label><input type="checkbox" id="metaSplit" /> <span data-i18n="meta_split">Metaball split</span></label>
         <label><span data-i18n="meta_rt_mode">Metaball RT mode</span>
@@ -86,17 +86,17 @@
             <option value="polygon" data-i18n="meta_outline_polygon">Polygon union (1 rim, sharp)</option>
           </select>
         </label>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="population">Population</h3>
+      <details class="settings-section">
+        <summary data-i18n="population">Population</summary>
         <label><span data-i18n="auto_split">Auto-split (s)</span> <span id="autoVal" class="val"></span>
           <input type="range" id="autoSplitSeconds" min="2" max="30" step="1" />
         </label>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="physics">Physics</h3>
+      <details class="settings-section">
+        <summary data-i18n="physics">Physics</summary>
         <label><span data-i18n="friction">Friction</span> <span id="frictionVal" class="val"></span>
           <input type="range" id="friction" min="0" max="1" step="0.01" />
         </label>
@@ -106,11 +106,10 @@
         <label><span data-i18n="throw_strength">Throw strength</span> <span id="throwVal" class="val"></span>
           <input type="range" id="throwStrength" min="0" max="3" step="0.05" />
         </label>
-      </section>
+      </details>
 
-
-      <section>
-        <h3 data-i18n="look">Look</h3>
+      <details class="settings-section">
+        <summary data-i18n="look">Look</summary>
         <label><span data-i18n="wobble">Wobble</span> <span id="wobbleVal" class="val"></span>
           <input type="range" id="wobbleAmp" min="0" max="0.4" step="0.01" />
         </label>
@@ -135,10 +134,10 @@
         <label><input type="checkbox" id="showBuildInfo" /> <span data-i18n="show_build_info">Show build info</span></label>
         <label><input type="checkbox" id="showRenderer" /> <span data-i18n="show_renderer">Show renderer</span></label>
         <label><input type="checkbox" id="showDebugField" /> <span data-i18n="show_field">Show metaball field</span></label>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="audio">Audio</h3>
+      <details class="settings-section">
+        <summary data-i18n="audio">Audio</summary>
         <label><input type="checkbox" id="musicEnabled" /> <span data-i18n="music_enabled">Music</span></label>
         <label><span data-i18n="music_volume">Music volume</span> <span id="musicVolumeVal" class="val"></span>
           <input type="range" id="musicVolume" min="0" max="1" step="0.05" />
@@ -147,10 +146,10 @@
         <label><span data-i18n="sfx_volume">Sound effects volume</span> <span id="sfxVolumeVal" class="val"></span>
           <input type="range" id="sfxVolume" min="0" max="1" step="0.05" />
         </label>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="performance">Performance</h3>
+      <details class="settings-section">
+        <summary data-i18n="performance">Performance</summary>
         <label><span data-i18n="renderer_engine">Renderer</span>
           <select id="rendererEngine">
             <option value="webgpu"      data-i18n="renderer_webgpu">WebGPU</option>
@@ -175,33 +174,31 @@
         <label><span data-i18n="scanlines">Scanlines (CRT)</span> <span id="scanlinesVal" class="val"></span>
           <input type="range" id="scanlinesAlpha" min="0" max="1" step="0.01" />
         </label>
-      </section>
-      </section>
+      </details>
 
       <section class="actions">
         <button type="button" id="resetSim" data-i18n="reset_sim">Reset simulation</button>
         <button type="button" id="aboutBtn" class="about-btn" data-i18n="about">About</button>
       </section>
 
-      <section>
-        <h3 data-i18n="debug_log">Debug log</h3>
+      <details class="settings-section">
+        <summary data-i18n="debug_log">Debug log</summary>
         <pre id="debugLogView" class="debug-log" aria-live="polite"></pre>
         <div class="debug-log-actions">
           <button type="button" id="debugLogClear" data-i18n="clear">Clear</button>
           <button type="button" id="debugLogCopy" data-i18n="copy">Copy</button>
         </div>
-      </section>
+      </details>
 
-      <section>
-        <h3 data-i18n="about">About</h3>
+      <details class="settings-section">
+        <summary data-i18n="about">About</summary>
         <p>
           <a href="book/index.html" target="_blank" rel="noopener noreferrer"
-             data-i18n="game_design_doc">Game Design Document</a>
-          ·
+             data-i18n="game_design_doc">Game Design Document</a> ·
           <a href="book/shader-test.html" target="_blank" rel="noopener noreferrer"
              data-i18n="shader_test_link">Shader test</a>
         </p>
-      </section>
+      </details>
     </aside>
   </div>
 
