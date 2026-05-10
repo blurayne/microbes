@@ -10,6 +10,7 @@ import {
   CELL_RADIUS, BROWNIAN, MARGIN, BOND_DURATION, SPLIT_DURATION, HASH_CELL,
   pickRandomActiveType,
 } from './state.js';
+import { getRule, maxAttractRadius, defaultHp } from './sim-rules.js';
 
 // Push-apart impulse from finishSplit() ramps in linearly over this
 // duration so the new cells don't snap outward at the moment of
@@ -117,10 +118,26 @@ export class Sim {
       alarmTarget: null,
       alarmTimer: 0,
       category: (CELL_TYPES[t] && CELL_TYPES[t].category) || 'good',
+      hp: defaultHp(t),
+      maxHp: defaultHp(t),
       nextBlink: (typeof performance !== 'undefined' ? performance.now() : 0)
         + 1500 + Math.random() * 4500,
       _colors: (CELL_TYPES[t] || CELL_TYPES.neutrophil).colors,
     };
+  }
+
+  // Subtract HP from a cell. Triggers the killCell death + particle
+  // burst when HP drops to 0 or below. Heroes start with Infinity HP
+  // (defaultHp) so this is a no-op for them in Free Game.
+  _applyDamage(cell, amount) {
+    if (!cell || cell.hp == null) return;
+    if (!Number.isFinite(cell.hp)) return;     // invulnerable (heroes)
+    cell.hp -= amount;
+    cell.flash = 0.4;
+    if (cell.hp <= 0) {
+      cell.hp = 0;
+      this.killCell(cell);
+    }
   }
 
   rollSplitTimer(type) {
@@ -361,15 +378,27 @@ export class Sim {
 
           if (!hasGoal) {
             if (c.alarmTimer === 0 && moveCfg.hostility !== 'idle') {
-              let bestD = ALARM_RADIUS * ALARM_RADIUS, enemy = null;
-              this.forEachNeighbour(c, ALARM_RADIUS, (o) => {
+              // Per-pair targeting matrix (sim-rules.js). Picks the
+              // closest neighbour for which getRule returns a rule;
+              // attractRadius from that rule is the search bound,
+              // capped above by the attacker's max attract radius
+              // so a single spatial-grid query covers every rule.
+              const searchR = Math.max(ALARM_RADIUS, maxAttractRadius(c.type));
+              let bestD = searchR * searchR, enemy = null, enemyRule = null;
+              this.forEachNeighbour(c, searchR, (o) => {
                 if (o.state !== 'NORMAL') return;
-                if ((o.category || (CELL_TYPES[o.type] && CELL_TYPES[o.type].category)) === c.category) return;
+                const rule = getRule(c.type, o.type);
+                if (!rule) return;
                 const dx = o.x - c.x, dy = o.y - c.y;
                 const d2 = dx*dx + dy*dy;
-                if (d2 < bestD) { bestD = d2; enemy = o; }
+                if (d2 < rule.attract * rule.attract && d2 < bestD) {
+                  bestD = d2; enemy = o; enemyRule = rule;
+                }
               });
-              if (enemy) { c.alarmTarget = enemy; c.alarmTimer = 1.6; }
+              if (enemy) {
+                c.alarmTarget = enemy; c.alarmTimer = 1.6;
+                c.alarmRule = enemyRule;
+              }
             }
 
             if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
@@ -380,6 +409,18 @@ export class Sim {
               accel = moveCfg.alarmAccel * sm;
               maxV  = moveCfg.attackSpeed * sm;
               hasGoal = true;
+              // Apply per-pair damage when inside attack range. Cached
+              // alarmRule was set when this target was acquired; if
+              // missing (e.g. target type changed), look it up fresh.
+              const rule = c.alarmRule || getRule(c.type, c.alarmTarget.type);
+              if (rule && rule.dps > 0 && d < rule.attack) {
+                this._applyDamage(c.alarmTarget, rule.dps * dt);
+                if (c.alarmTarget.hp <= 0) {
+                  c.alarmTarget = null;
+                  c.alarmTimer = 0;
+                  c.alarmRule = null;
+                }
+              }
             } else {
               const home = (c.category === 'bad') ? centroidBad : centroidGood;
               if (home && home.r > 0) {
