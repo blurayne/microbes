@@ -518,6 +518,16 @@
         </select>
       </div>
       <div class="ctrl">
+        <label><span>background</span></label>
+        <select id="bgkind">
+          <option value="0">bloodstream · default</option>
+          <option value="1">lung · alveolar</option>
+          <option value="2">heart · striated muscle</option>
+          <option value="3">brain · neural network</option>
+          <option value="4">bone marrow · trabecular</option>
+        </select>
+      </div>
+      <div class="ctrl">
         <label><span>zoom</span><span id="zoom-val">1.00</span></label>
         <input id="zoom" type="range" min="0.5" max="2.5" step="0.01" value="1.0"/>
       </div>
@@ -583,13 +593,17 @@
 // ────────────────────────────────────────────────────────────
 
 struct Uniforms {
-  resolution : vec2<f32>,
-  time       : f32,
-  zoom       : f32,
-  activity   : f32,
-  organelles : f32,
-  cellType   : f32,
-  theme      : f32,    // 0 microscope · 1 cartoon · 2 kurzgesagt · 3 classic (canvas2d game look)
+  resolution  : vec2<f32>,
+  time        : f32,
+  zoom        : f32,
+  activity    : f32,
+  organelles  : f32,
+  cellType    : f32,
+  theme       : f32,   // 0 microscope · 1 cartoon · 2 kurzgesagt · 3 classic
+  bgKind      : f32,   // 0 bloodstream · 1 lung · 2 heart · 3 brain · 4 bone marrow
+  cellOffsetX : f32,   // cell centre offset in UV space (drag)
+  cellOffsetY : f32,
+  cellRadius  : f32,   // cell radius multiplier (pinch / wheel) — 1.0 default
 };
 @group(0) @binding(0) var<uniform> U : Uniforms;
 
@@ -814,6 +828,101 @@ fn nucleusSdf(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
   return length(p) - 0.22;                                                       // eukaryote default
 }
 
+// ── environment backgrounds ─────────────────────────────────
+// Five procedural environments matching Kurzgesagt-style explainers:
+// bloodstream (red flow + RBC silhouettes), lung (alveolar honey-
+// comb), heart (striated muscle bands), brain (radial dendrites +
+// synapse dots), bone marrow (Voronoi trabeculae). Each modulates
+// its palette by the active theme so the cell on top reads
+// cohesively.
+fn envBackground(uv: vec2<f32>, kind: i32, theme: i32, t: f32) -> vec3<f32> {
+  if (kind == 1) {
+    // lung — alveolar honeycomb (skewed grid → hex packing)
+    let g = uv * 6.0;
+    let s = vec2<f32>(g.x + g.y * 0.5, g.y * 0.866);
+    let f = fract(s);
+    let d = min(min(distance(f, vec2<f32>(0.5, 0.5)),
+                    distance(f, vec2<f32>(1.0, 1.0))),
+                distance(f, vec2<f32>(0.0, 1.0)));
+    let alveoli = smoothstep(0.30, 0.45, d);
+    var base = vec3<f32>(0.85, 0.55, 0.60);
+    var rim  = vec3<f32>(0.45, 0.20, 0.28);
+    if (theme == 1) { base = vec3<f32>(0.55, 0.78, 0.65); rim = vec3<f32>(0.05, 0.25, 0.18); }
+    if (theme == 2) { base = vec3<f32>(0.50, 0.85, 0.75); rim = vec3<f32>(0.10, 0.25, 0.22); }
+    if (theme == 3) { base = vec3<f32>(0.78, 0.55, 0.55); rim = vec3<f32>(0.55, 0.30, 0.35); }
+    return mix(rim, base, alveoli);
+  }
+  if (kind == 2) {
+    // heart — striated muscle bands
+    let stripes = sin(uv.y * 18.0 + sin(uv.x * 4.0) * 0.5) * 0.5 + 0.5;
+    var base   = vec3<f32>(0.32, 0.05, 0.07);
+    var stripe = vec3<f32>(0.55, 0.08, 0.10);
+    if (theme == 1) { base = vec3<f32>(0.45, 0.10, 0.10); stripe = vec3<f32>(0.18, 0.02, 0.04); }
+    if (theme == 2) { base = vec3<f32>(0.18, 0.03, 0.06); stripe = vec3<f32>(0.85, 0.20, 0.30); }
+    if (theme == 3) { base = vec3<f32>(0.42, 0.10, 0.12); stripe = vec3<f32>(0.30, 0.06, 0.08); }
+    return mix(base, stripe, stripes);
+  }
+  if (kind == 3) {
+    // brain — radial dendrites + synapse dots
+    let ang = atan2(uv.y, uv.x);
+    let r = length(uv);
+    let dendrite = pow(abs(cos(ang * 3.0 + r * 4.0)), 30.0) * smoothstep(0.0, 0.8, r);
+    var ink  = vec3<f32>(0.05, 0.06, 0.12);
+    var line = vec3<f32>(0.45, 0.50, 0.65);
+    if (theme == 1) { ink = vec3<f32>(0.20, 0.25, 0.40); line = vec3<f32>(0.85, 0.90, 0.95); }
+    if (theme == 2) { ink = vec3<f32>(0.05, 0.05, 0.22); line = vec3<f32>(0.65, 0.80, 1.00); }
+    if (theme == 3) { ink = vec3<f32>(0.18, 0.20, 0.28); line = vec3<f32>(0.50, 0.55, 0.65); }
+    var col = mix(ink, line, dendrite * 0.6);
+    let s1 = smoothstep(0.025, 0.0, length(uv - vec2<f32>( 0.55,  0.30)));
+    let s2 = smoothstep(0.025, 0.0, length(uv - vec2<f32>(-0.40,  0.50)));
+    let s3 = smoothstep(0.025, 0.0, length(uv - vec2<f32>( 0.20, -0.55)));
+    return col + line * (s1 + s2 + s3) * 0.7;
+  }
+  if (kind == 4) {
+    // bone marrow — Voronoi-style trabeculae (single ring of neighbours)
+    let g = uv * 4.0;
+    let fi = floor(g);
+    let f = fract(g);
+    var minD: f32 = 9.0;
+    for (var ix: i32 = -1; ix <= 1; ix = ix + 1) {
+      for (var iy: i32 = -1; iy <= 1; iy = iy + 1) {
+        let nb = fi + vec2<f32>(f32(ix), f32(iy));
+        let pt = vec2<f32>(f32(ix), f32(iy)) + 0.5
+               + 0.45 * vec2<f32>(hash(nb), hash(nb + vec2<f32>(7.0, 11.0))) - f;
+        minD = min(minD, length(pt));
+      }
+    }
+    let trab = smoothstep(0.05, 0.20, minD);
+    var marrow = vec3<f32>(0.75, 0.65, 0.40);
+    var bone   = vec3<f32>(0.25, 0.18, 0.10);
+    if (theme == 1) { marrow = vec3<f32>(0.95, 0.85, 0.55); bone = vec3<f32>(0.10, 0.08, 0.05); }
+    if (theme == 2) { marrow = vec3<f32>(0.78, 0.70, 0.45); bone = vec3<f32>(0.30, 0.10, 0.40); }
+    if (theme == 3) { marrow = vec3<f32>(0.65, 0.55, 0.40); bone = vec3<f32>(0.30, 0.20, 0.15); }
+    return mix(bone, marrow, trab);
+  }
+  // kind == 0 — bloodstream (default).
+  let n   = fbm(uv * 3.0 + vec2<f32>(t * 0.04, t * 0.03));
+  let rbc = fbm(uv * 8.0 + vec2<f32>(0.0, t * 0.15));
+  if (theme == 1) {
+    let rbcDot = step(0.55, rbc);
+    return mix(vec3<f32>(0.55, 0.10, 0.12), vec3<f32>(0.85, 0.30, 0.30), rbcDot);
+  }
+  if (theme == 2) {
+    let rbcDot = step(0.55, rbc);
+    var col = mix(vec3<f32>(0.18, 0.03, 0.05), vec3<f32>(0.50, 0.08, 0.18), rbcDot);
+    col = col + vec3<f32>(0.40, 0.10, 0.10) * smoothstep(0.55, 0.85, rbc);
+    return col;
+  }
+  if (theme == 3) {
+    let r = length(uv);
+    return mix(vec3<f32>(0.30, 0.05, 0.08), vec3<f32>(0.10, 0.02, 0.04), smoothstep(0.0, 1.2, r));
+  }
+  // microscope — fbm tint + RBC silhouettes drifting
+  var col = mix(vec3<f32>(0.18, 0.03, 0.05), vec3<f32>(0.42, 0.06, 0.08), n);
+  col = mix(col, vec3<f32>(0.62, 0.10, 0.14), smoothstep(0.55, 0.75, rbc) * 0.5);
+  return col;
+}
+
 // ── fragment ────────────────────────────────────────────────
 @fragment
 fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
@@ -821,44 +930,48 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   let t = U.time * U.activity;
   let kind = i32(round(U.cellType));
 
-  // centre + aspect-correct
+  let theme = i32(round(U.theme));
+  let bgKind = i32(round(U.bgKind));
+
+  // centre + aspect-correct (viewport space)
   var uv = (frag.xy - 0.5 * res) / min(res.x, res.y);
   uv.y = -uv.y;
   uv = uv * U.zoom;
 
-  // ── extracellular medium ──
-  var bg = vec3<f32>(0.04, 0.03, 0.07);
-  let bgN = fbm(uv * 4.0 + vec2<f32>(t * 0.05, t * 0.03));
-  bg = bg + vec3<f32>(0.10, 0.05, 0.15) * bgN * 0.4;
+  // Cell-local UV — translates by user drag, scales by user pinch.
+  // All cell-body computations (membrane SDF, nucleus, granules,
+  // organelles, special features) read uvCell; viewport-scale
+  // effects (env background, microscope chromatic limb, brownian
+  // particles) keep using uv.
+  let uvCell = (uv - vec2<f32>(U.cellOffsetX, U.cellOffsetY)) / max(U.cellRadius, 0.01);
 
-  // soft drifting light fibres outside the cell
-  let fibre = fbm(uv * 12.0 + vec2<f32>(0.0, t * 0.1));
-  bg = bg + vec3<f32>(0.05, 0.03, 0.08) * smoothstep(0.55, 0.85, fibre);
+  // ── extracellular medium ──
+  let bg = envBackground(uv, bgKind, theme, t);
 
   // ── cell body ──
-  let mem = membraneFor(uv, kind, t);
+  let mem = membraneFor(uvCell, kind, t);
   let inside = smoothstep(0.004, -0.004, mem);
   let edge = smoothstep(0.022, 0.0, abs(mem));
 
   // cytoplasm — type-specific stain with subtle structure
   var cyto = cytoColor(kind);
-  let granular = fbm(uv * 22.0 + vec2<f32>(t * 0.02, 0.0));
+  let granular = fbm(uvCell * 22.0 + vec2<f32>(t * 0.02, 0.0));
   cyto = cyto - vec3<f32>(0.10, 0.07, 0.08) * granular;
-  let sheets = fbm(uv * 6.0 - vec2<f32>(t * 0.03, t * 0.02));
+  let sheets = fbm(uvCell * 6.0 - vec2<f32>(t * 0.03, t * 0.02));
   cyto = cyto + vec3<f32>(0.08, 0.04, 0.05) * (sheets - 0.5);
 
   // b-cell rough-ER stripes — diagonal sinusoid in the cytoplasm
   if (kind == 4) {
-    let er = sin(uv.x * 14.0 + uv.y * 6.0 + t * 0.4) * 0.5 + 0.5;
+    let er = sin(uvCell.x * 14.0 + uvCell.y * 6.0 + t * 0.4) * 0.5 + 0.5;
     cyto = cyto + vec3<f32>(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
   }
 
   // ── nucleus ──
-  let nucD = nucleusSdf(uv, kind, t);
+  let nucD = nucleusSdf(uvCell, kind, t);
   let nucMask = smoothstep(0.006, -0.006, nucD);
   let nucEdge = smoothstep(0.020, 0.0, abs(nucD));
   let nucOff = vec2<f32>(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
-  let nucP = uv - nucOff;
+  let nucP = uvCell - nucOff;
   var nucCol = vec3<f32>(0.30, 0.14, 0.42);
   if (kind == 3)                  { nucCol = vec3<f32>(0.20, 0.12, 0.46); }   // nk
   if (kind == 4)                  { nucCol = vec3<f32>(0.36, 0.12, 0.40); }   // b-cell
@@ -898,7 +1011,7 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let len = 0.045;
     let a = centre - dir * len;
     let b = centre + dir * len;
-    let d = capsule(uv, a, b, 0.018);
+    let d = capsule(uvCell, a, b, 0.018);
     mito = min(mito, d);
   }
   let mitoMask = smoothstep(0.004, -0.004, mito);
@@ -958,23 +1071,23 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     );
     let jit = vec2<f32>(0.008 * sin(t * 3.0 + fj * 7.0),
                         0.008 * cos(t * 2.6 + fj * 5.0));
-    ves = min(ves, length(uv - pos - jit) - vesRadius);
+    ves = min(ves, length(uvCell - pos - jit) - vesRadius);
   }
   let vesMask = smoothstep(0.003, -0.003, ves);
 
   // virus capsid hex pattern overlay — bright lattice on the body
   var capsid: f32 = 0.0;
   if (kind == 5) {
-    let h = 0.5 + 0.5 * cos(uv.x * 28.0) * cos(uv.y * 28.0);
+    let h = 0.5 + 0.5 * cos(uvCell.x * 28.0) * cos(uvCell.y * 28.0);
     capsid = pow(h, 6.0);
   }
 
   // bacterium flagellum — a wiggling tail extending right
   var flag: f32 = 1e9;
   if (kind == 6) {
-    let xf = uv.x - 0.32;
+    let xf = uvCell.x - 0.32;
     if (xf > 0.0 && xf < 0.45) {
-      let yf = uv.y - 0.04 * sin(xf * 26.0 - t * 8.0);
+      let yf = uvCell.y - 0.04 * sin(xf * 26.0 - t * 8.0);
       flag = abs(yf) - 0.006;
     }
   }
@@ -983,21 +1096,21 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   // spore double-wall — inner ring inside the outer membrane
   var wall: f32 = 1e9;
   if (kind == 8) {
-    wall = abs(length(uv) - 0.30) - 0.014;
+    wall = abs(length(uvCell) - 0.30) - 0.014;
   }
   let wallMask = smoothstep(0.003, -0.003, wall);
 
   // rbc biconcave — dark central depression on the disc
   var biconcave: f32 = 0.0;
   if (kind == 16) {
-    biconcave = smoothstep(0.22, 0.04, length(uv));
+    biconcave = smoothstep(0.22, 0.04, length(uvCell));
   }
 
   // slime hyphal threads — faint dark radial filaments at the rim
   var hyphae: f32 = 0.0;
   if (kind == 18) {
-    let ang = atan2(uv.y, uv.x);
-    let r = length(uv);
+    let ang = atan2(uvCell.y, uvCell.x);
+    let r = length(uvCell);
     let lines = pow(abs(cos(ang * 1.5 + t * 0.1)), 50.0);
     hyphae = lines * smoothstep(0.55, 0.40, r) * smoothstep(0.22, 0.32, r);
   }
@@ -1005,7 +1118,7 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   // toxin glow — bright violet halo just inside the membrane
   var toxinGlow: f32 = 0.0;
   if (kind == 20) {
-    let r = length(uv);
+    let r = length(uvCell);
     toxinGlow = pow(smoothstep(0.55, 0.42, r), 2.0) * smoothstep(0.30, 0.42, r);
   }
 
@@ -1015,16 +1128,18 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   // flagMask / wallMask / biconcave / hyphae / toxinGlow / edge /
   // inside / bg. Each branch composes them differently to deliver
   // a distinct visual language without any new helpers.
-  let r = length(uv);
-  let theme = i32(round(U.theme));
+  // Use uvCell (cell-relative) for halo/highlight/biconcave; use uv
+  // (viewport) for the microscope chromatic limb + brownian particles.
+  let r = length(uvCell);
+  let rView = length(uv);
   var col: vec3<f32>;
 
   if (theme == 1) {
     // ─── cartoon · saturated, thick black outlines ───
-    col = vec3<f32>(0.10, 0.06, 0.22);
+    col = bg;
     let cytoSat = clamp(cyto * 1.30, vec3<f32>(0.0), vec3<f32>(1.0));
     col = mix(col, cytoSat, inside);
-    let hl = smoothstep(0.16, 0.0, length(uv - vec2<f32>(-0.18, 0.18)));
+    let hl = smoothstep(0.16, 0.0, length(uvCell - vec2<f32>(-0.18, 0.18)));
     col = col + vec3<f32>(0.32, 0.30, 0.28) * hl * inside;
     col = mix(col, vesCol, vesMask * inside);
     col = mix(col, nucCol, nucMask);
@@ -1036,7 +1151,7 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     col = mix(col, vec3<f32>(0.0, 0.0, 0.0), edge);
   } else if (theme == 2) {
     // ─── kurzgesagt · flat cyto, thin pale rim, neon halo ───
-    col = vec3<f32>(0.10, 0.06, 0.22);
+    col = bg;
     col = mix(col, cyto, inside);
     col = mix(col, vesCol, vesMask * inside);
     col = mix(col, nucCol, nucMask);
@@ -1050,9 +1165,9 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     col = mix(col, vec3<f32>(0.95, 0.92, 0.85), edge * 0.4);
   } else if (theme == 3) {
     // ─── classic · canvas2d game look (radial fill + dark outline) ───
-    col = vec3<f32>(0.06, 0.04, 0.12);
+    col = bg;
     let cytoTop = clamp(cyto * 1.35 + vec3<f32>(0.05), vec3<f32>(0.0), vec3<f32>(1.0));
-    let highlight = smoothstep(0.7, 0.0, length(uv - vec2<f32>(-0.15, 0.18)));
+    let highlight = smoothstep(0.7, 0.0, length(uvCell - vec2<f32>(-0.15, 0.18)));
     let cytoFill = mix(cyto, cytoTop, highlight);
     col = mix(col, cytoFill, inside);
     col = mix(col, vec3<f32>(0.04, 0.02, 0.08), edge);
@@ -1081,10 +1196,10 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
         0.55 * sin(fk * 3.71 + t * speedK),
         0.55 * cos(fk * 5.19 + t * speedK * 1.13)
       );
-      let d = length(uv - p);
+      let d = length(uvCell - p);
       col = col + vec3<f32>(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, d) * inside;
     }
-    col = col + vec3<f32>(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, r), 2.0) * 0.6;
+    col = col + vec3<f32>(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, rView), 2.0) * 0.6;
     let g = hash(frag.xy + vec2<f32>(t * 31.7, t * 17.3)) - 0.5;
     col = col + vec3<f32>(g) * 0.025;
   }
@@ -1130,6 +1245,10 @@ uniform float u_activity;
 uniform float u_organelles;
 uniform float u_cellType;
 uniform float u_theme;
+uniform float u_bgKind;
+uniform float u_cellOffsetX;
+uniform float u_cellOffsetY;
+uniform float u_cellRadius;
 
 out vec4 outColor;
 
@@ -1304,40 +1423,126 @@ float nucleusSdf(vec2 uv, int kind, float t) {
   return length(p) - 0.22;
 }
 
+// envBackground — five Kurzgesagt-style environments. Mirrors WGSL.
+vec3 envBackground(vec2 uv, int kind, int theme, float t) {
+  if (kind == 1) {
+    vec2 g = uv * 6.0;
+    vec2 s = vec2(g.x + g.y * 0.5, g.y * 0.866);
+    vec2 f = fract(s);
+    float d = min(min(distance(f, vec2(0.5, 0.5)),
+                      distance(f, vec2(1.0, 1.0))),
+                  distance(f, vec2(0.0, 1.0)));
+    float alveoli = smoothstep(0.30, 0.45, d);
+    vec3 base = vec3(0.85, 0.55, 0.60);
+    vec3 rim  = vec3(0.45, 0.20, 0.28);
+    if (theme == 1) { base = vec3(0.55, 0.78, 0.65); rim = vec3(0.05, 0.25, 0.18); }
+    if (theme == 2) { base = vec3(0.50, 0.85, 0.75); rim = vec3(0.10, 0.25, 0.22); }
+    if (theme == 3) { base = vec3(0.78, 0.55, 0.55); rim = vec3(0.55, 0.30, 0.35); }
+    return mix(rim, base, alveoli);
+  }
+  if (kind == 2) {
+    float stripes = sin(uv.y * 18.0 + sin(uv.x * 4.0) * 0.5) * 0.5 + 0.5;
+    vec3 base   = vec3(0.32, 0.05, 0.07);
+    vec3 stripe = vec3(0.55, 0.08, 0.10);
+    if (theme == 1) { base = vec3(0.45, 0.10, 0.10); stripe = vec3(0.18, 0.02, 0.04); }
+    if (theme == 2) { base = vec3(0.18, 0.03, 0.06); stripe = vec3(0.85, 0.20, 0.30); }
+    if (theme == 3) { base = vec3(0.42, 0.10, 0.12); stripe = vec3(0.30, 0.06, 0.08); }
+    return mix(base, stripe, stripes);
+  }
+  if (kind == 3) {
+    float ang = atan(uv.y, uv.x);
+    float r = length(uv);
+    float dendrite = pow(abs(cos(ang * 3.0 + r * 4.0)), 30.0) * smoothstep(0.0, 0.8, r);
+    vec3 ink  = vec3(0.05, 0.06, 0.12);
+    vec3 line = vec3(0.45, 0.50, 0.65);
+    if (theme == 1) { ink = vec3(0.20, 0.25, 0.40); line = vec3(0.85, 0.90, 0.95); }
+    if (theme == 2) { ink = vec3(0.05, 0.05, 0.22); line = vec3(0.65, 0.80, 1.00); }
+    if (theme == 3) { ink = vec3(0.18, 0.20, 0.28); line = vec3(0.50, 0.55, 0.65); }
+    vec3 col = mix(ink, line, dendrite * 0.6);
+    float s1 = smoothstep(0.025, 0.0, length(uv - vec2( 0.55,  0.30)));
+    float s2 = smoothstep(0.025, 0.0, length(uv - vec2(-0.40,  0.50)));
+    float s3 = smoothstep(0.025, 0.0, length(uv - vec2( 0.20, -0.55)));
+    return col + line * (s1 + s2 + s3) * 0.7;
+  }
+  if (kind == 4) {
+    vec2 g = uv * 4.0;
+    vec2 fi = floor(g);
+    vec2 f = fract(g);
+    float minD = 9.0;
+    for (int ix = -1; ix <= 1; ix++) {
+      for (int iy = -1; iy <= 1; iy++) {
+        vec2 nb = fi + vec2(float(ix), float(iy));
+        vec2 pt = vec2(float(ix), float(iy)) + 0.5
+                + 0.45 * vec2(hash(nb), hash(nb + vec2(7.0, 11.0))) - f;
+        minD = min(minD, length(pt));
+      }
+    }
+    float trab = smoothstep(0.05, 0.20, minD);
+    vec3 marrow = vec3(0.75, 0.65, 0.40);
+    vec3 bone   = vec3(0.25, 0.18, 0.10);
+    if (theme == 1) { marrow = vec3(0.95, 0.85, 0.55); bone = vec3(0.10, 0.08, 0.05); }
+    if (theme == 2) { marrow = vec3(0.78, 0.70, 0.45); bone = vec3(0.30, 0.10, 0.40); }
+    if (theme == 3) { marrow = vec3(0.65, 0.55, 0.40); bone = vec3(0.30, 0.20, 0.15); }
+    return mix(bone, marrow, trab);
+  }
+  // bloodstream (default)
+  float n   = fbm(uv * 3.0 + vec2(t * 0.04, t * 0.03));
+  float rbc = fbm(uv * 8.0 + vec2(0.0, t * 0.15));
+  if (theme == 1) {
+    float rbcDot = step(0.55, rbc);
+    return mix(vec3(0.55, 0.10, 0.12), vec3(0.85, 0.30, 0.30), rbcDot);
+  }
+  if (theme == 2) {
+    float rbcDot = step(0.55, rbc);
+    vec3 col = mix(vec3(0.18, 0.03, 0.05), vec3(0.50, 0.08, 0.18), rbcDot);
+    col += vec3(0.40, 0.10, 0.10) * smoothstep(0.55, 0.85, rbc);
+    return col;
+  }
+  if (theme == 3) {
+    float r = length(uv);
+    return mix(vec3(0.30, 0.05, 0.08), vec3(0.10, 0.02, 0.04), smoothstep(0.0, 1.2, r));
+  }
+  vec3 col = mix(vec3(0.18, 0.03, 0.05), vec3(0.42, 0.06, 0.08), n);
+  col = mix(col, vec3(0.62, 0.10, 0.14), smoothstep(0.55, 0.75, rbc) * 0.5);
+  return col;
+}
+
 void main() {
   vec2 res = u_resolution;
   float t = u_time * u_activity;
   int kind = int(floor(u_cellType + 0.5));
+  int theme = int(floor(u_theme + 0.5));
+  int bgKind = int(floor(u_bgKind + 0.5));
 
   vec2 uv = (gl_FragCoord.xy - 0.5 * res) / min(res.x, res.y);
   uv *= u_zoom;
 
+  // Cell-local UV — drag offset + pinch radius. See WGSL comment.
+  vec2 uvCell = (uv - vec2(u_cellOffsetX, u_cellOffsetY)) / max(u_cellRadius, 0.01);
+
   // extracellular medium
-  vec3 bg = vec3(0.04, 0.03, 0.07);
-  bg += vec3(0.10, 0.05, 0.15) * fbm(uv * 4.0 + vec2(t * 0.05, t * 0.03)) * 0.4;
-  bg += vec3(0.05, 0.03, 0.08)
-      * smoothstep(0.55, 0.85, fbm(uv * 12.0 + vec2(0.0, t * 0.1)));
+  vec3 bg = envBackground(uv, bgKind, theme, t);
 
   // membrane
-  float mem = membraneFor(uv, kind, t);
+  float mem = membraneFor(uvCell, kind, t);
   float inside = smoothstep(0.004, -0.004, mem);
   float edge   = smoothstep(0.022, 0.0, abs(mem));
 
   // cytoplasm
   vec3 cyto = cytoColor(kind);
-  cyto -= vec3(0.10, 0.07, 0.08) * fbm(uv * 22.0 + vec2(t * 0.02, 0.0));
-  cyto += vec3(0.08, 0.04, 0.05) * (fbm(uv * 6.0 - vec2(t * 0.03, t * 0.02)) - 0.5);
+  cyto -= vec3(0.10, 0.07, 0.08) * fbm(uvCell * 22.0 + vec2(t * 0.02, 0.0));
+  cyto += vec3(0.08, 0.04, 0.05) * (fbm(uvCell * 6.0 - vec2(t * 0.03, t * 0.02)) - 0.5);
   if (kind == 4) {
-    float er = sin(uv.x * 14.0 + uv.y * 6.0 + t * 0.4) * 0.5 + 0.5;
+    float er = sin(uvCell.x * 14.0 + uvCell.y * 6.0 + t * 0.4) * 0.5 + 0.5;
     cyto += vec3(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
   }
 
   // nucleus
-  float nucD = nucleusSdf(uv, kind, t);
+  float nucD = nucleusSdf(uvCell, kind, t);
   float nucMask = smoothstep(0.006, -0.006, nucD);
   float nucEdge = smoothstep(0.020, 0.0, abs(nucD));
   vec2 nucOff = vec2(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
-  vec2 nucP = uv - nucOff;
+  vec2 nucP = uvCell - nucOff;
   vec3 nucCol = vec3(0.30, 0.14, 0.42);
   if (kind == 3)               nucCol = vec3(0.20, 0.12, 0.46);
   if (kind == 4)               nucCol = vec3(0.36, 0.12, 0.40);
@@ -1375,7 +1580,7 @@ void main() {
     float len = 0.045;
     vec2 a = centre - dir * len;
     vec2 b = centre + dir * len;
-    mito = min(mito, capsule(uv, a, b, 0.018));
+    mito = min(mito, capsule(uvCell, a, b, 0.018));
   }
   float mitoMask = smoothstep(0.004, -0.004, mito);
   float mitoEdge = smoothstep(0.012, 0.0, abs(mito));
@@ -1434,23 +1639,23 @@ void main() {
     );
     vec2 jit = vec2(0.008 * sin(t * 3.0 + fj * 7.0),
                     0.008 * cos(t * 2.6 + fj * 5.0));
-    ves = min(ves, length(uv - pos - jit) - vesRadius);
+    ves = min(ves, length(uvCell - pos - jit) - vesRadius);
   }
   float vesMask = smoothstep(0.003, -0.003, ves);
 
   // virus capsid lattice overlay
   float capsid = 0.0;
   if (kind == 5) {
-    float h = 0.5 + 0.5 * cos(uv.x * 28.0) * cos(uv.y * 28.0);
+    float h = 0.5 + 0.5 * cos(uvCell.x * 28.0) * cos(uvCell.y * 28.0);
     capsid = pow(h, 6.0);
   }
 
   // bacterium flagellum
   float flag = 1e9;
   if (kind == 6) {
-    float xf = uv.x - 0.32;
+    float xf = uvCell.x - 0.32;
     if (xf > 0.0 && xf < 0.45) {
-      float yf = uv.y - 0.04 * sin(xf * 26.0 - t * 8.0);
+      float yf = uvCell.y - 0.04 * sin(xf * 26.0 - t * 8.0);
       flag = abs(yf) - 0.006;
     }
   }
@@ -1459,21 +1664,21 @@ void main() {
   // spore double-wall ring
   float wall = 1e9;
   if (kind == 8) {
-    wall = abs(length(uv) - 0.30) - 0.014;
+    wall = abs(length(uvCell) - 0.30) - 0.014;
   }
   float wallMask = smoothstep(0.003, -0.003, wall);
 
   // rbc biconcave
   float biconcave = 0.0;
   if (kind == 16) {
-    biconcave = smoothstep(0.22, 0.04, length(uv));
+    biconcave = smoothstep(0.22, 0.04, length(uvCell));
   }
 
   // slime hyphal threads
   float hyphae = 0.0;
   if (kind == 18) {
-    float ang = atan(uv.y, uv.x);
-    float r = length(uv);
+    float ang = atan(uvCell.y, uvCell.x);
+    float r = length(uvCell);
     float lines = pow(abs(cos(ang * 1.5 + t * 0.1)), 50.0);
     hyphae = lines * smoothstep(0.55, 0.40, r) * smoothstep(0.22, 0.32, r);
   }
@@ -1481,21 +1686,23 @@ void main() {
   // toxin glow
   float toxinGlow = 0.0;
   if (kind == 20) {
-    float r = length(uv);
+    float r = length(uvCell);
     toxinGlow = pow(smoothstep(0.55, 0.42, r), 2.0) * smoothstep(0.30, 0.42, r);
   }
 
-  // compose · 4-theme switch (microscope / cartoon / kurzgesagt / classic)
-  float r = length(uv);
-  int theme = int(floor(u_theme + 0.5));
+  // compose · 4-theme switch. uvCell drives cell-relative effects;
+  // uv stays viewport-space for the microscope chromatic limb +
+  // brownian particles.
+  float r = length(uvCell);
+  float rView = length(uv);
   vec3 col;
 
   if (theme == 1) {
     // cartoon
-    col = vec3(0.10, 0.06, 0.22);
+    col = bg;
     vec3 cytoSat = clamp(cyto * 1.30, 0.0, 1.0);
     col = mix(col, cytoSat, inside);
-    float hl = smoothstep(0.16, 0.0, length(uv - vec2(-0.18, 0.18)));
+    float hl = smoothstep(0.16, 0.0, length(uvCell - vec2(-0.18, 0.18)));
     col += vec3(0.32, 0.30, 0.28) * hl * inside;
     col = mix(col, vesCol, vesMask * inside);
     col = mix(col, nucCol, nucMask);
@@ -1507,7 +1714,7 @@ void main() {
     col = mix(col, vec3(0.0), edge);
   } else if (theme == 2) {
     // kurzgesagt
-    col = vec3(0.10, 0.06, 0.22);
+    col = bg;
     col = mix(col, cyto, inside);
     col = mix(col, vesCol, vesMask * inside);
     col = mix(col, nucCol, nucMask);
@@ -1521,9 +1728,9 @@ void main() {
     col = mix(col, vec3(0.95, 0.92, 0.85), edge * 0.4);
   } else if (theme == 3) {
     // classic — canvas2d game look
-    col = vec3(0.06, 0.04, 0.12);
+    col = bg;
     vec3 cytoTop = clamp(cyto * 1.35 + vec3(0.05), 0.0, 1.0);
-    float highlight = smoothstep(0.7, 0.0, length(uv - vec2(-0.15, 0.18)));
+    float highlight = smoothstep(0.7, 0.0, length(uvCell - vec2(-0.15, 0.18)));
     vec3 cytoFill = mix(cyto, cytoTop, highlight);
     col = mix(col, cytoFill, inside);
     col = mix(col, vec3(0.04, 0.02, 0.08), edge);
@@ -1551,9 +1758,9 @@ void main() {
         0.55 * sin(fk * 3.71 + t * speedK),
         0.55 * cos(fk * 5.19 + t * speedK * 1.13)
       );
-      col += vec3(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, length(uv - p)) * inside;
+      col += vec3(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, length(uvCell - p)) * inside;
     }
-    col += vec3(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, r), 2.0) * 0.6;
+    col += vec3(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, rView), 2.0) * 0.6;
     float g = hash(gl_FragCoord.xy + vec2(t * 31.7, t * 17.3)) - 0.5;
     col += vec3(g) * 0.025;
   }
@@ -1576,7 +1783,11 @@ const params = {
   activity: 1.0,
   organelles: 8,
   cellType: 0,
-  theme: 0,    // 0 microscope · 1 cartoon · 2 kurzgesagt · 3 classic
+  theme: 0,         // 0 microscope · 1 cartoon · 2 kurzgesagt · 3 classic
+  bgKind: 0,        // 0 bloodstream · 1 lung · 2 heart · 3 brain · 4 bone marrow
+  cellOffsetX: 0.0, // UV-space drag offset (0,0 = centred)
+  cellOffsetY: 0.0,
+  cellRadius: 1.0,  // mouse-wheel / pinch scale (clamped 0.3..3.0)
 };
 
 // hook up sliders ----------------------------------------------------------
@@ -1607,6 +1818,84 @@ themeSel.addEventListener('change', () => {
   params.theme = parseInt(themeSel.value, 10) || 0;
 });
 params.theme = parseInt(themeSel.value, 10) || 0;
+
+// background-environment dropdown
+const bgkindSel = $('bgkind');
+bgkindSel.addEventListener('change', () => {
+  params.bgKind = parseInt(bgkindSel.value, 10) || 0;
+});
+params.bgKind = parseInt(bgkindSel.value, 10) || 0;
+
+// ── Drag + pinch/wheel: move and resize the cell ────────────
+// Pointer events handle both mouse and touch. CSS `touch-action:
+// none` on #stage stops the browser's default scroll/zoom from
+// fighting our gestures.
+canvas.style.touchAction = 'none';
+const _ptrs = new Map();   // pointerId → { x, y } in CSS px
+let _dragStart = null;     // { ptrId, sx, sy, ox, oy } at pointerdown
+let _pinchStart = null;    // { d0, r0 } at second-pointer-down
+
+function _toUv(sx, sy) {
+  // Convert CSS pixel coordinates to UV (matches the shader's
+  // (frag - 0.5*res) / min(res) but accounting for canvas Y-flip).
+  const rect = canvas.getBoundingClientRect();
+  const m = Math.min(rect.width, rect.height);
+  return {
+    x:  (sx - rect.left - rect.width  * 0.5) / m,
+    y: -(sy - rect.top  - rect.height * 0.5) / m,
+  };
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  canvas.setPointerCapture?.(e.pointerId);
+  _ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (_ptrs.size === 1) {
+    _dragStart = {
+      ptrId: e.pointerId,
+      sx: e.clientX, sy: e.clientY,
+      ox: params.cellOffsetX, oy: params.cellOffsetY,
+    };
+  } else if (_ptrs.size === 2) {
+    const [a, b] = [..._ptrs.values()];
+    _pinchStart = {
+      d0: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      r0: params.cellRadius,
+    };
+    _dragStart = null;   // pinch overrides drag
+  }
+});
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!_ptrs.has(e.pointerId)) return;
+  _ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (_ptrs.size === 2 && _pinchStart) {
+    const [a, b] = [..._ptrs.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    params.cellRadius = Math.max(0.3, Math.min(3.0, _pinchStart.r0 * (d / _pinchStart.d0)));
+    return;
+  }
+  if (_dragStart && e.pointerId === _dragStart.ptrId) {
+    const u0 = _toUv(_dragStart.sx, _dragStart.sy);
+    const u1 = _toUv(e.clientX, e.clientY);
+    params.cellOffsetX = _dragStart.ox + (u1.x - u0.x);
+    params.cellOffsetY = _dragStart.oy + (u1.y - u0.y);
+  }
+});
+
+function _endPointer(e) {
+  _ptrs.delete(e.pointerId);
+  if (_dragStart && e.pointerId === _dragStart.ptrId) _dragStart = null;
+  if (_ptrs.size < 2) _pinchStart = null;
+}
+canvas.addEventListener('pointerup', _endPointer);
+canvas.addEventListener('pointercancel', _endPointer);
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  params.cellRadius = Math.max(0.3, Math.min(3.0,
+    params.cellRadius * (1 - e.deltaY * 0.001)
+  ));
+}, { passive: false });
 
 // inject shader sources into the side panel --------------------------------
 const wgslSrc = $('shader-wgsl').textContent.trim();
@@ -1771,7 +2060,7 @@ async function initWebGPU() {
     });
 
     // 8 floats = 32 bytes (matches std140-ish padding in WGSL Uniforms)
-    const uboSize = 32;
+    const uboSize = 48;
     const ubo = device.createBuffer({
       size: uboSize,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -1781,7 +2070,7 @@ async function initWebGPU() {
       entries: [{ binding: 0, resource: { buffer: ubo } }],
     });
 
-    const cpuBuf = new Float32Array(8);
+    const cpuBuf = new Float32Array(12);
 
     function frame(time) {
       // resize-safe
@@ -1799,7 +2088,11 @@ async function initWebGPU() {
       cpuBuf[4] = params.activity;
       cpuBuf[5] = params.organelles;
       cpuBuf[6] = params.cellType;
-      cpuBuf[7] = params.theme;
+      cpuBuf[7]  = params.theme;
+      cpuBuf[8]  = params.bgKind;
+      cpuBuf[9]  = params.cellOffsetX;
+      cpuBuf[10] = params.cellOffsetY;
+      cpuBuf[11] = params.cellRadius;
       device.queue.writeBuffer(ubo, 0, cpuBuf);
 
       const enc = device.createCommandEncoder();
@@ -1857,7 +2150,11 @@ function initWebGL2() {
   const u_act  = gl.getUniformLocation(prog, 'u_activity');
   const u_org  = gl.getUniformLocation(prog, 'u_organelles');
   const u_kind  = gl.getUniformLocation(prog, 'u_cellType');
-  const u_theme = gl.getUniformLocation(prog, 'u_theme');
+  const u_theme   = gl.getUniformLocation(prog, 'u_theme');
+  const u_bgKind  = gl.getUniformLocation(prog, 'u_bgKind');
+  const u_cox     = gl.getUniformLocation(prog, 'u_cellOffsetX');
+  const u_coy     = gl.getUniformLocation(prog, 'u_cellOffsetY');
+  const u_cr      = gl.getUniformLocation(prog, 'u_cellRadius');
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -1875,8 +2172,12 @@ function initWebGL2() {
     gl.uniform1f(u_zoom, params.zoom);
     gl.uniform1f(u_act,  params.activity);
     gl.uniform1f(u_org,  params.organelles);
-    gl.uniform1f(u_kind,  params.cellType);
-    gl.uniform1f(u_theme, params.theme);
+    gl.uniform1f(u_kind,   params.cellType);
+    gl.uniform1f(u_theme,  params.theme);
+    gl.uniform1f(u_bgKind, params.bgKind);
+    gl.uniform1f(u_cox,    params.cellOffsetX);
+    gl.uniform1f(u_coy,    params.cellOffsetY);
+    gl.uniform1f(u_cr,     params.cellRadius);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
   return { name: 'webgl2 · glsl es 3.0', frame };
