@@ -42,6 +42,7 @@ export const DEFAULTS = {
   // counter the on-field pathogens. ON by default in Free Game so
   // the player learns the matrix; toggle hides it for purists.
   compositionHud: true,
+  causticsOverlay: false,   // water-turbulence post-process applied on top of the rendered background. WebGL2 + WebGPU only; Canvas2D is a no-op.
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   virusShader3D: false,     // experimental: render virus cells with a 3D sphere shader (cnoise-displaced surface + diffuse lighting) adapted from webgl-shaders.com/sphere-example. WebGL2 only today; WebGPU + Canvas2D the toggle is a no-op (documented in the plan file).
   showFPS: false,
@@ -197,6 +198,7 @@ export const LOCALES = {
     mode_campaign_soon: 'Campaign (soon)',
     mode_survival_soon: 'Survival (soon)',
     composition_hud: 'Composition HUD',
+    caustics_overlay: 'Caustics overlay',
     counters_needed: 'Counters needed',
     counters_covered: 'Fully covered',
     no_pathogens: 'No pathogens',
@@ -302,6 +304,7 @@ export const LOCALES = {
     mode_campaign_soon: 'Kampagne (bald)',
     mode_survival_soon: 'Survival (bald)',
     composition_hud: 'Aufstellungs-HUD',
+    caustics_overlay: 'Lichtspiel-Overlay',
     counters_needed: 'Konter benötigt',
     counters_covered: 'Voll abgedeckt',
     no_pathogens: 'Keine Erreger',
@@ -403,6 +406,7 @@ export const LOCALES = {
     mode_campaign_soon: 'Campaña (pronto)',
     mode_survival_soon: 'Supervivencia (pronto)',
     composition_hud: 'HUD de composición',
+    caustics_overlay: 'Cáusticas (luz)',
     counters_needed: 'Contras necesarios',
     counters_covered: 'Cubierto',
     no_pathogens: 'Sin patógenos',
@@ -505,6 +509,7 @@ export const LOCALES = {
     mode_campaign_soon: 'Kampagne (boid)',
     mode_survival_soon: 'Survival (boid)',
     composition_hud: 'Aufstöing-HUD',
+    caustics_overlay: 'Liachtgflimm',
     counters_needed: 'Konter braucht ma',
     counters_covered: 'Olls do',
     no_pathogens: 'Koa Bazilln',
@@ -609,6 +614,7 @@ export const LOCALES = {
     mode_campaign_soon: 'Kampagne (gleisch)',
     mode_survival_soon: 'Survival (gleisch)',
     composition_hud: 'Aufstellungs-HUD',
+    caustics_overlay: 'Lichtspiel-Iwwerlach',
     counters_needed: 'Konter braucht mer',
     counters_covered: 'Alles dabei',
     no_pathogens: 'Kaa Erreger',
@@ -713,6 +719,7 @@ export const LOCALES = {
     mode_campaign_soon: 'Kampagne (bald)',
     mode_survival_soon: 'Survival (bald)',
     composition_hud: 'Aufschtellungs-HUD',
+    caustics_overlay: 'Liechtspeil-Drüwwer',
     counters_needed: 'Konter braucht ma',
     counters_covered: 'Alles dabei',
     no_pathogens: 'Kää Erreger',
@@ -814,6 +821,7 @@ export const LOCALES = {
     mode_campaign_soon: 'Expeditio (mox)',
     mode_survival_soon: 'Superstes (mox)',
     composition_hud: 'HUD compositionis',
+    caustics_overlay: 'Lux undans',
     counters_needed: 'Repugnatores requiruntur',
     counters_covered: 'Plene defensus',
     no_pathogens: 'Nullae pestes',
