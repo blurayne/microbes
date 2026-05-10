@@ -147,3 +147,23 @@ export function defaultHp(type) {
   const size = def.sizeMul || 1;
   return Math.round(60 * size + 40);
 }
+
+/**
+ * The hero type with the highest dps against this pathogen. Used by
+ * the composition HUD to recommend "what to add" when a pathogen is
+ * on-field. Returns null if no hero has a positive dps.
+ *
+ * @param {string} pathogenType
+ * @returns {string | null}
+ */
+export function getBestCounter(pathogenType) {
+  let best = null, bestDps = 0;
+  for (const heroType of Object.keys(RULES)) {
+    const def = CELL_TYPES[heroType];
+    if (!def || def.category !== 'good') continue;
+    const rule = getRule(heroType, pathogenType);
+    if (!rule || rule.dps <= 0) continue;
+    if (rule.dps > bestDps) { best = heroType; bestDps = rule.dps; }
+  }
+  return best;
+}
