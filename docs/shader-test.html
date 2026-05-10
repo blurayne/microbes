@@ -364,7 +364,7 @@
     align-items: center;
     gap: 6px;
     padding: 0 14px;
-    background: none;
+    background: rgba(11, 7, 18, 0.95);
     border: none;
     border-left: 1px solid var(--line);
     color: var(--dim);
@@ -374,6 +374,14 @@
     letter-spacing: 0.2em;
     cursor: pointer;
     transition: color 0.15s, background 0.15s;
+    /* Sticky to the trailing edge of the scrolling tab strip
+       (right edge in horizontal layout, bottom in vertical when
+       collapsed on desktop). Mirrors the chevron's sticky-left
+       so the user can always reach copy regardless of scroll. */
+    position: sticky;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
   }
   .copy-btn:hover {
     color: var(--accent);
@@ -1158,12 +1166,13 @@ fn envBackground(uv: vec2<f32>, kind: i32, theme: i32, t: f32) -> vec3<f32> {
     let saturation = 0.850;
     var dir = vec3<f32>(uv * zoom, 1.0);
     let time2 = t * 0.010 + 0.25;
-    var from = vec3<f32>(1.0, 0.5, 0.5) + vec3<f32>(time2 * 2.0, time2, -2.0);
+    // `from` is a reserved keyword in WGSL — renamed to `origin`.
+    var origin = vec3<f32>(1.0, 0.5, 0.5) + vec3<f32>(time2 * 2.0, time2, -2.0);
     var s: f32 = 0.10;
     var fade: f32 = 1.0;
     var v: vec3<f32> = vec3<f32>(0.0);
     for (var r: i32 = 0; r < 12; r = r + 1) {
-      var p = from + s * dir * 0.5;
+      var p = origin + s * dir * 0.5;
       p = abs(vec3<f32>(tile) - ((p % vec3<f32>(tile * 2.0)) + vec3<f32>(tile * 2.0)) % vec3<f32>(tile * 2.0));
       var pa: f32 = 0.0;
       var a: f32 = 0.0;
@@ -2794,12 +2803,12 @@ async function initWebGPU() {
     device.lost?.then((info) => {
       console.error('[webgpu] device lost:', info.reason, info.message);
     });
-    const ctx = canvas.getContext('webgpu');
-    console.log('[webgpu] context:', ctx ? 'ok' : 'null');
-    if (!ctx) return null;
+    // The preferred format is canvas-independent — we can pick it
+    // before claiming the canvas via getContext('webgpu') so that
+    // WebGL2 fallback still has a virgin canvas to work with if
+    // shader / pipeline creation fails below.
     const format = navigator.gpu.getPreferredCanvasFormat();
     console.log('[webgpu] format:', format, 'canvas css', canvas.clientWidth + 'x' + canvas.clientHeight, 'dpr', window.devicePixelRatio);
-    ctx.configure({ device, format, alphaMode: 'opaque' });
 
     // Wrap shader-module creation in a validation error scope so
     // creation-time errors are caught synchronously rather than
@@ -2850,6 +2859,15 @@ async function initWebGPU() {
       return null;
     }
     console.log('[webgpu] pipeline created');
+
+    // Claim + configure the canvas now (only after shader + pipeline
+    // both succeeded). If we'd done this earlier and then failed
+    // here, the canvas would be locked into webgpu mode and the
+    // WebGL2 fallback below would get back null from getContext().
+    const ctx = canvas.getContext('webgpu');
+    console.log('[webgpu] context:', ctx ? 'ok' : 'null');
+    if (!ctx) return null;
+    ctx.configure({ device, format, alphaMode: 'opaque' });
 
     // 8 floats = 32 bytes (matches std140-ish padding in WGSL Uniforms)
     const uboSize = 64;
