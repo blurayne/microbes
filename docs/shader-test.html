@@ -571,6 +571,10 @@
       height: auto;
       min-height: 0;
     }
+    /* The "one shader · two targets · identical math…" code-info
+       blurb is purely informational and eats vertical real estate
+       on phones. Hide it on small viewports. */
+    .code-info { display: none; }
   }
 
   /* Console pane: a scroll buffer for window.console.* output that's
@@ -2766,8 +2770,26 @@ async function initWebGPU() {
     console.log('[webgpu] device acquired');
     // Catch every WebGPU validation / out-of-memory error (these
     // are otherwise async-fired and never surface in our log).
+    // Dedupe identical messages within a 2 s window so a single
+    // root cause doesn't flood the console with hundreds of frame-
+    // submit cascade messages.
+    const _errSeen = new Map();   // msg → { count, firstAt, lastReported }
     device.addEventListener?.('uncapturederror', (e) => {
-      console.error('[webgpu] uncaptured error:', e.error?.message || e.error);
+      const msg = e.error?.message || String(e.error || e);
+      const now = performance.now();
+      const ent = _errSeen.get(msg);
+      if (!ent) {
+        _errSeen.set(msg, { count: 1, firstAt: now, lastReported: now });
+        console.error('[webgpu] uncaptured error: ' + msg);
+        return;
+      }
+      ent.count++;
+      // Re-report at exponential thresholds (2, 10, 100, 1000…)
+      // so we still know if a recurring error is escalating.
+      if (ent.count === 2 || ent.count === 10 || ent.count === 100 || ent.count === 1000) {
+        console.error(`[webgpu] (repeated ×${ent.count}) ` + msg.split('\n')[0]);
+        ent.lastReported = now;
+      }
     });
     device.lost?.then((info) => {
       console.error('[webgpu] device lost:', info.reason, info.message);
@@ -2779,7 +2801,17 @@ async function initWebGPU() {
     console.log('[webgpu] format:', format, 'canvas css', canvas.clientWidth + 'x' + canvas.clientHeight, 'dpr', window.devicePixelRatio);
     ctx.configure({ device, format, alphaMode: 'opaque' });
 
+    // Wrap shader-module creation in a validation error scope so
+    // creation-time errors are caught synchronously rather than
+    // showing up as opaque "Invalid RenderPipeline" cascades on
+    // first submit. (createShaderModule is technically async-
+    // validated but Dawn surfaces validation errors via the scope
+    // mechanism.)
+    device.pushErrorScope('validation');
     let module = device.createShaderModule({ code: wgslSrc });
+    const moduleErr = await device.popErrorScope();
+    if (moduleErr) console.error('[webgpu] shader-module validation:\n' + moduleErr.message);
+
     // Surface any compile diagnostics from the INITIAL module — the
     // live-recompile path already does this for user edits, but
     // boot-time issues were silent until now.
@@ -2793,12 +2825,30 @@ async function initWebGPU() {
       if (!errs.length && !warns.length) console.log('[webgpu] WGSL compiled clean');
     } catch (e) { console.warn('[webgpu] getCompilationInfo failed:', e.message); }
 
-    let pipeline = device.createRenderPipeline({
-      layout: 'auto',
-      vertex:   { module, entryPoint: 'vs_main' },
-      fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
-      primitive: { topology: 'triangle-list' },
-    });
+    // Use createRenderPipelineAsync + an error scope so the actual
+    // pipeline-validation error gets surfaced cleanly, instead of
+    // the "Invalid RenderPipeline" cascade flooding the console
+    // on every frame submit.
+    device.pushErrorScope('validation');
+    let pipeline;
+    try {
+      pipeline = await device.createRenderPipelineAsync({
+        layout: 'auto',
+        vertex:   { module, entryPoint: 'vs_main' },
+        fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
+        primitive: { topology: 'triangle-list' },
+      });
+    } catch (e) {
+      console.error('[webgpu] pipeline rejected:\n' + (e?.message || e));
+      const popErr = await device.popErrorScope();
+      if (popErr) console.error('[webgpu] pipeline validation:\n' + popErr.message);
+      return null;
+    }
+    const pipelineErr = await device.popErrorScope();
+    if (pipelineErr) {
+      console.error('[webgpu] pipeline validation:\n' + pipelineErr.message);
+      return null;
+    }
     console.log('[webgpu] pipeline created');
 
     // 8 floats = 32 bytes (matches std140-ish padding in WGSL Uniforms)
@@ -2878,18 +2928,24 @@ async function initWebGPU() {
     // compilation info or from createRenderPipeline throwing.
     async function setWgslSource(newCode) {
       try {
+        device.pushErrorScope('validation');
         const m = device.createShaderModule({ code: newCode });
+        const mErr = await device.popErrorScope();
+        if (mErr) return { ok: false, error: 'shader-module:\n' + mErr.message };
         const info = await m.getCompilationInfo?.();
         const errs = (info?.messages || []).filter(x => x.type === 'error');
         if (errs.length) {
           return { ok: false, error: errs.map(e => `L${e.lineNum}: ${e.message}`).join('\n') };
         }
-        const p = device.createRenderPipeline({
+        device.pushErrorScope('validation');
+        const p = await device.createRenderPipelineAsync({
           layout: 'auto',
           vertex:   { module: m, entryPoint: 'vs_main' },
           fragment: { module: m, entryPoint: 'fs_main', targets: [{ format }] },
           primitive: { topology: 'triangle-list' },
         });
+        const pErr = await device.popErrorScope();
+        if (pErr) return { ok: false, error: 'pipeline:\n' + pErr.message };
         const bg = device.createBindGroup({
           layout: p.getBindGroupLayout(0),
           entries: [{ binding: 0, resource: { buffer: ubo } }],
