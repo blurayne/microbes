@@ -10,7 +10,7 @@ file in sync.
 
 ## Open
 
-- [ ] **Virus 3D shader experiment** — [`.claude/plan/02-virus-shader-experiment.md`](./.claude/plan/02-virus-shader-experiment.md)
+- [ ] **Virus 3D shader — WebGPU + Canvas2D ports** — [`.claude/plan/06-virus-shader-gpu-port.md`](./.claude/plan/06-virus-shader-gpu-port.md)
 
 ## Done
 
@@ -18,6 +18,7 @@ file in sync.
 - [x] **Reactor background (Gray-Scott, WebGL2)** — [`.claude/plan/04-reactor-bg.md`](./.claude/plan/04-reactor-bg.md) (#37)
 - [x] **Reactor bg WebGPU port** — [`.claude/plan/05-reactor-webgpu-port.md`](./.claude/plan/05-reactor-webgpu-port.md) (#38)
 - [x] **Free Game implementation** — [`.claude/plan/03-free-game-implementation.md`](./.claude/plan/03-free-game-implementation.md) (#44 / #45 / #46 / #47)
+- [x] **Virus 3D shader experiment (WebGL2)** — [`.claude/plan/02-virus-shader-experiment.md`](./.claude/plan/02-virus-shader-experiment.md) (#50)
 
 ## Process
 

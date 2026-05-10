@@ -512,6 +512,10 @@ if (metaOutlineModeSel) {
 bindCheckbox('cartoon', 'cartoon');
 // HUD reacts within the next 250 ms throttle window, fast enough.
 bindCheckbox('compositionHud', 'compositionHud');
+// Virus 3D shader experiment (Plan #2). Toggle is read by webgl2.js
+// per frame when packing the disk-instance kindAsFloat — no listener
+// hook needed; the next render frame picks up the new value.
+bindCheckbox('virusShader3D', 'virusShader3D');
 
 // ----- Audio: music + SFX volume sliders, music on/off + next track -----
 // Volume scale applied to off-screen SFX events (e.g. an antibody

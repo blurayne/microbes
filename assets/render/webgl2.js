@@ -93,8 +93,39 @@ out vec4 outColor;
 //   body (0..5) + nucleus (0..5) * 16 + selected (0..1) * 256 + hollow (0..1) * 4096
 int bodyKind()    { return int(mod(v_kind + 0.5, 16.0)); }
 int nucKind()     { return int(mod((v_kind + 0.5) / 16.0, 16.0)); }
-int isSelected()  { return int(mod((v_kind + 0.5) / 256.0, 16.0)); }
-int isHollow()    { return int((v_kind + 0.5) / 4096.0); }
+int isSelected()  { return int(mod((v_kind + 0.5) / 256.0, 2.0)); }
+int isVirus3D()   { return int(mod((v_kind + 0.5) / 512.0, 2.0)); }
+int isHollow()    { return int(mod((v_kind + 0.5) / 4096.0, 2.0)); }
+
+// Classic 2D Perlin noise (cnoise) by Stefan Gustavson — verbatim from
+// the source webgl-shaders.com sphere shader (see
+// assets/shaders/vendor/vert-sphere.glsl). Used by the virus-3D
+// experimental branch below to displace the apparent surface and
+// drive the sphere-look animation in u_time.
+vec4 _cnoise_mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec4 _cnoise_permute(vec4 x) { return _cnoise_mod289(((x * 34.0) + 1.0) * x); }
+vec4 _cnoise_invSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+vec2 _cnoise_fade(vec2 t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
+float cnoise(vec2 P) {
+  vec4 Pi = floor(P.xyxy) + vec4(0.0, 0.0, 1.0, 1.0);
+  vec4 Pf = fract(P.xyxy) - vec4(0.0, 0.0, 1.0, 1.0);
+  Pi = _cnoise_mod289(Pi);
+  vec4 ix = Pi.xzxz; vec4 iy = Pi.yyww;
+  vec4 fx = Pf.xzxz; vec4 fy = Pf.yyww;
+  vec4 i = _cnoise_permute(_cnoise_permute(ix) + iy);
+  vec4 gx = fract(i * (1.0 / 41.0)) * 2.0 - 1.0;
+  vec4 gy = abs(gx) - 0.5;
+  vec4 tx = floor(gx + 0.5); gx = gx - tx;
+  vec2 g00 = vec2(gx.x, gy.x), g10 = vec2(gx.y, gy.y);
+  vec2 g01 = vec2(gx.z, gy.z), g11 = vec2(gx.w, gy.w);
+  vec4 norm = _cnoise_invSqrt(vec4(dot(g00, g00), dot(g01, g01), dot(g10, g10), dot(g11, g11)));
+  g00 *= norm.x; g01 *= norm.y; g10 *= norm.z; g11 *= norm.w;
+  float n00 = dot(g00, vec2(fx.x, fy.x)), n10 = dot(g10, vec2(fx.y, fy.y));
+  float n01 = dot(g01, vec2(fx.z, fy.z)), n11 = dot(g11, vec2(fx.w, fy.w));
+  vec2 fade_xy = _cnoise_fade(Pf.xy);
+  vec2 n_x = mix(vec2(n00, n01), vec2(n10, n11), fade_xy.x);
+  return 2.3 * mix(n_x.x, n_x.y, fade_xy.y);
+}
 
 float bodyScale(vec2 uv) {
   int kind = bodyKind();
@@ -230,6 +261,34 @@ void main() {
     // Reuse: we don't have a separate flash slot. Skip — flash is only
     // drawn via the cell.flash field in the Canvas2D pass; close-enough
     // parity ignores the brief 200ms tap flash for the WebGL backend.
+  }
+
+  // Virus 3D shader experiment (Plan #2). Replaces the body surface
+  // with a faux 3D sphere derived from the disk's local UV: the inner
+  // unit disc is treated as the front-facing hemisphere of a sphere,
+  // a cnoise-driven displacement rolls over its surface, and a fixed
+  // top-left light gives diffuse shading. Adapted from the Three.js
+  // sphere demo at webgl-shaders.com (see assets/shaders/vendor/).
+  // Active only when the user has flipped S.virusShader3D, and only
+  // for virus cells — every other instance has isVirus3D() == 0.
+  if (isVirus3D() == 1) {
+    float r2 = dot(v_uv, v_uv);
+    if (r2 < 1.0) {
+      vec3 sphereN = vec3(v_uv.x, v_uv.y, sqrt(1.0 - r2));
+      // cnoise driven the same way as the source: angle around y-axis
+      // + a time-varying elevation term. Output is roughly -1..1.
+      float angle = atan(sphereN.y, sphereN.x);
+      float elev  = acos(clamp(sphereN.z, -1.0, 1.0));
+      float n = cnoise(vec2(3.0 * cos(angle), 2.0 * u_time + 3.0 * elev));
+      // Source palette: vec3(clamp(0,1, 5*displacement), 0.3, 0.3) —
+      // pinkish base with bright red where the surface bulges.
+      float bulge = clamp(0.5 + 0.5 * n, 0.0, 1.0);
+      vec3 surface = vec3(clamp(5.0 * (bulge - 0.5), 0.0, 1.0), 0.30, 0.30);
+      vec3 lightDir = normalize(vec3(-0.4, -0.4, 0.7));
+      float lit = max(0.0, dot(sphereN, lightDir));
+      // Small ambient so the dark side doesn't pure black.
+      col = surface * (lit + 0.18);
+    }
   }
 
   outColor = vec4(col, bodyA * v_diskAlpha);
@@ -1932,7 +1991,11 @@ export class WebGL2Renderer extends RendererBase {
         const nucK = NUC_KIND_FLOAT[(type.nucleus && type.nucleus.kind) || 'none'] || 0;
         const sel = this.sim.selectedCells.has(c) ? 1 : 0;
         const hollow = type.bodyHollow ? 1 : 0;
-        const kind = bodyK + nucK * 16 + sel * 256 + hollow * 4096;
+        // Virus 3D shader bit (Plan #2). 1 only for virus cells when
+        // the experimental S.virusShader3D toggle is on; 0 everywhere
+        // else. Lives at bit 9 (value 512) of the kind packing.
+        const virus3d = (c.type === 'virus' && S.virusShader3D) ? 1 : 0;
+        const kind = bodyK + nucK * 16 + sel * 256 + virus3d * 512 + hollow * 4096;
         const wobMul = (type.field && type.field.wobbleMul) || 1.0;
         const j = i * INSTANCE_FLOATS;
         data[j]     = s.x;
