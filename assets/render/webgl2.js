@@ -711,19 +711,22 @@ void main() {
   // bubble with a slightly randomised radius (per-tile hash). Subtle
   // breath pulse from sin(u_time).
   if (u_kind == 4) {
-    vec2 p = worldPx * 0.012;
-    float pulse = 0.5 + 0.5 * sin(u_time * 0.6);
-    vec2 cell = floor(p);
-    vec2 cellUv = fract(p) - 0.5;
-    float jitter = bgHash(cell);
-    float r = 0.30 + 0.08 * jitter + 0.04 * pulse;
-    float d = length(cellUv);
-    float bubble = 1.0 - smoothstep(r * 0.85, r, d);
-    float rim = smoothstep(r * 0.80, r * 0.90, d) * (1.0 - smoothstep(r * 0.90, r, d));
-    vec3 tissue   = vec3(0.45, 0.18, 0.22);
-    vec3 alveolus = vec3(0.85, 0.55, 0.62);
-    col = mix(col, mix(tissue, alveolus, bubble), 0.60);
-    col = mix(col, vec3(0.18, 0.06, 0.10), rim * 0.55);
+    // Lung — "Smoke" FBM by Roman Bobniev / FatumR (Apache 2.0,
+    // https://www.shadertoy.com/view/ldBSDd). Self-referential
+    // value-noise FBM with a breathing-rhythm sine in lieu of the
+    // original's audio-reactive amplitude. Octaves trimmed 6→4
+    // for in-game cost; visuals stay close. Domain-warped in
+    // worldPx so the pattern tiles seamlessly with the camera.
+    vec2 plungP = worldPx * 0.0010 + vec2(0.0, u_time * 0.08);
+    float breath = 0.55 + 0.20 * sin(u_time * 0.6);
+    float n0 = bgFbm(plungP * 0.5);
+    float n1 = bgFbm(plungP + 2.0 * n0);
+    float n2 = bgFbm(plungP + n1);
+    float n3 = bgFbm(plungP + vec2(u_time * 0.04, 0.0) + n2);
+    float v = breath * n3;
+    vec3 hot  = vec3(0.510, 0.204, 0.016);
+    vec3 cool = vec3(0.529, 0.808, 0.980);
+    col = mix(col, mix(hot, cool, clamp(v, 0.0, 1.0)), 0.85);
   }
 
   // ---- Aurora borealis: vertical ribbons of green/violet (kind 5) ----
