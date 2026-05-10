@@ -1377,7 +1377,12 @@ float arcA(vec2 p, vec2 c, float r, float hw, float a0, float a1) {
   // Wrap into [-PI, PI].
   float lo = a0;
   float hi = a1;
-  float in_arc = step(lo, ang) * step(ang, hi);
+  // Soft angular endpoints (was hard step() — sub-pixel arc at
+  // small zoom aliased to dot-pairs at the extrema, user-visible
+  // on dendritic). 0.06 rad fade reads as a curve at any size.
+  float aFade = 0.06;
+  float in_arc = smoothstep(lo - aFade, lo + aFade, ang)
+               * (1.0 - smoothstep(hi - aFade, hi + aFade, ang));
   return band * in_arc;
 }
 
@@ -1448,7 +1453,7 @@ void main() {
 
   if (mouthKind == 1 || mouthKind == 6) {
     // SMILE (or DROOL — base smile)
-    float arc = arcA(v_uv, vec2(0.0, mouthY - mouthW * 0.3), mouthW, 0.04, 0.12 * 3.14159, 0.88 * 3.14159);
+    float arc = arcA(v_uv, vec2(0.0, mouthY - mouthW * 0.3), mouthW, 0.06, 0.12 * 3.14159, 0.88 * 3.14159);
     col = mix(col, v_mouthCol, arc);
     a = max(a, arc);
     if (mouthKind == 6) {
@@ -1462,7 +1467,7 @@ void main() {
     }
   } else if (mouthKind == 2) {
     // FROWN
-    float arc = arcA(v_uv, vec2(0.0, mouthY + mouthW * 0.6), mouthW, 0.04, 1.12 * 3.14159, 1.88 * 3.14159);
+    float arc = arcA(v_uv, vec2(0.0, mouthY + mouthW * 0.6), mouthW, 0.06, 1.12 * 3.14159, 1.88 * 3.14159);
     col = mix(col, v_mouthCol, arc);
     a = max(a, arc);
   } else if (mouthKind == 3) {

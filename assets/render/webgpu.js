@@ -1382,7 +1382,13 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
   let dist = abs(length(d) - r);
   let band = 1.0 - sstep(hw * 0.5, hw, dist, blur);
   let ang = atan2(d.y, d.x);
-  let in_arc = step(a0, ang) * step(ang, a1);
+  // Soft angular endpoints (was hard step() — produced sub-pixel
+  // dot artefacts at small zoom because only the angular extrema
+  // aliased through). The 0.06 fade is in radians; tuned so the
+  // arc reads as a smooth curve at any size.
+  let aFade: f32 = 0.06;
+  let in_arc = smoothstep(a0 - aFade, a0 + aFade, ang)
+             * (1.0 - smoothstep(a1 - aFade, a1 + aFade, ang));
   return band * in_arc;
 }
 
@@ -1450,8 +1456,11 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
   let d = uv - mc;
 
   if (mouthKind == 1 || mouthKind == 6) {
-    // SMILE (or DROOL — base smile)
-    let arc = arcA(uv, vec2<f32>(0.0, mouthY - mouthW * 0.3), mouthW, 0.04,
+    // SMILE (or DROOL — base smile). Stroke bumped from 0.04 to
+    // 0.06 so the arc survives at small screen sizes (was
+    // sub-pixel on dendritic / other zoomed-out cells and aliased
+    // into a pair of endpoint dots — user-visible bug).
+    let arc = arcA(uv, vec2<f32>(0.0, mouthY - mouthW * 0.3), mouthW, 0.06,
       0.12 * PI, 0.88 * PI, blur);
     col = mix(col, in.mouthCol, arc);
     a = max(a, arc);
@@ -1464,8 +1473,8 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
       a = max(a, dripA);
     }
   } else if (mouthKind == 2) {
-    // FROWN
-    let arc = arcA(uv, vec2<f32>(0.0, mouthY + mouthW * 0.6), mouthW, 0.04,
+    // FROWN — stroke bumped 0.04 → 0.06 (same anti-alias fix as smile)
+    let arc = arcA(uv, vec2<f32>(0.0, mouthY + mouthW * 0.6), mouthW, 0.06,
       1.12 * PI, 1.88 * PI, blur);
     col = mix(col, in.mouthCol, arc);
     a = max(a, arc);
