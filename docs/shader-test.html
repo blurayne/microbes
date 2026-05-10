@@ -521,7 +521,7 @@
         <label><span>background</span></label>
         <select id="bgkind">
           <option value="0">bloodstream · default</option>
-          <option value="1">lung · alveolar</option>
+          <option value="1">lung · smoke</option>
           <option value="2">heart · striated muscle</option>
           <option value="3">brain · neural network</option>
           <option value="4">bone marrow · trabecular</option>
@@ -642,6 +642,49 @@ fn capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   let ba = b - a;
   let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
   return length(pa - ba * h) - r;
+}
+
+// Smoke-FBM helpers for the "lung · smoke" background (kind 1).
+// Adapted from "Smoke" by Roman Bobniev / FatumR (Apache 2.0,
+// https://www.shadertoy.com/view/ldBSDd). The original sampled an
+// audio texture (iChannel0) for live amplitude reactivity; we
+// substitute a slow sine to mimic a breathing rhythm.
+fn smoke_rand2(co: vec2<f32>) -> f32 {
+  return fract(cos(dot(co, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
+fn smoke_valueNoise(vl: vec2<f32>) -> f32 {
+  let g = floor(vl);
+  let a = smoke_rand2(g);
+  let b = smoke_rand2(g + vec2<f32>(1.0, 0.0));
+  let c = smoke_rand2(g + vec2<f32>(0.0, 1.0));
+  let d = smoke_rand2(g + vec2<f32>(1.0, 1.0));
+  let f = vec2<f32>(smoothstep(0.0, 1.0, fract(vl.x)),
+                    smoothstep(0.0, 1.0, fract(vl.y)));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+fn smoke_fbm(p_in: vec2<f32>) -> f32 {
+  var amplitude: f32 = 0.5;
+  var rez: f32 = 0.0;
+  var p = p_in;
+  for (var i: i32 = 0; i < 6; i = i + 1) {  // 6 octaves (was 8 in source; trimmed for mobile)
+    rez = rez + amplitude * smoke_valueNoise(p);
+    amplitude = amplitude / 2.0;
+    p = p * 2.0;
+  }
+  return rez;
+}
+fn smoke_complex(p: vec2<f32>, t: f32) -> f32 {
+  // Substitute the audio-reactive amplitude with a slow sine — reads
+  // as a steady breathing rhythm in lieu of music input.
+  let breath = 0.55 + 0.20 * sin(t * 0.6);
+  let slow = t / 2.5;
+  let fast = t / 0.5;
+  let off1 = vec2<f32>(slow, 0.0);
+  let off2 = vec2<f32>(sin(fast) * 0.1, 0.0);
+  let inner1 = smoke_fbm(p - off2);
+  let inner2 = smoke_fbm(p + 2.0 * inner1);
+  let inner3 = smoke_fbm(p + inner2);
+  return breath * smoke_fbm(p + off1 + inner3);
 }
 
 // ── vertex (fullscreen triangle) ────────────────────────────
@@ -837,20 +880,17 @@ fn nucleusSdf(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
 // cohesively.
 fn envBackground(uv: vec2<f32>, kind: i32, theme: i32, t: f32) -> vec3<f32> {
   if (kind == 1) {
-    // lung — alveolar honeycomb (skewed grid → hex packing)
-    let g = uv * 6.0;
-    let s = vec2<f32>(g.x + g.y * 0.5, g.y * 0.866);
-    let f = fract(s);
-    let d = min(min(distance(f, vec2<f32>(0.5, 0.5)),
-                    distance(f, vec2<f32>(1.0, 1.0))),
-                distance(f, vec2<f32>(0.0, 1.0)));
-    let alveoli = smoothstep(0.30, 0.45, d);
-    var base = vec3<f32>(0.85, 0.55, 0.60);
-    var rim  = vec3<f32>(0.45, 0.20, 0.28);
-    if (theme == 1) { base = vec3<f32>(0.55, 0.78, 0.65); rim = vec3<f32>(0.05, 0.25, 0.18); }
-    if (theme == 2) { base = vec3<f32>(0.50, 0.85, 0.75); rim = vec3<f32>(0.10, 0.25, 0.22); }
-    if (theme == 3) { base = vec3<f32>(0.78, 0.55, 0.55); rim = vec3<f32>(0.55, 0.30, 0.35); }
-    return mix(rim, base, alveoli);
+    // lung · smoke — adapted from "Smoke" by Roman Bobniev / FatumR
+    // (Apache 2.0, https://www.shadertoy.com/view/ldBSDd). Layered
+    // value-noise FBM with self-referential offsets; the original's
+    // audio-reactive amplitude is replaced by a slow breathing sine.
+    let v = smoke_complex((uv + vec2<f32>(0.5)) * 1.0, t);
+    var hot  = vec3<f32>(0.510, 0.204, 0.016);   // orangeColor2
+    var cool = vec3<f32>(0.529, 0.808, 0.980);   // blueColor
+    if (theme == 1) { hot = vec3<f32>(0.85, 0.30, 0.10); cool = vec3<f32>(0.30, 0.75, 0.95); }
+    if (theme == 2) { hot = vec3<f32>(0.30, 0.10, 0.45); cool = vec3<f32>(0.55, 0.80, 1.00); }
+    if (theme == 3) { hot = vec3<f32>(0.45, 0.20, 0.10); cool = vec3<f32>(0.42, 0.65, 0.85); }
+    return mix(hot, cool, clamp(v, 0.0, 1.0));
   }
   if (kind == 2) {
     // heart — striated muscle bands
@@ -1285,6 +1325,45 @@ float capsule(vec2 p, vec2 a, vec2 b, float r) {
   return length(pa - ba * h) - r;
 }
 
+// Smoke-FBM helpers (mirrors WGSL). Adapted from "Smoke" by Roman
+// Bobniev / FatumR (Apache 2.0, https://www.shadertoy.com/view/ldBSDd).
+float smoke_rand2(vec2 co) {
+  return fract(cos(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
+float smoke_valueNoise(vec2 vl) {
+  vec2 g = floor(vl);
+  float a = smoke_rand2(g);
+  float b = smoke_rand2(g + vec2(1.0, 0.0));
+  float c = smoke_rand2(g + vec2(0.0, 1.0));
+  float d = smoke_rand2(g + vec2(1.0, 1.0));
+  vec2 f = vec2(smoothstep(0.0, 1.0, fract(vl.x)),
+                smoothstep(0.0, 1.0, fract(vl.y)));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+float smoke_fbm(vec2 p_in) {
+  float amplitude = 0.5;
+  float rez = 0.0;
+  vec2 p = p_in;
+  for (int i = 0; i < 6; i++) {
+    rez += amplitude * smoke_valueNoise(p);
+    amplitude /= 2.0;
+    p *= 2.0;
+  }
+  return rez;
+}
+float smoke_complex(vec2 p, float t) {
+  float breath = 0.55 + 0.20 * sin(t * 0.6);
+  float slow = t / 2.5;
+  float fast = t / 0.5;
+  vec2 off1 = vec2(slow, 0.0);
+  vec2 off2 = vec2(sin(fast) * 0.1, 0.0);
+  float n0 = smoke_fbm(p - off2);
+  float n1 = smoke_fbm(p + 2.0 * n0);
+  float n2 = smoke_fbm(p + n1);
+  float n3 = smoke_fbm(p + off1 + n2);
+  return breath * n3;
+}
+
 float membraneFor(vec2 uv, int kind, float t) {
   if (kind == 6) {
     float breathe = 0.018 * sin(t * 0.6);
@@ -1426,19 +1505,14 @@ float nucleusSdf(vec2 uv, int kind, float t) {
 // envBackground — five Kurzgesagt-style environments. Mirrors WGSL.
 vec3 envBackground(vec2 uv, int kind, int theme, float t) {
   if (kind == 1) {
-    vec2 g = uv * 6.0;
-    vec2 s = vec2(g.x + g.y * 0.5, g.y * 0.866);
-    vec2 f = fract(s);
-    float d = min(min(distance(f, vec2(0.5, 0.5)),
-                      distance(f, vec2(1.0, 1.0))),
-                  distance(f, vec2(0.0, 1.0)));
-    float alveoli = smoothstep(0.30, 0.45, d);
-    vec3 base = vec3(0.85, 0.55, 0.60);
-    vec3 rim  = vec3(0.45, 0.20, 0.28);
-    if (theme == 1) { base = vec3(0.55, 0.78, 0.65); rim = vec3(0.05, 0.25, 0.18); }
-    if (theme == 2) { base = vec3(0.50, 0.85, 0.75); rim = vec3(0.10, 0.25, 0.22); }
-    if (theme == 3) { base = vec3(0.78, 0.55, 0.55); rim = vec3(0.55, 0.30, 0.35); }
-    return mix(rim, base, alveoli);
+    // lung · smoke — mirrors WGSL. Apache 2.0, FatumR.
+    float v = smoke_complex((uv + vec2(0.5)) * 1.0, t);
+    vec3 hot  = vec3(0.510, 0.204, 0.016);
+    vec3 cool = vec3(0.529, 0.808, 0.980);
+    if (theme == 1) { hot = vec3(0.85, 0.30, 0.10); cool = vec3(0.30, 0.75, 0.95); }
+    if (theme == 2) { hot = vec3(0.30, 0.10, 0.45); cool = vec3(0.55, 0.80, 1.00); }
+    if (theme == 3) { hot = vec3(0.45, 0.20, 0.10); cool = vec3(0.42, 0.65, 0.85); }
+    return mix(hot, cool, clamp(v, 0.0, 1.0));
   }
   if (kind == 2) {
     float stripes = sin(uv.y * 18.0 + sin(uv.x * 4.0) * 0.5) * 0.5 + 0.5;
