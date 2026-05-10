@@ -486,6 +486,73 @@ void main() {
     }
   }
 
+  // ── Vesicles / granules ── per-kind scattered dots inside the
+  // cytoplasm. Count + radius + colour vary by kind (matches the
+  // table in shader-test). Hard-capped at 16 here for fragment
+  // cost; shader-test's mast (60) is the only kind that's
+  // visibly denser there — comes through as plenty-dense at 16.
+  if (themeId != 0 && d < bodyR) {
+    int tk4 = testKind();
+    int vesCount = 14;
+    if      (tk4 == 1)  { vesCount = 16; }   // macrophage lysosomes (cap)
+    else if (tk4 == 2)  { vesCount = 16; }   // neutrophil
+    else if (tk4 == 3)  { vesCount = 6;  }   // nk
+    else if (tk4 == 4)  { vesCount = 8;  }   // b-cell
+    else if (tk4 == 5)  { vesCount = 0;  }   // virus
+    else if (tk4 == 6)  { vesCount = 16; }   // bacterium
+    else if (tk4 == 7)  { vesCount = 10; }   // amoeba
+    else if (tk4 == 8)  { vesCount = 4;  }   // spore
+    else if (tk4 == 9)  { vesCount = 14; }   // monocyte
+    else if (tk4 == 10) { vesCount = 16; }   // mast (cap)
+    else if (tk4 == 11) { vesCount = 6;  }   // dendritic
+    else if (tk4 == 12) { vesCount = 16; }   // basophil (cap)
+    else if (tk4 == 13) { vesCount = 4;  }   // platelet
+    else if (tk4 == 14) { vesCount = 0;  }   // t-cell
+    else if (tk4 == 15) { vesCount = 16; }   // eosinophil
+    else if (tk4 == 16) { vesCount = 0;  }   // rbc
+    else if (tk4 == 17) { vesCount = 8;  }
+    else if (tk4 == 18) { vesCount = 12; }
+    else if (tk4 == 19) { vesCount = 10; }
+    else if (tk4 == 20) { vesCount = 8;  }
+    float vesRadius = 0.012;
+    if      (tk4 == 2)  vesRadius = 0.008;
+    else if (tk4 == 3)  vesRadius = 0.020;
+    else if (tk4 == 7)  vesRadius = 0.022;
+    else if (tk4 == 10) vesRadius = 0.006;
+    else if (tk4 == 12) vesRadius = 0.010;
+    else if (tk4 == 13) vesRadius = 0.014;
+    else if (tk4 == 15) vesRadius = 0.020;
+    else if (tk4 == 20) vesRadius = 0.014;
+    vec3 vesCol = vec3(1.0, 0.92, 0.65);
+    if      (tk4 == 3)  vesCol = vec3(0.75, 0.85, 1.00);
+    else if (tk4 == 6)  vesCol = vec3(0.80, 0.90, 0.55);
+    else if (tk4 == 7)  vesCol = vec3(0.55, 0.45, 0.30);
+    else if (tk4 == 10) vesCol = vec3(0.12, 0.40, 0.25);
+    else if (tk4 == 12) vesCol = vec3(0.20, 0.10, 0.55);
+    else if (tk4 == 13) vesCol = vec3(0.55, 0.40, 0.10);
+    else if (tk4 == 15) vesCol = vec3(1.00, 0.55, 0.30);
+    else if (tk4 == 17) vesCol = vec3(0.70, 0.85, 0.45);
+    else if (tk4 == 18) vesCol = vec3(0.60, 0.75, 0.20);
+    else if (tk4 == 19) vesCol = vec3(0.90, 0.60, 0.20);
+    else if (tk4 == 20) vesCol = vec3(1.00, 0.90, 1.00);
+    if (vesCount > 0) {
+      float ves = 1e9;
+      for (int j = 0; j < 16; j++) {
+        if (j >= vesCount) break;
+        float fj = float(j);
+        vec2 pos = vec2(
+          0.42 * sin(fj * 1.91 + u_time * (0.18 + 0.03 * fj)),
+          0.42 * cos(fj * 2.37 + u_time * (0.21 + 0.02 * fj))
+        );
+        vec2 jit = vec2(0.008 * sin(u_time * 3.0 + fj * 7.0),
+                        0.008 * cos(u_time * 2.6 + fj * 5.0));
+        ves = min(ves, length(v_uv - pos - jit) - vesRadius);
+      }
+      float vesMask = smoothstep(0.003, -0.003, ves);
+      col = mix(col, vesCol, vesMask * 0.85);
+    }
+  }
+
   // Tap flash overlay — c.flash decays in Sim.update(); fade out across 200 ms.
   float flashA = clamp(v_outline.a / 0.2, 0.0, 1.0) * 0.6;
   col = mix(col, vec3(1.0), flashA);

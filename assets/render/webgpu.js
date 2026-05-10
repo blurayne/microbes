@@ -439,6 +439,69 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     }
   }
 
+  // Vesicles / granules — mirror of WebGL2 FRAG_DISK pass.
+  if (theme != 0 && d < bodyR) {
+    let tk4 = testKind(in.kind);
+    var vesCount: i32 = 14;
+    if      (tk4 == 1)  { vesCount = 16; }
+    else if (tk4 == 2)  { vesCount = 16; }
+    else if (tk4 == 3)  { vesCount = 6;  }
+    else if (tk4 == 4)  { vesCount = 8;  }
+    else if (tk4 == 5)  { vesCount = 0;  }
+    else if (tk4 == 6)  { vesCount = 16; }
+    else if (tk4 == 7)  { vesCount = 10; }
+    else if (tk4 == 8)  { vesCount = 4;  }
+    else if (tk4 == 9)  { vesCount = 14; }
+    else if (tk4 == 10) { vesCount = 16; }
+    else if (tk4 == 11) { vesCount = 6;  }
+    else if (tk4 == 12) { vesCount = 16; }
+    else if (tk4 == 13) { vesCount = 4;  }
+    else if (tk4 == 14) { vesCount = 0;  }
+    else if (tk4 == 15) { vesCount = 16; }
+    else if (tk4 == 16) { vesCount = 0;  }
+    else if (tk4 == 17) { vesCount = 8;  }
+    else if (tk4 == 18) { vesCount = 12; }
+    else if (tk4 == 19) { vesCount = 10; }
+    else if (tk4 == 20) { vesCount = 8;  }
+    var vesRadius: f32 = 0.012;
+    if      (tk4 == 2)  { vesRadius = 0.008; }
+    else if (tk4 == 3)  { vesRadius = 0.020; }
+    else if (tk4 == 7)  { vesRadius = 0.022; }
+    else if (tk4 == 10) { vesRadius = 0.006; }
+    else if (tk4 == 12) { vesRadius = 0.010; }
+    else if (tk4 == 13) { vesRadius = 0.014; }
+    else if (tk4 == 15) { vesRadius = 0.020; }
+    else if (tk4 == 20) { vesRadius = 0.014; }
+    var vesCol = vec3<f32>(1.0, 0.92, 0.65);
+    if      (tk4 == 3)  { vesCol = vec3<f32>(0.75, 0.85, 1.00); }
+    else if (tk4 == 6)  { vesCol = vec3<f32>(0.80, 0.90, 0.55); }
+    else if (tk4 == 7)  { vesCol = vec3<f32>(0.55, 0.45, 0.30); }
+    else if (tk4 == 10) { vesCol = vec3<f32>(0.12, 0.40, 0.25); }
+    else if (tk4 == 12) { vesCol = vec3<f32>(0.20, 0.10, 0.55); }
+    else if (tk4 == 13) { vesCol = vec3<f32>(0.55, 0.40, 0.10); }
+    else if (tk4 == 15) { vesCol = vec3<f32>(1.00, 0.55, 0.30); }
+    else if (tk4 == 17) { vesCol = vec3<f32>(0.70, 0.85, 0.45); }
+    else if (tk4 == 18) { vesCol = vec3<f32>(0.60, 0.75, 0.20); }
+    else if (tk4 == 19) { vesCol = vec3<f32>(0.90, 0.60, 0.20); }
+    else if (tk4 == 20) { vesCol = vec3<f32>(1.00, 0.90, 1.00); }
+    if (vesCount > 0) {
+      var ves: f32 = 1e9;
+      for (var j: i32 = 0; j < 16; j = j + 1) {
+        if (j >= vesCount) { break; }
+        let fj = f32(j);
+        let pos = vec2<f32>(
+          0.42 * sin(fj * 1.91 + time * (0.18 + 0.03 * fj)),
+          0.42 * cos(fj * 2.37 + time * (0.21 + 0.02 * fj))
+        );
+        let jit = vec2<f32>(0.008 * sin(time * 3.0 + fj * 7.0),
+                            0.008 * cos(time * 2.6 + fj * 5.0));
+        ves = min(ves, length(in.uv - pos - jit) - vesRadius);
+      }
+      let vesMask = smoothstep(0.003, -0.003, ves);
+      col = mix(col, vesCol, vec3<f32>(vesMask * 0.85));
+    }
+  }
+
   // Tap flash — c.flash decays in Sim.update(); fade across 200 ms.
   let flashA = clamp(in.outline.a / 0.2, 0.0, 1.0) * 0.6;
   col = mix(col, vec3<f32>(1.0), vec3<f32>(flashA));
