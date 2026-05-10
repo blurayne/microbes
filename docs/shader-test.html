@@ -494,6 +494,18 @@
           <option value="6">bacterium · pathogen</option>
           <option value="7">amoeba · pathogen</option>
           <option value="8">spore · pathogen</option>
+          <option value="9">monocyte · immune</option>
+          <option value="10">mast cell · immune</option>
+          <option value="11">dendritic cell · immune</option>
+          <option value="12">basophil · immune</option>
+          <option value="13">platelet · immune</option>
+          <option value="14">t-cell · immune</option>
+          <option value="15">eosinophil · immune</option>
+          <option value="16">red blood cell · immune</option>
+          <option value="17">germ · pathogen</option>
+          <option value="18">slime mold · pathogen</option>
+          <option value="19">mite · pathogen</option>
+          <option value="20">toxin · pathogen</option>
         </select>
       </div>
       <div class="ctrl">
@@ -551,10 +563,14 @@
 //  cytologica · WGSL fragment shader
 //  stylised cell · brightfield + H&E look
 //
-//  cellType selector (0..8):
-//    0 eukaryote   1 macrophage  2 neutrophil
-//    3 nk-cell     4 b-cell      5 virus
-//    6 bacterium   7 amoeba      8 spore
+//  cellType selector (0..20):
+//    0 eukaryote   1 macrophage   2 neutrophil
+//    3 nk-cell     4 b-cell       5 virus
+//    6 bacterium   7 amoeba       8 spore
+//    9 monocyte   10 mast        11 dendritic
+//   12 basophil   13 platelet    14 t-cell
+//   15 eosinophil 16 rbc         17 germ
+//   18 slime      19 mite        20 toxin
 // ────────────────────────────────────────────────────────────
 
 struct Uniforms {
@@ -647,14 +663,72 @@ fn membraneFor(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
     // ring in the colour pass); the SDF itself is a hard small disc.
     return length(uv) - (0.36 + 0.012 * sin(t * 0.4));
   }
+  if (kind == 13) {
+    // platelet — small 10-point star fragment, no nucleus.
+    let ang = atan2(uv.y, uv.x);
+    let star = 0.05 * cos(ang * 10.0);
+    return length(uv) - (0.30 + star);
+  }
+  if (kind == 16) {
+    // rbc — biconcave disc seen face-on; smooth rim (the dark
+    // central depression is added in the compose pass).
+    return length(uv) - (0.50 + 0.006 * sin(t * 0.4));
+  }
+  if (kind == 11) {
+    // dendritic cell — round body with 6 long thin tendrils.
+    let ang = atan2(uv.y, uv.x);
+    let tend = 0.18 * pow(0.5 + 0.5 * cos(ang * 6.0 + t * 0.2), 14.0);
+    return length(uv) - (0.42 + tend);
+  }
+  if (kind == 19) {
+    // mite — round body with 4 small leg bumps.
+    let ang = atan2(uv.y, uv.x);
+    let legs = 0.06 * pow(0.5 + 0.5 * cos(ang * 4.0 + 0.5), 8.0);
+    return length(uv) - (0.46 + legs);
+  }
+  if (kind == 20) {
+    // toxin — sharp 10-point spiked star, glowing in compose.
+    let ang = atan2(uv.y, uv.x);
+    let star = 0.12 * pow(0.5 + 0.5 * cos(ang * 10.0 + t * 0.3), 4.0);
+    return length(uv) - (0.40 + star);
+  }
+  if (kind == 10) {
+    // mast cell — slightly oblong, packed with granules.
+    let stretched = vec2<f32>(uv.x * 0.85, uv.y * 1.10);
+    return length(stretched) - (0.52 + 0.012 * sin(t * 0.5));
+  }
+  if (kind == 18) {
+    // slime mold — irregular lobed blob (more chaotic than germ).
+    let ang = atan2(uv.y, uv.x);
+    let chaos = 0.09 * sin(ang * 4.0 + t * 0.3)
+              + 0.05 * sin(ang * 7.0 - t * 0.5)
+              + 0.04 * sin(ang * 11.0 + t * 0.8);
+    return length(uv) - (0.55 + chaos);
+  }
+  if (kind == 17) {
+    // germ — small 3-lobe bacterial-style blob.
+    let ang = atan2(uv.y, uv.x);
+    let lobes = 0.07 * cos(ang * 3.0 + t * 0.4);
+    return length(uv) - (0.40 + lobes);
+  }
+  if (kind == 9) {
+    // monocyte — round + high-frequency surface ripple.
+    let ang = atan2(uv.y, uv.x);
+    let ripple = 0.04 * sin(ang * 11.0 + t * 0.5)
+               + 0.02 * sin(ang * 23.0 - t * 0.3);
+    return length(uv) - (0.58 + ripple);
+  }
   // shared blob variants: amplitude scales by type so macrophage
   // wobbles harder than a tight neutrophil/nk.
   var amp: f32 = 1.0;
   var rad: f32 = 0.62;
-  if (kind == 1) { amp = 1.6; rad = 0.66; }   // macrophage
-  if (kind == 2) { amp = 0.5; rad = 0.55; }   // neutrophil
-  if (kind == 3) { amp = 0.4; rad = 0.46; }   // nk
-  if (kind == 4) { amp = 0.6; rad = 0.50; }   // b-cell
+  if (kind == 1)  { amp = 1.6; rad = 0.66; }   // macrophage
+  if (kind == 2)  { amp = 0.5; rad = 0.55; }   // neutrophil
+  if (kind == 3)  { amp = 0.4; rad = 0.46; }   // nk
+  if (kind == 4)  { amp = 0.6; rad = 0.50; }   // b-cell
+  if (kind == 12) { amp = 0.30; rad = 0.50; }  // basophil — smooth round
+  if (kind == 14) { amp = 0.25; rad = 0.52; }  // t-cell — very smooth lymphocyte
+  if (kind == 15) { amp = 0.35; rad = 0.50; }  // eosinophil — smooth round
   let ang = atan2(uv.y, uv.x);
   let wob = amp * (0.045 * sin(ang * 5.0 + t * 0.6)
                  + 0.025 * sin(ang * 9.0 - t * 0.4)
@@ -662,16 +736,30 @@ fn membraneFor(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
   return length(uv) - (rad + wob);
 }
 
-// per-type cytoplasm base colour
+// per-type cytoplasm base colour. The kind 9..20 entries pull
+// cytoBot from CELL_TYPES in state.js (lines 838..1086) so the
+// preview matches what the disk shader paints in-game.
 fn cytoColor(kind: i32) -> vec3<f32> {
-  if (kind == 1) { return vec3<f32>(0.74, 0.50, 0.55); }   // macrophage tan-pink
-  if (kind == 2) { return vec3<f32>(0.86, 0.70, 0.74); }   // neutrophil pale
-  if (kind == 3) { return vec3<f32>(0.55, 0.50, 0.72); }   // nk blue-violet
-  if (kind == 4) { return vec3<f32>(0.70, 0.45, 0.55); }   // b-cell deep pink
-  if (kind == 5) { return vec3<f32>(0.30, 0.25, 0.42); }   // virus indigo core
-  if (kind == 6) { return vec3<f32>(0.55, 0.70, 0.40); }   // bacterium green
-  if (kind == 7) { return vec3<f32>(0.55, 0.55, 0.40); }   // amoeba olive
-  if (kind == 8) { return vec3<f32>(0.78, 0.66, 0.40); }   // spore amber
+  if (kind == 1)  { return vec3<f32>(0.74, 0.50, 0.55); }   // macrophage tan-pink
+  if (kind == 2)  { return vec3<f32>(0.86, 0.70, 0.74); }   // neutrophil pale
+  if (kind == 3)  { return vec3<f32>(0.55, 0.50, 0.72); }   // nk blue-violet
+  if (kind == 4)  { return vec3<f32>(0.70, 0.45, 0.55); }   // b-cell deep pink
+  if (kind == 5)  { return vec3<f32>(0.30, 0.25, 0.42); }   // virus indigo core
+  if (kind == 6)  { return vec3<f32>(0.55, 0.70, 0.40); }   // bacterium green
+  if (kind == 7)  { return vec3<f32>(0.55, 0.55, 0.40); }   // amoeba olive
+  if (kind == 8)  { return vec3<f32>(0.78, 0.66, 0.40); }   // spore amber
+  if (kind == 9)  { return vec3<f32>(0.43, 0.55, 0.94); }   // monocyte #6d8df0
+  if (kind == 10) { return vec3<f32>(0.33, 0.66, 0.47); }   // mast #54a877
+  if (kind == 11) { return vec3<f32>(0.30, 0.56, 0.81); }   // dendritic #4d8fcf
+  if (kind == 12) { return vec3<f32>(0.85, 0.48, 0.63); }   // basophil #d97aa1
+  if (kind == 13) { return vec3<f32>(0.84, 0.65, 0.08); }   // platelet #d7a614
+  if (kind == 14) { return vec3<f32>(0.55, 0.48, 0.88); }   // t-cell #8d7be0
+  if (kind == 15) { return vec3<f32>(0.88, 0.52, 0.35); }   // eosinophil #e0855a
+  if (kind == 16) { return vec3<f32>(0.63, 0.09, 0.09); }   // rbc #a01818
+  if (kind == 17) { return vec3<f32>(0.37, 0.63, 0.19); }   // germ #5fa030
+  if (kind == 18) { return vec3<f32>(0.48, 0.70, 0.14); }   // slime #7ab323
+  if (kind == 19) { return vec3<f32>(0.80, 0.42, 0.08); }   // mite #cc6a14
+  if (kind == 20) { return vec3<f32>(1.00, 0.36, 0.69); }   // toxin #ff5cb1
   return vec3<f32>(0.78, 0.55, 0.66);                       // eukaryote
 }
 
@@ -680,9 +768,14 @@ fn cytoColor(kind: i32) -> vec3<f32> {
 fn nucleusSdf(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
   let nucOff = vec2<f32>(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
   let p = uv - nucOff;
-  if (kind == 5 || kind == 6 || kind == 8) { return 1e9; }
-  if (kind == 1) {
+  // anucleate: prokaryotes / virus / spore / platelet / rbc /
+  // slime mold / toxin (toxin isn't a cell at all).
+  if (kind == 5  || kind == 6  || kind == 8
+   || kind == 13 || kind == 16 || kind == 18 || kind == 20) { return 1e9; }
+  if (kind == 1 || kind == 9) {
     // kidney-shaped nucleus: big lobe minus a smaller indent.
+    // Macrophage (1) + monocyte (9) — both belong to the
+    // mononuclear phagocyte system.
     let r1 = length(p - vec2<f32>(-0.04, 0.0)) - 0.22;
     let r2 = length(p - vec2<f32>(0.10, 0.0)) - 0.14;
     return max(r1, -r2);
@@ -694,10 +787,21 @@ fn nucleusSdf(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
     let c = length(p - vec2<f32>( 0.00,  0.13)) - 0.10;
     return min(min(a, b), c);
   }
-  if (kind == 3) { return length(p) - 0.30; }   // nk — dominant
-  if (kind == 4) { return length(p) - 0.26; }   // b-cell — round
-  if (kind == 7) { return length(p - vec2<f32>(0.18, -0.08)) - 0.18; }  // amoeba eccentric
-  return length(p) - 0.22;                       // eukaryote default
+  if (kind == 12 || kind == 15) {
+    // bilobed — basophil and eosinophil both share this shape.
+    let a = length(p - vec2<f32>(-0.13, 0.0)) - 0.13;
+    let b = length(p - vec2<f32>( 0.13, 0.0)) - 0.13;
+    return min(a, b);
+  }
+  if (kind == 3) { return length(p) - 0.30; }                                   // nk — dominant
+  if (kind == 4) { return length(p) - 0.26; }                                   // b-cell — round
+  if (kind == 7) { return length(p - vec2<f32>(0.18, -0.08)) - 0.18; }          // amoeba eccentric
+  if (kind == 11) { return length(p) - 0.18; }                                  // dendritic round-small
+  if (kind == 14) { return length(p) - 0.30; }                                  // t-cell — large dominant
+  if (kind == 17) { return length(p) - 0.16; }                                  // germ — small
+  if (kind == 10) { return length(p) - 0.20; }                                  // mast — round
+  if (kind == 19) { return length(p) - 0.18; }                                  // mite — round
+  return length(p) - 0.22;                                                       // eukaryote default
 }
 
 // ── fragment ────────────────────────────────────────────────
@@ -746,22 +850,32 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   let nucOff = vec2<f32>(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
   let nucP = uv - nucOff;
   var nucCol = vec3<f32>(0.30, 0.14, 0.42);
-  if (kind == 3) { nucCol = vec3<f32>(0.20, 0.12, 0.46); }
-  if (kind == 4) { nucCol = vec3<f32>(0.36, 0.12, 0.40); }
+  if (kind == 3)                  { nucCol = vec3<f32>(0.20, 0.12, 0.46); }   // nk
+  if (kind == 4)                  { nucCol = vec3<f32>(0.36, 0.12, 0.40); }   // b-cell
+  if (kind == 9 || kind == 14)    { nucCol = vec3<f32>(0.18, 0.12, 0.44); }   // monocyte / t-cell — blue
+  if (kind == 11)                 { nucCol = vec3<f32>(0.15, 0.20, 0.40); }   // dendritic — blue
+  if (kind == 12)                 { nucCol = vec3<f32>(0.30, 0.05, 0.20); }   // basophil — dark
+  if (kind == 15)                 { nucCol = vec3<f32>(0.40, 0.18, 0.10); }   // eosinophil — orange
+  if (kind == 10)                 { nucCol = vec3<f32>(0.10, 0.30, 0.18); }   // mast — green
+  if (kind == 17)                 { nucCol = vec3<f32>(0.15, 0.30, 0.05); }   // germ — green
+  if (kind == 19)                 { nucCol = vec3<f32>(0.30, 0.15, 0.05); }   // mite — orange
   let chromatin = fbm(nucP * 28.0 + vec2<f32>(t * 0.05, 0.0));
   nucCol = nucCol + vec3<f32>(0.18, 0.08, 0.22) * chromatin;
-  // nucleolus (only types with a single round nucleus)
-  if (kind == 0 || kind == 3 || kind == 4 || kind == 7) {
+  // nucleolus (single round/kidney-style nucleus only — not bilobed/multilobed)
+  if (kind == 0 || kind == 3 || kind == 4 || kind == 7
+   || kind == 10 || kind == 11 || kind == 14 || kind == 17 || kind == 19) {
     let nlD = length(nucP - vec2<f32>(0.05, 0.04)) - 0.045;
     let nlMask = smoothstep(0.004, -0.004, nlD);
     nucCol = mix(nucCol, vec3<f32>(0.55, 0.20, 0.50), nlMask);
   }
 
-  // ── mitochondria (capsules) ── absent for virus / spore
+  // ── mitochondria (capsules) ── absent for prokaryotes / virus /
+  // spore / anucleate fragments / toxin
   var mito: f32 = 1e9;
   var nMito = i32(round(U.organelles));
   if (kind == 5 || kind == 8) { nMito = 0; }
-  if (kind == 6) { nMito = 0; }   // bacterium has no organelles
+  if (kind == 6 || kind == 17) { nMito = 0; }                   // bacterium / germ — prokaryotes
+  if (kind == 13 || kind == 16 || kind == 20) { nMito = 0; }    // platelet / rbc / toxin
   for (var i: i32 = 0; i < 16; i = i + 1) {
     if (i >= nMito) { break; }
     let fi = f32(i);
@@ -783,22 +897,47 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
 
   // ── vesicles / granules ── count + colour vary by type
   var vesCount: i32 = 14;
-  if (kind == 1) { vesCount = 22; }   // macrophage lysosomes
-  if (kind == 2) { vesCount = 30; }   // neutrophil fine granules
-  if (kind == 3) { vesCount = 6;  }   // nk cytotoxic granules
-  if (kind == 4) { vesCount = 8;  }   // b-cell
-  if (kind == 6) { vesCount = 18; }   // bacterium ribosomes
-  if (kind == 7) { vesCount = 10; }   // amoeba food vacuoles
-  if (kind == 5) { vesCount = 0;  }   // virus
-  if (kind == 8) { vesCount = 4;  }   // spore
+  if (kind == 1)  { vesCount = 22; }   // macrophage lysosomes
+  if (kind == 2)  { vesCount = 30; }   // neutrophil fine granules
+  if (kind == 3)  { vesCount = 6;  }   // nk cytotoxic granules
+  if (kind == 4)  { vesCount = 8;  }   // b-cell
+  if (kind == 6)  { vesCount = 18; }   // bacterium ribosomes
+  if (kind == 7)  { vesCount = 10; }   // amoeba food vacuoles
+  if (kind == 5)  { vesCount = 0;  }   // virus
+  if (kind == 8)  { vesCount = 4;  }   // spore
+  if (kind == 9)  { vesCount = 14; }   // monocyte
+  if (kind == 10) { vesCount = 60; }   // mast — granule-packed (signature)
+  if (kind == 11) { vesCount = 6;  }   // dendritic — minimal
+  if (kind == 12) { vesCount = 25; }   // basophil — dark metachromatic granules
+  if (kind == 13) { vesCount = 4;  }   // platelet — alpha-granules
+  if (kind == 14) { vesCount = 0;  }   // t-cell — smooth lymphocyte
+  if (kind == 15) { vesCount = 18; }   // eosinophil — large bright acidophilic granules
+  if (kind == 16) { vesCount = 0;  }   // rbc
+  if (kind == 17) { vesCount = 8;  }   // germ
+  if (kind == 18) { vesCount = 12; }   // slime
+  if (kind == 19) { vesCount = 10; }   // mite
+  if (kind == 20) { vesCount = 8;  }   // toxin sparkles
   var vesRadius = 0.012;
-  if (kind == 2) { vesRadius = 0.008; }
-  if (kind == 3) { vesRadius = 0.020; }
-  if (kind == 7) { vesRadius = 0.022; }
+  if (kind == 2)  { vesRadius = 0.008; }
+  if (kind == 3)  { vesRadius = 0.020; }
+  if (kind == 7)  { vesRadius = 0.022; }
+  if (kind == 10) { vesRadius = 0.006; }   // mast — tiny dense
+  if (kind == 12) { vesRadius = 0.010; }
+  if (kind == 15) { vesRadius = 0.020; }   // eosinophil — large bright
+  if (kind == 13) { vesRadius = 0.014; }
+  if (kind == 20) { vesRadius = 0.014; }
   var vesCol = vec3<f32>(1.0, 0.92, 0.65);
-  if (kind == 3) { vesCol = vec3<f32>(0.75, 0.85, 1.00); }
-  if (kind == 6) { vesCol = vec3<f32>(0.80, 0.90, 0.55); }
-  if (kind == 7) { vesCol = vec3<f32>(0.55, 0.45, 0.30); }
+  if (kind == 3)  { vesCol = vec3<f32>(0.75, 0.85, 1.00); }
+  if (kind == 6)  { vesCol = vec3<f32>(0.80, 0.90, 0.55); }
+  if (kind == 7)  { vesCol = vec3<f32>(0.55, 0.45, 0.30); }
+  if (kind == 10) { vesCol = vec3<f32>(0.12, 0.40, 0.25); }   // mast — dark green
+  if (kind == 12) { vesCol = vec3<f32>(0.20, 0.10, 0.55); }   // basophil — dark blue/violet
+  if (kind == 15) { vesCol = vec3<f32>(1.00, 0.55, 0.30); }   // eosinophil — bright orange
+  if (kind == 13) { vesCol = vec3<f32>(0.55, 0.40, 0.10); }   // platelet — amber
+  if (kind == 17) { vesCol = vec3<f32>(0.70, 0.85, 0.45); }   // germ — light green
+  if (kind == 18) { vesCol = vec3<f32>(0.60, 0.75, 0.20); }   // slime
+  if (kind == 19) { vesCol = vec3<f32>(0.90, 0.60, 0.20); }   // mite
+  if (kind == 20) { vesCol = vec3<f32>(1.00, 0.90, 1.00); }   // toxin — bright sparkle
   var ves: f32 = 1e9;
   for (var j: i32 = 0; j < 32; j = j + 1) {
     if (j >= vesCount) { break; }
@@ -838,6 +977,28 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   }
   let wallMask = smoothstep(0.003, -0.003, wall);
 
+  // rbc biconcave — dark central depression on the disc
+  var biconcave: f32 = 0.0;
+  if (kind == 16) {
+    biconcave = smoothstep(0.22, 0.04, length(uv));
+  }
+
+  // slime hyphal threads — faint dark radial filaments at the rim
+  var hyphae: f32 = 0.0;
+  if (kind == 18) {
+    let ang = atan2(uv.y, uv.x);
+    let r = length(uv);
+    let lines = pow(abs(cos(ang * 1.5 + t * 0.1)), 50.0);
+    hyphae = lines * smoothstep(0.55, 0.40, r) * smoothstep(0.22, 0.32, r);
+  }
+
+  // toxin glow — bright violet halo just inside the membrane
+  var toxinGlow: f32 = 0.0;
+  if (kind == 20) {
+    let r = length(uv);
+    toxinGlow = pow(smoothstep(0.55, 0.42, r), 2.0) * smoothstep(0.30, 0.42, r);
+  }
+
   // ── compose ──
   var col = bg;
   col = mix(col, cyto, inside);
@@ -855,6 +1016,15 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
 
   // spore double-wall ring
   col = mix(col, vec3<f32>(0.45, 0.30, 0.10), wallMask);
+
+  // rbc biconcave depression — darken the disc centre
+  col = mix(col, col * 0.45, biconcave * inside);
+
+  // slime hyphal threads
+  col = mix(col, vec3<f32>(0.20, 0.30, 0.05), hyphae * 0.7);
+
+  // toxin glow — bright violet halo
+  col = col + vec3<f32>(0.50, 0.30, 0.80) * toxinGlow;
 
   // bold cel-shaded membrane outline
   col = mix(col, vec3<f32>(0.16, 0.06, 0.18), edge * 0.85);
@@ -904,10 +1074,14 @@ void main() {
 //  cytologica · GLSL ES 3.00 fragment shader
 //  identical math to the WGSL version, retargeted for WebGL2
 //
-//  cellType selector (0..8):
-//    0 eukaryote   1 macrophage  2 neutrophil
-//    3 nk-cell     4 b-cell      5 virus
-//    6 bacterium   7 amoeba      8 spore
+//  cellType selector (0..20):
+//    0 eukaryote   1 macrophage   2 neutrophil
+//    3 nk-cell     4 b-cell       5 virus
+//    6 bacterium   7 amoeba       8 spore
+//    9 monocyte   10 mast        11 dendritic
+//   12 basophil   13 platelet    14 t-cell
+//   15 eosinophil 16 rbc         17 germ
+//   18 slime      19 mite        20 toxin
 // ────────────────────────────────────────────────────────────
 precision highp float;
 
@@ -974,12 +1148,60 @@ float membraneFor(vec2 uv, int kind, float t) {
   if (kind == 8) {
     return length(uv) - (0.36 + 0.012 * sin(t * 0.4));
   }
+  if (kind == 13) {
+    float ang = atan(uv.y, uv.x);
+    float star = 0.05 * cos(ang * 10.0);
+    return length(uv) - (0.30 + star);
+  }
+  if (kind == 16) {
+    return length(uv) - (0.50 + 0.006 * sin(t * 0.4));
+  }
+  if (kind == 11) {
+    float ang = atan(uv.y, uv.x);
+    float tend = 0.18 * pow(0.5 + 0.5 * cos(ang * 6.0 + t * 0.2), 14.0);
+    return length(uv) - (0.42 + tend);
+  }
+  if (kind == 19) {
+    float ang = atan(uv.y, uv.x);
+    float legs = 0.06 * pow(0.5 + 0.5 * cos(ang * 4.0 + 0.5), 8.0);
+    return length(uv) - (0.46 + legs);
+  }
+  if (kind == 20) {
+    float ang = atan(uv.y, uv.x);
+    float star = 0.12 * pow(0.5 + 0.5 * cos(ang * 10.0 + t * 0.3), 4.0);
+    return length(uv) - (0.40 + star);
+  }
+  if (kind == 10) {
+    vec2 stretched = vec2(uv.x * 0.85, uv.y * 1.10);
+    return length(stretched) - (0.52 + 0.012 * sin(t * 0.5));
+  }
+  if (kind == 18) {
+    float ang = atan(uv.y, uv.x);
+    float chaos = 0.09 * sin(ang * 4.0  + t * 0.3)
+                + 0.05 * sin(ang * 7.0  - t * 0.5)
+                + 0.04 * sin(ang * 11.0 + t * 0.8);
+    return length(uv) - (0.55 + chaos);
+  }
+  if (kind == 17) {
+    float ang = atan(uv.y, uv.x);
+    float lobes = 0.07 * cos(ang * 3.0 + t * 0.4);
+    return length(uv) - (0.40 + lobes);
+  }
+  if (kind == 9) {
+    float ang = atan(uv.y, uv.x);
+    float ripple = 0.04 * sin(ang * 11.0 + t * 0.5)
+                 + 0.02 * sin(ang * 23.0 - t * 0.3);
+    return length(uv) - (0.58 + ripple);
+  }
   float amp = 1.0;
   float rad = 0.62;
-  if (kind == 1) { amp = 1.6; rad = 0.66; }
-  if (kind == 2) { amp = 0.5; rad = 0.55; }
-  if (kind == 3) { amp = 0.4; rad = 0.46; }
-  if (kind == 4) { amp = 0.6; rad = 0.50; }
+  if (kind == 1)  { amp = 1.6;  rad = 0.66; }
+  if (kind == 2)  { amp = 0.5;  rad = 0.55; }
+  if (kind == 3)  { amp = 0.4;  rad = 0.46; }
+  if (kind == 4)  { amp = 0.6;  rad = 0.50; }
+  if (kind == 12) { amp = 0.30; rad = 0.50; }
+  if (kind == 14) { amp = 0.25; rad = 0.52; }
+  if (kind == 15) { amp = 0.35; rad = 0.50; }
   float ang = atan(uv.y, uv.x);
   float wob = amp * (0.045 * sin(ang * 5.0  + t * 0.6)
                    + 0.025 * sin(ang * 9.0  - t * 0.4)
@@ -988,22 +1210,35 @@ float membraneFor(vec2 uv, int kind, float t) {
 }
 
 vec3 cytoColor(int kind) {
-  if (kind == 1) return vec3(0.74, 0.50, 0.55);
-  if (kind == 2) return vec3(0.86, 0.70, 0.74);
-  if (kind == 3) return vec3(0.55, 0.50, 0.72);
-  if (kind == 4) return vec3(0.70, 0.45, 0.55);
-  if (kind == 5) return vec3(0.30, 0.25, 0.42);
-  if (kind == 6) return vec3(0.55, 0.70, 0.40);
-  if (kind == 7) return vec3(0.55, 0.55, 0.40);
-  if (kind == 8) return vec3(0.78, 0.66, 0.40);
+  if (kind == 1)  return vec3(0.74, 0.50, 0.55);
+  if (kind == 2)  return vec3(0.86, 0.70, 0.74);
+  if (kind == 3)  return vec3(0.55, 0.50, 0.72);
+  if (kind == 4)  return vec3(0.70, 0.45, 0.55);
+  if (kind == 5)  return vec3(0.30, 0.25, 0.42);
+  if (kind == 6)  return vec3(0.55, 0.70, 0.40);
+  if (kind == 7)  return vec3(0.55, 0.55, 0.40);
+  if (kind == 8)  return vec3(0.78, 0.66, 0.40);
+  if (kind == 9)  return vec3(0.43, 0.55, 0.94);   // monocyte
+  if (kind == 10) return vec3(0.33, 0.66, 0.47);   // mast
+  if (kind == 11) return vec3(0.30, 0.56, 0.81);   // dendritic
+  if (kind == 12) return vec3(0.85, 0.48, 0.63);   // basophil
+  if (kind == 13) return vec3(0.84, 0.65, 0.08);   // platelet
+  if (kind == 14) return vec3(0.55, 0.48, 0.88);   // t-cell
+  if (kind == 15) return vec3(0.88, 0.52, 0.35);   // eosinophil
+  if (kind == 16) return vec3(0.63, 0.09, 0.09);   // rbc
+  if (kind == 17) return vec3(0.37, 0.63, 0.19);   // germ
+  if (kind == 18) return vec3(0.48, 0.70, 0.14);   // slime
+  if (kind == 19) return vec3(0.80, 0.42, 0.08);   // mite
+  if (kind == 20) return vec3(1.00, 0.36, 0.69);   // toxin
   return vec3(0.78, 0.55, 0.66);
 }
 
 float nucleusSdf(vec2 uv, int kind, float t) {
   vec2 nucOff = vec2(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
   vec2 p = uv - nucOff;
-  if (kind == 5 || kind == 6 || kind == 8) return 1e9;
-  if (kind == 1) {
+  if (kind == 5  || kind == 6  || kind == 8
+   || kind == 13 || kind == 16 || kind == 18 || kind == 20) return 1e9;
+  if (kind == 1 || kind == 9) {
     float r1 = length(p - vec2(-0.04, 0.0)) - 0.22;
     float r2 = length(p - vec2( 0.10, 0.0)) - 0.14;
     return max(r1, -r2);
@@ -1014,9 +1249,19 @@ float nucleusSdf(vec2 uv, int kind, float t) {
     float c = length(p - vec2( 0.00,  0.13)) - 0.10;
     return min(min(a, b), c);
   }
-  if (kind == 3) return length(p) - 0.30;
-  if (kind == 4) return length(p) - 0.26;
-  if (kind == 7) return length(p - vec2(0.18, -0.08)) - 0.18;
+  if (kind == 12 || kind == 15) {
+    float a = length(p - vec2(-0.13, 0.0)) - 0.13;
+    float b = length(p - vec2( 0.13, 0.0)) - 0.13;
+    return min(a, b);
+  }
+  if (kind == 3)  return length(p) - 0.30;
+  if (kind == 4)  return length(p) - 0.26;
+  if (kind == 7)  return length(p - vec2(0.18, -0.08)) - 0.18;
+  if (kind == 11) return length(p) - 0.18;
+  if (kind == 14) return length(p) - 0.30;
+  if (kind == 17) return length(p) - 0.16;
+  if (kind == 10) return length(p) - 0.20;
+  if (kind == 19) return length(p) - 0.18;
   return length(p) - 0.22;
 }
 
@@ -1055,19 +1300,30 @@ void main() {
   vec2 nucOff = vec2(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
   vec2 nucP = uv - nucOff;
   vec3 nucCol = vec3(0.30, 0.14, 0.42);
-  if (kind == 3) nucCol = vec3(0.20, 0.12, 0.46);
-  if (kind == 4) nucCol = vec3(0.36, 0.12, 0.40);
+  if (kind == 3)               nucCol = vec3(0.20, 0.12, 0.46);
+  if (kind == 4)               nucCol = vec3(0.36, 0.12, 0.40);
+  if (kind == 9 || kind == 14) nucCol = vec3(0.18, 0.12, 0.44);
+  if (kind == 11)              nucCol = vec3(0.15, 0.20, 0.40);
+  if (kind == 12)              nucCol = vec3(0.30, 0.05, 0.20);
+  if (kind == 15)              nucCol = vec3(0.40, 0.18, 0.10);
+  if (kind == 10)              nucCol = vec3(0.10, 0.30, 0.18);
+  if (kind == 17)              nucCol = vec3(0.15, 0.30, 0.05);
+  if (kind == 19)              nucCol = vec3(0.30, 0.15, 0.05);
   nucCol += vec3(0.18, 0.08, 0.22) * fbm(nucP * 28.0 + vec2(t * 0.05, 0.0));
-  if (kind == 0 || kind == 3 || kind == 4 || kind == 7) {
+  if (kind == 0 || kind == 3 || kind == 4 || kind == 7
+   || kind == 10 || kind == 11 || kind == 14 || kind == 17 || kind == 19) {
     float nlD = length(nucP - vec2(0.05, 0.04)) - 0.045;
     float nlMask = smoothstep(0.004, -0.004, nlD);
     nucCol = mix(nucCol, vec3(0.55, 0.20, 0.50), nlMask);
   }
 
-  // mitochondria — eukaryote / macrophage / neutrophil / nk / b-cell / amoeba
+  // mitochondria — absent for prokaryotes / virus / spore /
+  // anucleate fragments / toxin
   float mito = 1e9;
   int nMito = int(floor(u_organelles + 0.5));
-  if (kind == 5 || kind == 6 || kind == 8) nMito = 0;
+  if (kind == 5  || kind == 8)                nMito = 0;
+  if (kind == 6  || kind == 17)               nMito = 0;
+  if (kind == 13 || kind == 16 || kind == 20) nMito = 0;
   for (int i = 0; i < 16; i++) {
     if (i >= nMito) break;
     float fi = float(i);
@@ -1088,22 +1344,47 @@ void main() {
 
   // vesicles / granules
   int vesCount = 14;
-  if (kind == 1) vesCount = 22;
-  if (kind == 2) vesCount = 30;
-  if (kind == 3) vesCount = 6;
-  if (kind == 4) vesCount = 8;
-  if (kind == 5) vesCount = 0;
-  if (kind == 6) vesCount = 18;
-  if (kind == 7) vesCount = 10;
-  if (kind == 8) vesCount = 4;
+  if (kind == 1)  vesCount = 22;
+  if (kind == 2)  vesCount = 30;
+  if (kind == 3)  vesCount = 6;
+  if (kind == 4)  vesCount = 8;
+  if (kind == 5)  vesCount = 0;
+  if (kind == 6)  vesCount = 18;
+  if (kind == 7)  vesCount = 10;
+  if (kind == 8)  vesCount = 4;
+  if (kind == 9)  vesCount = 14;
+  if (kind == 10) vesCount = 60;   // mast — granule-packed
+  if (kind == 11) vesCount = 6;
+  if (kind == 12) vesCount = 25;   // basophil — dark granules
+  if (kind == 13) vesCount = 4;
+  if (kind == 14) vesCount = 0;
+  if (kind == 15) vesCount = 18;   // eosinophil — large bright
+  if (kind == 16) vesCount = 0;
+  if (kind == 17) vesCount = 8;
+  if (kind == 18) vesCount = 12;
+  if (kind == 19) vesCount = 10;
+  if (kind == 20) vesCount = 8;
   float vesRadius = 0.012;
-  if (kind == 2) vesRadius = 0.008;
-  if (kind == 3) vesRadius = 0.020;
-  if (kind == 7) vesRadius = 0.022;
+  if (kind == 2)  vesRadius = 0.008;
+  if (kind == 3)  vesRadius = 0.020;
+  if (kind == 7)  vesRadius = 0.022;
+  if (kind == 10) vesRadius = 0.006;
+  if (kind == 12) vesRadius = 0.010;
+  if (kind == 15) vesRadius = 0.020;
+  if (kind == 13) vesRadius = 0.014;
+  if (kind == 20) vesRadius = 0.014;
   vec3 vesCol = vec3(1.0, 0.92, 0.65);
-  if (kind == 3) vesCol = vec3(0.75, 0.85, 1.00);
-  if (kind == 6) vesCol = vec3(0.80, 0.90, 0.55);
-  if (kind == 7) vesCol = vec3(0.55, 0.45, 0.30);
+  if (kind == 3)  vesCol = vec3(0.75, 0.85, 1.00);
+  if (kind == 6)  vesCol = vec3(0.80, 0.90, 0.55);
+  if (kind == 7)  vesCol = vec3(0.55, 0.45, 0.30);
+  if (kind == 10) vesCol = vec3(0.12, 0.40, 0.25);   // mast — dark green
+  if (kind == 12) vesCol = vec3(0.20, 0.10, 0.55);   // basophil — dark blue/violet
+  if (kind == 15) vesCol = vec3(1.00, 0.55, 0.30);   // eosinophil — bright orange
+  if (kind == 13) vesCol = vec3(0.55, 0.40, 0.10);
+  if (kind == 17) vesCol = vec3(0.70, 0.85, 0.45);
+  if (kind == 18) vesCol = vec3(0.60, 0.75, 0.20);
+  if (kind == 19) vesCol = vec3(0.90, 0.60, 0.20);
+  if (kind == 20) vesCol = vec3(1.00, 0.90, 1.00);   // toxin — bright sparkle
   float ves = 1e9;
   for (int j = 0; j < 32; j++) {
     if (j >= vesCount) break;
@@ -1143,6 +1424,28 @@ void main() {
   }
   float wallMask = smoothstep(0.003, -0.003, wall);
 
+  // rbc biconcave
+  float biconcave = 0.0;
+  if (kind == 16) {
+    biconcave = smoothstep(0.22, 0.04, length(uv));
+  }
+
+  // slime hyphal threads
+  float hyphae = 0.0;
+  if (kind == 18) {
+    float ang = atan(uv.y, uv.x);
+    float r = length(uv);
+    float lines = pow(abs(cos(ang * 1.5 + t * 0.1)), 50.0);
+    hyphae = lines * smoothstep(0.55, 0.40, r) * smoothstep(0.22, 0.32, r);
+  }
+
+  // toxin glow
+  float toxinGlow = 0.0;
+  if (kind == 20) {
+    float r = length(uv);
+    toxinGlow = pow(smoothstep(0.55, 0.42, r), 2.0) * smoothstep(0.30, 0.42, r);
+  }
+
   // compose
   vec3 col = bg;
   col = mix(col, cyto, inside);
@@ -1154,6 +1457,9 @@ void main() {
   col += vec3(0.30, 0.20, 0.45) * capsid * inside;
   col = mix(col, vec3(0.40, 0.55, 0.30), flagMask);
   col = mix(col, vec3(0.45, 0.30, 0.10), wallMask);
+  col = mix(col, col * 0.45, biconcave * inside);
+  col = mix(col, vec3(0.20, 0.30, 0.05), hyphae * 0.7);
+  col += vec3(0.50, 0.30, 0.80) * toxinGlow;
   col = mix(col, vec3(0.16, 0.06, 0.18), edge * 0.85);
 
   // brownian particles
