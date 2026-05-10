@@ -830,6 +830,13 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
       pan: sfxSpatialPan(e.x, e.y),
     });
   };
+
+  sim.onKill = (e) => {
+    sfx.play('death', {
+      volumeScale: sfxSpatialScale(e.x, e.y),
+      pan: sfxSpatialPan(e.x, e.y),
+    });
+  };
 }).catch((err) => {
   console.warn('Audio modules failed to load:', err);
 });

@@ -27,6 +27,9 @@ const SFX_SOURCES = {
   virusHit: [
     'assets/audio/sfx/virus-hit-1.mp3',
   ],
+  death: [
+    'assets/audio/sfx/death-1.mp3',
+  ],
 };
 
 export class SfxPlayer {
