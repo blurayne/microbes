@@ -516,7 +516,12 @@
   aside:not(.collapsed) .src-toggle svg { transform: rotate(90deg); }
   aside.collapsed .code-info,
   aside.collapsed .code-pane,
-  aside.collapsed .wgsl-status { display: none; }
+  aside.collapsed .wgsl-status,
+  /* #pane-console has its own `display: flex` rule with id-level
+     specificity (set so the console-bar + pre stack vertically when
+     the pane is active), which would override the class-level
+     `display: none` above. Re-state the hide at id specificity. */
+  aside.collapsed #pane-console { display: none; }
 
   /* Vertical tab bar when collapsed on desktop — the right-edge
      strip. Tabs stack top-to-bottom; chevron stays at the top.
@@ -1334,9 +1339,13 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   var bg: vec3<f32> = vec3<f32>(0.0);
   if (U.caustics > 0.5) {
     let cx = computeCaustics((uv + vec2<f32>(0.5)) * 1.0, t);
-    bg = envBackground(uv + cx.offset, bgKind, theme, t) * cx.tint;
+    // Background is theme-INDEPENDENT — always pass theme = 0 so
+    // the env palette stays the same regardless of which microscope
+    // / cartoon / kurzgesagt / classic theme is picked. The cell
+    // body still uses `theme` for its own modulation.
+    bg = envBackground(uv + cx.offset, bgKind, 0, t) * cx.tint;
   } else {
-    bg = envBackground(uv, bgKind, theme, t);
+    bg = envBackground(uv, bgKind, 0, t);
   }
 
   // ── cell body ──
@@ -2033,9 +2042,10 @@ void main() {
   if (u_caustics > 0.5) {
     vec2 cx_off;
     vec3 cx_tint = computeCaustics((uv + vec2(0.5)) * 1.0, t, cx_off);
-    bg = envBackground(uv + cx_off, bgKind, theme, t) * cx_tint;
+    // Theme-INDEPENDENT background — see WGSL comment.
+    bg = envBackground(uv + cx_off, bgKind, 0, t) * cx_tint;
   } else {
-    bg = envBackground(uv, bgKind, theme, t);
+    bg = envBackground(uv, bgKind, 0, t);
   }
 
   // membrane
@@ -2591,10 +2601,10 @@ function setSrcCollapsed(collapsed) {
   aside.classList.toggle('collapsed', collapsed);
   layout.classList.toggle('src-collapsed', collapsed);
   toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-  try { localStorage.setItem('shaderTest.srcCollapsed', collapsed ? '1' : '0'); } catch (_) {}
+  try { localStorage.setItem('shaderTest.srcCollapsedV2', collapsed ? '1' : '0'); } catch (_) {}
 }
 {
-  const stored = (() => { try { return localStorage.getItem('shaderTest.srcCollapsed'); } catch (_) { return null; } })();
+  const stored = (() => { try { return localStorage.getItem('shaderTest.srcCollapsedV2'); } catch (_) { return null; } })();
   // default: collapsed (matches user spec).
   setSrcCollapsed(stored === null ? true : stored === '1');
   $('src-toggle').addEventListener('click', () => {
