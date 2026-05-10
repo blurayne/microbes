@@ -301,7 +301,28 @@ const helpBtn = document.getElementById('help');
 const paletteBtn = document.getElementById('palette');
 const paletteBadBtn = document.getElementById('paletteBad');
 const reloadBtn = document.getElementById('reload');
-const fabs = [gearBtn, helpBtn, paletteBtn, paletteBadBtn, reloadBtn].filter(Boolean);
+const pauseBtn = document.getElementById('pause');
+const pauseOverlay = document.getElementById('pauseOverlay');
+const fabs = [gearBtn, helpBtn, paletteBtn, paletteBadBtn, reloadBtn, pauseBtn].filter(Boolean);
+
+// Pause state. Frame loop skips sim.update when _paused; the music
+// player (assigned later by the music import block) is muted in
+// parallel without touching S.musicEnabled. Pause state is transient
+// — not persisted across reloads.
+let _paused = false;
+let _musicPlayer = null;
+function setPaused(p) {
+  _paused = !!p;
+  if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(_paused));
+  if (pauseOverlay) {
+    pauseOverlay.classList.toggle('shown', _paused);
+    pauseOverlay.setAttribute('aria-hidden', String(!_paused));
+  }
+  if (_musicPlayer) _musicPlayer.setEnabled(_paused ? false : !!S.musicEnabled);
+}
+if (pauseBtn) {
+  pauseBtn.addEventListener('click', () => setPaused(!_paused));
+}
 const allDialogs = [settingsEl, helpDialog, paletteDialog, paletteBadDialog].filter(Boolean);
 
 function openOnly(target) {
@@ -528,6 +549,10 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
   const player = new MusicPlayer();
   player.setVolume(S.musicVolume);
   player.setEnabled(!!S.musicEnabled);
+  // Expose to the pause handler so toggling pause can mute the music
+  // without changing the user's S.musicEnabled preference.
+  _musicPlayer = player;
+  if (_paused) player.setEnabled(false);
 
   const sfx = new SfxPlayer();
   sfx.setVolume(S.sfxVolume);
@@ -929,7 +954,10 @@ function frame(ts) {
   const dt = Math.min(0.05, (ts - lastTs) / 1000);
   lastTs = ts;
 
-  sim.update(dt);
+  // Skip simulation when paused; the renderer still runs so the
+  // PAUSE overlay can fade in over the existing field, and the
+  // resume transition is seamless.
+  if (!_paused) sim.update(dt);
 
   const t = ts * 0.001;
   const shapes = getShapes(sim.cells, t, sim.camera, sim.W, sim.H);
