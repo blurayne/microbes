@@ -613,6 +613,31 @@
     .hud-bars { grid-template-columns: 1fr; }
     th, td { padding: 10px 8px; font-size: 11px; }
     .diagram-card { padding: 24px 12px; }
+
+    /* Mobile-specific bug fix: on narrow viewports the mkdocs default
+       theme (Bootstrap 5) ships a `.card` rule with display:flex +
+       min-width:0 + flex-grow:0 that combines badly with our grid
+       items, collapsing them to single-character min-content (the
+       "S/I/E/G" letter-stacked card seen at viewport ≤ 480px on
+       Ch08 / Ch10). Force our card boxes to fill the column. */
+    .grid-auto { min-width: 0; }
+    .grid-auto > *,
+    .grid-auto .card {
+      min-width: 0;
+      max-width: 100%;
+      width: auto;
+      display: block;
+    }
+    /* Tables in chapter content: let them scroll horizontally instead
+       of squeezing column text to single-character columns. */
+    .chapter table,
+    table.matrix-table,
+    .table-wrap > table {
+      display: block;
+      max-width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
   }
 
 /* ============================================================
@@ -661,6 +686,98 @@
     border-color: var(--line) !important;
   }
   .navbar-toggler-icon { filter: invert(1); }
+
+  /* Search box (Bootstrap form-control inside the navbar). The mkdocs
+     default ships it white-on-white; tint to the GDD green accent so
+     it reads against the dark navbar. The `[search]` button gets the
+     same accent. */
+  .navbar input[type="text"],
+  .navbar input[type="search"],
+  .navbar .form-control,
+  input.search-query,
+  #mkdocs_search_modal input[type="text"] {
+    background-color: var(--bg-elev) !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--accent) !important;
+    box-shadow: 0 0 0 1px transparent;
+    transition: box-shadow 120ms ease, border-color 120ms ease;
+  }
+  .navbar input[type="text"]::placeholder,
+  .navbar input[type="search"]::placeholder,
+  .navbar .form-control::placeholder,
+  #mkdocs_search_modal input[type="text"]::placeholder {
+    color: var(--ink-dim) !important;
+    opacity: 0.7;
+  }
+  .navbar input[type="text"]:focus,
+  .navbar input[type="search"]:focus,
+  .navbar .form-control:focus,
+  #mkdocs_search_modal input[type="text"]:focus {
+    background-color: var(--bg-elev) !important;
+    color: var(--ink) !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px var(--accent) !important;
+    outline: none !important;
+  }
+
+  /* Search results modal/list. Match the dark panel and tint each hit
+     with the accent so the link/title reads as a clear interactive. */
+  #mkdocs_search_modal,
+  #mkdocs_search_modal .modal-content,
+  #mkdocs_search_modal .modal-header,
+  #mkdocs_search_modal .modal-body,
+  #mkdocs_search_modal .modal-footer {
+    background-color: var(--bg) !important;
+    color: var(--ink) !important;
+    border-color: var(--line) !important;
+  }
+  #mkdocs_search_modal .close,
+  #mkdocs_search_modal .btn-close {
+    filter: invert(1);
+  }
+  #mkdocs-search-results .search-result {
+    background: var(--bg-elev) !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--line) !important;
+    border-left: 3px solid var(--accent) !important;
+    border-radius: 4px;
+    padding: 12px 14px;
+    margin: 8px 0;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  #mkdocs-search-results .search-result:hover {
+    background: var(--bg-card, var(--bg-elev)) !important;
+    border-color: var(--accent) !important;
+  }
+  #mkdocs-search-results .search-result a,
+  #mkdocs-search-results .search-result .search-result-title,
+  #mkdocs-search-results .search-result h1,
+  #mkdocs-search-results .search-result h2 {
+    color: var(--accent) !important;
+    text-decoration: none;
+    font-weight: 500;
+  }
+  #mkdocs-search-results .search-result a:hover {
+    text-decoration: underline;
+  }
+  #mkdocs-search-results .search-result-text,
+  #mkdocs-search-results .search-result p,
+  #mkdocs-search-results .search-result .context {
+    color: var(--ink-dim) !important;
+    font-size: 13px;
+    line-height: 1.45;
+    margin: 4px 0 0;
+  }
+  #mkdocs-search-results mark,
+  #mkdocs-search-results .search-result mark,
+  #mkdocs-search-results em {
+    background: rgba(157, 255, 110, 0.20) !important;
+    color: var(--accent) !important;
+    padding: 0 2px;
+    border-radius: 2px;
+    font-style: normal;
+    font-weight: 600;
+  }
 
   /* Mobile drawer card (the panel under the hamburger). */
   .navbar-collapse.bg-body-tertiary,
