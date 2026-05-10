@@ -45,6 +45,12 @@ export const DEFAULTS = {
   cellTypeOverlay: false,   // eye-toggle: per-cell ring + text label identifying the cell type. HTML overlay above the canvas; renderer-agnostic.
   causticsOverlay: false,   // water-turbulence post-process applied on top of the rendered background. WebGL2 + WebGPU only; Canvas2D is a no-op.
   liquidRipples: false,     // bg post-process: each on-screen cell radiates concentric ripples that distort the background — reads as cells moving through liquid. WebGL2 + WebGPU only; Canvas2D is a no-op.
+  // Liquid-ripples knobs. All three are visible in the settings panel
+  // only while S.liquidRipples is on. They feed straight into the
+  // ripple shader's per-cell uniforms (see _rippleCollectCells + UBO).
+  rippleDensity: 1.5,       // how many ripple rings each cell radiates. Higher → tighter wavelength, more visible rings close to the body. Multiplier on the baseline 1 / 0.7.
+  rippleReach: 0.7,         // how far the ripples extend outward. Lower → ripples stay close to the cell (user wants "close to the object" by default). Multiplier on the falloff distance.
+  rippleStrength: 1.0,      // peak UV displacement amplitude. Multiplier on the baseline ~6 px.
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
@@ -272,6 +278,9 @@ export const LOCALES = {
     composition_hud: 'Composition HUD',
     caustics_overlay: 'Caustics overlay',
     liquid_ripples: 'Liquid ripples',
+    ripple_density: 'Wave density',
+    ripple_reach: 'Wave reach',
+    ripple_strength: 'Wave strength',
     cell_type_overlay: 'Show cell types',
     counters_needed: 'Counters needed',
     counters_covered: 'Fully covered',
@@ -402,6 +411,9 @@ export const LOCALES = {
     composition_hud: 'Aufstellungs-HUD',
     caustics_overlay: 'Lichtspiel-Overlay',
     liquid_ripples: 'Flüssigkeitswellen',
+    ripple_density: 'Wellendichte',
+    ripple_reach: 'Wellenreichweite',
+    ripple_strength: 'Wellenstärke',
     cell_type_overlay: 'Zelltypen anzeigen',
     counters_needed: 'Konter benötigt',
     counters_covered: 'Voll abgedeckt',

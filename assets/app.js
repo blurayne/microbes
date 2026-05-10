@@ -707,7 +707,19 @@ bindCheckbox('causticsToggle', 'causticsOverlay');
 // Liquid-ripples toggle. Same per-frame read pattern as caustics;
 // the renderer redirects the bg pass through a ripple post-process
 // that distorts the bg around each on-screen cell.
-bindCheckbox('liquidRipplesToggle', 'liquidRipples');
+const rippleControlsEl = document.getElementById('rippleControls');
+function applyRippleControlsVis() {
+  if (rippleControlsEl) rippleControlsEl.hidden = !S.liquidRipples;
+}
+bindCheckbox('liquidRipplesToggle', 'liquidRipples', applyRippleControlsVis);
+applyRippleControlsVis();
+
+// Ripple sub-controls — feed straight into the renderer's per-frame
+// uniform pack on the next rAF, so no listener hook is needed beyond
+// the value-label sync that bindRange handles.
+bindRange('rippleDensity',  'rippleDensity',  'rippleDensityVal',  v => v.toFixed(1) + '×');
+bindRange('rippleReach',    'rippleReach',    'rippleReachVal',    v => v.toFixed(1) + '×');
+bindRange('rippleStrength', 'rippleStrength', 'rippleStrengthVal', v => v.toFixed(1) + '×');
 
 // Fullscreen toggle. Browsers REQUIRE a user gesture to enter
 // fullscreen, so this can't be a saved-and-restored S.* setting —

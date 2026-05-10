@@ -942,10 +942,13 @@ struct CausticU { time: f32 };
 const RIPPLE_MAX_WGPU = 24;
 const RIPPLE_BG_WGSL = /* wgsl */ `
 struct RippleU {
+  // Header (16 bytes — 4 floats):
   time: f32,
-  cellCount: f32,           // packed as float for tight 16-byte alignment
+  cellCount: f32,
   resW: f32,
   resH: f32,
+  // Tunables (16 bytes — vec4 alignment):
+  params: vec4<f32>,        // (density, reach, strength, _)
   cells: array<vec4<f32>, ${RIPPLE_MAX_WGPU}>,
 };
 @group(0) @binding(0) var<uniform> U : RippleU;
@@ -964,6 +967,9 @@ struct RippleU {
   var disp = vec2<f32>(0.0, 0.0);
   let minAx = min(res.x, res.y);
   let n = i32(U.cellCount + 0.5);
+  let density  = max(U.params.x, 0.001);
+  let reach    = max(U.params.y, 0.001);
+  let strength = U.params.z;
   for (var i: i32 = 0; i < ${RIPPLE_MAX_WGPU}; i = i + 1) {
     if (i >= n) { break; }
     let c = U.cells[i];
@@ -971,15 +977,15 @@ struct RippleU {
     let dvPx = dvUv * res;
     let dPx  = length(dvPx);
     let rPx  = max(c.z * minAx, 4.0);
-    if (dPx > rPx * 8.0) { continue; }
-    let wavelen = rPx * 0.7;
+    if (dPx > rPx * 8.0 * reach) { continue; }
+    let wavelen = rPx * 0.7 / density;
     let k = 6.28318 / wavelen;
     let wave = sin(dPx * k - U.time * (wavelen * 1.5) * k);
-    let falloff = exp(-dPx / (rPx * 4.0));
+    let falloff = exp(-dPx / (rPx * 4.0 * reach));
     let dirUv = dvUv / max(1e-4, length(dvUv));
     disp = disp + dirUv * wave * falloff;
   }
-  let uvDisp = disp * (6.0 / minAx);
+  let uvDisp = disp * (6.0 / minAx) * strength;
   let bg = textureSample(bgTex, bgSamp,
                          clamp(uv + uvDisp, vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
   return vec4<f32>(bg, 1.0);
@@ -2623,8 +2629,9 @@ export class WebGPURenderer extends RendererBase {
       magFilter: 'linear', minFilter: 'linear',
       addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
     });
-    // Layout: time, cellCount, resW, resH, then 24 × vec4 cells.
-    const floats = 4 + RIPPLE_MAX_WGPU * 4;
+    // Layout: time, cellCount, resW, resH, params (vec4),
+    // then 24 × vec4 cells.
+    const floats = 4 + 4 + RIPPLE_MAX_WGPU * 4;
     this._rippleBgUbo = device.createBuffer({
       size: floats * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -2639,26 +2646,27 @@ export class WebGPURenderer extends RendererBase {
     this._rippleBgUboData = null;
   }
   // Pack visible cells into the UBO data buffer; returns the count.
+  // UBO layout: [0..3] header, [4..7] params vec4, [8..] cells vec4×N.
   _rippleBgCollectCells() {
     const buf = this._rippleBgUboData;
     const cells = (this.sim && this.sim.cells) || [];
     const W = this.W, H = this.H;
     const minAx = Math.max(1, Math.min(W, H));
+    const CELLS_OFF = 8;
     let n = 0;
     for (let i = 0; i < cells.length && n < RIPPLE_MAX_WGPU; i++) {
       const c = cells[i];
       const s = this.sim.worldToScreen(c.x, c.y);
       const m = c.r * 1.5;
       if (s.x < -m || s.y < -m || s.x > W + m || s.y > H + m) continue;
-      const off = 4 + n * 4;
+      const off = CELLS_OFF + n * 4;
       buf[off + 0] = s.x / W;
       buf[off + 1] = s.y / H;
       buf[off + 2] = (c.r * this.camera.scale) / minAx;
       buf[off + 3] = 0;
       n++;
     }
-    // Zero out the unused tail.
-    for (let i = 4 + n * 4; i < buf.length; i++) buf[i] = 0;
+    for (let i = CELLS_OFF + n * 4; i < buf.length; i++) buf[i] = 0;
     return n;
   }
 
@@ -3048,6 +3056,10 @@ export class WebGPURenderer extends RendererBase {
       u[1] = cellCount;
       u[2] = this.canvas.width;
       u[3] = this.canvas.height;
+      u[4] = S.rippleDensity ?? 1.5;
+      u[5] = S.rippleReach ?? 0.7;
+      u[6] = S.rippleStrength ?? 1.0;
+      u[7] = 0;
       this.device.queue.writeBuffer(
         this._rippleBgUbo, 0,
         u.buffer, u.byteOffset, u.byteLength,
