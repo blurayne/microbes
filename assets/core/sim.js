@@ -311,7 +311,12 @@ export class Sim {
     }
     if (!c || idx < 0) return;
     const cc = c._colors || {};
-    const N = 32;
+    // Particle count scales with cell radius — bigger pop, bigger spray.
+    // Floor at 2× the previous baseline (32 → 64) so every kill has
+    // visual punch; ceiling at 160 keeps the particle pool bounded for
+    // huge amoebas. CELL_RADIUS (=52) is the size-1 reference.
+    const sizeRatio = Math.max(0.5, c.r / 52);
+    const N = Math.max(64, Math.min(160, Math.round(64 * sizeRatio)));
     for (let i = 0; i < N; i++) {
       const ang = (i / N) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
       const speed = 50 + Math.random() * 100;

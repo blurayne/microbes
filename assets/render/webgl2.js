@@ -105,42 +105,11 @@ out vec4 outColor;
 int bodyKind()    { return int(mod(v_kind + 0.5, 16.0)); }
 int nucKind()     { return int(mod((v_kind + 0.5) / 16.0, 16.0)); }
 int isSelected()  { return int(mod((v_kind + 0.5) / 256.0, 2.0)); }
-int isVirus3D()   { return int(mod((v_kind + 0.5) / 512.0, 2.0)); }
 int isHollow()    { return int(mod((v_kind + 0.5) / 4096.0, 2.0)); }
 // Per-cell-type test-kind (0..20), ported from docs/shader-test.html.
 // 0 = eukaryote/generic. Read only when u_theme != 0; legacy theme
 // (default) ignores this and uses the existing bodyKind dispatch.
 int testKind()    { return int(mod((v_kind + 0.5) / 8192.0, 32.0)); }
-
-// Classic 2D Perlin noise (cnoise) by Stefan Gustavson — verbatim from
-// the source webgl-shaders.com sphere shader (see
-// assets/shaders/vendor/vert-sphere.glsl). Used by the virus-3D
-// experimental branch below to displace the apparent surface and
-// drive the sphere-look animation in u_time.
-vec4 _cnoise_mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
-vec4 _cnoise_permute(vec4 x) { return _cnoise_mod289(((x * 34.0) + 1.0) * x); }
-vec4 _cnoise_invSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
-vec2 _cnoise_fade(vec2 t) { return t * t * t * (t * (t * 6.0 - 15.0) + 10.0); }
-float cnoise(vec2 P) {
-  vec4 Pi = floor(P.xyxy) + vec4(0.0, 0.0, 1.0, 1.0);
-  vec4 Pf = fract(P.xyxy) - vec4(0.0, 0.0, 1.0, 1.0);
-  Pi = _cnoise_mod289(Pi);
-  vec4 ix = Pi.xzxz; vec4 iy = Pi.yyww;
-  vec4 fx = Pf.xzxz; vec4 fy = Pf.yyww;
-  vec4 i = _cnoise_permute(_cnoise_permute(ix) + iy);
-  vec4 gx = fract(i * (1.0 / 41.0)) * 2.0 - 1.0;
-  vec4 gy = abs(gx) - 0.5;
-  vec4 tx = floor(gx + 0.5); gx = gx - tx;
-  vec2 g00 = vec2(gx.x, gy.x), g10 = vec2(gx.y, gy.y);
-  vec2 g01 = vec2(gx.z, gy.z), g11 = vec2(gx.w, gy.w);
-  vec4 norm = _cnoise_invSqrt(vec4(dot(g00, g00), dot(g01, g01), dot(g10, g10), dot(g11, g11)));
-  g00 *= norm.x; g01 *= norm.y; g10 *= norm.z; g11 *= norm.w;
-  float n00 = dot(g00, vec2(fx.x, fy.x)), n10 = dot(g10, vec2(fx.y, fy.y));
-  float n01 = dot(g01, vec2(fx.z, fy.z)), n11 = dot(g11, vec2(fx.w, fy.w));
-  vec2 fade_xy = _cnoise_fade(Pf.xy);
-  vec2 n_x = mix(vec2(n00, n01), vec2(n10, n11), fade_xy.x);
-  return 2.3 * mix(n_x.x, n_x.y, fade_xy.y);
-}
 
 // Lightweight value-noise + 4-octave fbm for the cytoplasm grain
 // pass. Mirrors shader-test's fbm() in scale + octaves so the
@@ -569,34 +538,6 @@ void main() {
     // parity ignores the brief 200ms tap flash for the WebGL backend.
   }
 
-  // Virus 3D shader experiment (Plan #2). Replaces the body surface
-  // with a faux 3D sphere derived from the disk's local UV: the inner
-  // unit disc is treated as the front-facing hemisphere of a sphere,
-  // a cnoise-driven displacement rolls over its surface, and a fixed
-  // top-left light gives diffuse shading. Adapted from the Three.js
-  // sphere demo at webgl-shaders.com (see assets/shaders/vendor/).
-  // Active only when the user has flipped S.virusShader3D, and only
-  // for virus cells — every other instance has isVirus3D() == 0.
-  if (isVirus3D() == 1) {
-    float r2 = dot(v_uv, v_uv);
-    if (r2 < 1.0) {
-      vec3 sphereN = vec3(v_uv.x, v_uv.y, sqrt(1.0 - r2));
-      // cnoise driven the same way as the source: angle around y-axis
-      // + a time-varying elevation term. Output is roughly -1..1.
-      float angle = atan(sphereN.y, sphereN.x);
-      float elev  = acos(clamp(sphereN.z, -1.0, 1.0));
-      float n = cnoise(vec2(3.0 * cos(angle), 2.0 * u_time + 3.0 * elev));
-      // Source palette: vec3(clamp(0,1, 5*displacement), 0.3, 0.3) —
-      // pinkish base with bright red where the surface bulges.
-      float bulge = clamp(0.5 + 0.5 * n, 0.0, 1.0);
-      vec3 surface = vec3(clamp(5.0 * (bulge - 0.5), 0.0, 1.0), 0.30, 0.30);
-      vec3 lightDir = normalize(vec3(-0.4, -0.4, 0.7));
-      float lit = max(0.0, dot(sphereN, lightDir));
-      // Small ambient so the dark side doesn't pure black.
-      col = surface * (lit + 0.18);
-    }
-  }
-
   outColor = vec4(col, bodyA * v_diskAlpha);
 }`;
 
@@ -818,6 +759,17 @@ void main() {
     col = mix(col, hot, 0.85);
   }
 
+  // Ambient drifting wash for the otherwise-static kinds (flat,
+  // gradient, agar, cybergrid). A faint domain-warped fbm tinted
+  // toward the existing colour — keeps every theme visibly "alive"
+  // without overpowering the design. Skipped for kinds that already
+  // animate (lung/aurora/underwater/lava/reactor/bloodflow/cellShadow).
+  if (u_kind <= 3) {
+    vec2 ambP = worldPx * 0.0009 + vec2(u_time * 0.025, u_time * 0.012);
+    float amb = bgFbm(ambP + bgFbm(ambP * 0.5)) - 0.5;
+    col += amb * 0.06;
+  }
+
   // Drifting light spots — additive, screen-space coords. Each spot
   // colour was pre-multiplied by its source alpha on the JS side, so
   // we just add directly without re-scaling.
@@ -829,18 +781,23 @@ void main() {
     col += u_spotCols[i] * a;
   }
 
-  // Bloodstream theme: a seamless plasma wash beneath the discrete
-  // RBC silhouettes. The plasma is a continuous domain-warped fbm
-  // in worldPx (same pattern as lava) — it has no tile structure,
-  // so the field reads as "plasma with cells in it" instead of
-  // "scattered ellipses on a flat gradient". Fixes the visible
-  // gaps that appeared between RBCs when zoomed out.
+  // Bloodstream theme: directional plasma flow beneath the RBC
+  // silhouettes. The fbm is sheared along a leftward flow vector so
+  // the wash reads as "stream of blood" rather than a still pool;
+  // bright streamer ribbons (high-power sin) ride the same flow.
   if (u_rbc == 1) {
-    vec2 plasmaP = worldPx * 0.0015 + vec2(0.0, u_time * 0.08);
+    vec2 flow = vec2(-1.0, 0.10);    // mostly leftward, slight downflow
+    vec2 plasmaP = worldPx * 0.0015 + flow * (u_time * 0.20);
     float plasma = bgFbm(plasmaP + bgFbm(plasmaP * 0.5));
     vec3 plasmaCol = mix(vec3(0.30, 0.05, 0.07), vec3(0.62, 0.12, 0.16),
                          smoothstep(0.30, 0.85, plasma));
     col = mix(col, plasmaCol, 0.55);
+    // Bright streamer ribbons — narrow horizontal bands of brighter
+    // tint that scroll with the same flow vector. Reads as currents.
+    float ribbon = sin(worldPx.y * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
+                       + u_time * 0.6);
+    ribbon = pow(max(0.0, ribbon), 6.0);
+    col = mix(col, vec3(0.88, 0.22, 0.25), ribbon * 0.18);
   }
 
   // Drifting RBC silhouettes — discrete cell shapes on top of the
@@ -857,9 +814,13 @@ void main() {
           float kSeed = h0 * 6.28 + float(k) * 1.31;
           // Stable in-tile centre + slow per-cell drift in world px.
           vec2 inTile = vec2(fract(kSeed * 1.7), fract(kSeed * 2.3)) * TS;
+          // Per-cell wobble overlaid on a directional flow drift —
+          // the bloodstream now reads as a current of cells rather
+          // than a static field of jitter.
           vec2 cWorld = cell * TS + inTile
                       + vec2(40.0 * sin(u_time * 0.25 + kSeed),
-                             40.0 * cos(u_time * 0.18 + kSeed));
+                             40.0 * cos(u_time * 0.18 + kSeed))
+                      + vec2(-90.0, 9.0) * u_time;
           float rWorld = 18.0 + 16.0 * fract(kSeed * 0.41);
           vec2 dEll = (worldPx - cWorld) / vec2(rWorld, rWorld * 0.78);
           float ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
@@ -934,13 +895,20 @@ precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_bg;
 uniform float u_time;
+uniform vec2 u_resolution;       // canvas drawing-buffer (W, H)
 out vec4 outColor;
 
 void main() {
   vec2 uv = v_uv;
   float TAU = 6.28318530718;
+  // Tile the caustic pattern across the screen, aspect-corrected so
+  // each "cell" of the pattern stays roughly square instead of being
+  // stretched horizontally on widescreen. Tile factor 3 ⇒ ~3 cells
+  // tall, 3*aspect cells wide.
+  float aspect = u_resolution.x / max(1.0, u_resolution.y);
+  vec2 cuv = uv * vec2(aspect, 1.0) * 3.0;
   float time2 = u_time * 0.5 + 23.0;
-  vec2 p0 = mod(uv * TAU, TAU) - 150.0;
+  vec2 p0 = mod(cuv * TAU, TAU) - 150.0;
   vec2 i = p0;
   float c = 1.0;
   float inten = 0.005;
@@ -2272,8 +2240,11 @@ export class WebGL2Renderer extends RendererBase {
   // samples from it on a fullscreen post-pass to the default fb.
   _causticEnsureRt() {
     const gl = this.gl;
-    const w = this.W | 0;
-    const h = this.H | 0;
+    // Match the canvas drawing buffer (dpr * renderScale), NOT CSS-px:
+    // sampling at CSS-px size on a HiDPI display previously left only the
+    // top-left quarter of the screen showing caustics.
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
     if (this._causticRt && this._causticRt.w === w && this._causticRt.h === h) return;
     if (this._causticRt) {
       gl.deleteFramebuffer(this._causticRt.fbo);
@@ -2301,6 +2272,7 @@ export class WebGL2Renderer extends RendererBase {
     this._causticU = {
       bg:   gl.getUniformLocation(prog, 'u_bg'),
       time: gl.getUniformLocation(prog, 'u_time'),
+      res:  gl.getUniformLocation(prog, 'u_resolution'),
     };
   }
   _causticDestroy() {
@@ -2419,12 +2391,13 @@ export class WebGL2Renderer extends RendererBase {
     if (useCaustics && this._causticProg) {
       // Switch to the default framebuffer + caustic post-pass.
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, this.W, this.H);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
       gl.useProgram(this._causticProg);
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._causticRt.tex);
       gl.uniform1i(this._causticU.bg, 0);
       gl.uniform1f(this._causticU.time, t);
+      gl.uniform2f(this._causticU.res, this.canvas.width, this.canvas.height);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     } else if (this._causticRt) {
       // Toggled off mid-session — release the offscreen RT so the
@@ -2503,15 +2476,11 @@ export class WebGL2Renderer extends RendererBase {
         const nucK = NUC_KIND_FLOAT[(type.nucleus && type.nucleus.kind) || 'none'] || 0;
         const sel = this.sim.selectedCells.has(c) ? 1 : 0;
         const hollow = type.bodyHollow ? 1 : 0;
-        // Virus 3D shader bit (Plan #2). 1 only for virus cells when
-        // the experimental S.virusShader3D toggle is on; 0 everywhere
-        // else. Lives at bit 9 (value 512) of the kind packing.
-        const virus3d = (c.type === 'virus' && S.virusShader3D) ? 1 : 0;
         // Pack the docs/shader-test "test kind" (0..20) at bit 13
         // (multiplier 8192). Read as testKind() in FRAG_DISK; consumed
         // only when u_theme != 0 (Phase 2 per-type SDF dispatch).
         const tk = testKindFor(c.type);
-        const kind = bodyK + nucK * 16 + sel * 256 + virus3d * 512 + hollow * 4096 + tk * 8192;
+        const kind = bodyK + nucK * 16 + sel * 256 + hollow * 4096 + tk * 8192;
         const wobMul = (type.field && type.field.wobbleMul) || 1.0;
         const j = i * INSTANCE_FLOATS;
         data[j]     = s.x;

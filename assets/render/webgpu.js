@@ -884,8 +884,12 @@ struct CausticU { time: f32 };
   let dim = vec2<f32>(textureDimensions(bgTex, 0));
   let uv  = frag.xy / dim;
   let TAU: f32 = 6.28318530718;
+  // Tile the caustic across the screen, aspect-corrected so each cell
+  // stays roughly square. Tile factor 3 ⇒ ~3 cells tall, 3*aspect wide.
+  let aspect = dim.x / max(1.0, dim.y);
+  let cuv = uv * vec2<f32>(aspect, 1.0) * 3.0;
   let time2 = U.time * 0.5 + 23.0;
-  var p0 = ((uv * TAU) % vec2<f32>(TAU) + vec2<f32>(TAU)) % vec2<f32>(TAU) - vec2<f32>(150.0);
+  var p0 = ((cuv * TAU) % vec2<f32>(TAU) + vec2<f32>(TAU)) % vec2<f32>(TAU) - vec2<f32>(150.0);
   var i = p0;
   var c: f32 = 1.0;
   let inten: f32 = 0.005;
@@ -1112,6 +1116,14 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     col = mix(col, hot, 0.85);
   }
 
+  // Ambient drifting wash for the otherwise-static kinds (flat,
+  // gradient, agar, cybergrid). Mirrors WebGL2 FRAG_BG.
+  if (kind <= 3) {
+    let ambP = worldPx * 0.0009 + vec2<f32>(time * 0.025, time * 0.012);
+    let amb = bgFbm(ambP + vec2<f32>(bgFbm(ambP * 0.5))) - 0.5;
+    col = col + vec3<f32>(amb * 0.06);
+  }
+
   // Drifting light spots — additive, screen UV. Colours pre-multiplied.
   for (var i: i32 = 0; i < ${MAX_SPOTS}; i = i + 1) {
     if (i >= spotCount) { break; }
@@ -1125,16 +1137,21 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   // with darker centre dot. Anchored in world space so they pan + zoom
   // with the camera (matches Canvas2D's drawBackground behaviour where
   // RBCs are drawn inside the camera transform).
-  // Bloodstream plasma wash — seamless domain-warped fbm in worldPx
-  // (mirrors WebGL2). Fills the gaps between discrete RBCs so the
-  // field reads as "plasma with cells in it" at any zoom level.
+  // Bloodstream theme: directional plasma flow + bright streamer
+  // ribbons riding the same flow vector — reads as a stream of
+  // blood, not a still pool. Mirrors WebGL2 FRAG_BG.
   if (rbcOn == 1) {
-    let plasmaP = worldPx * 0.0015 + vec2<f32>(0.0, time * 0.08);
+    let flow = vec2<f32>(-1.0, 0.10);
+    let plasmaP = worldPx * 0.0015 + flow * (time * 0.20);
     let plasma = bgFbm(plasmaP + vec2<f32>(bgFbm(plasmaP * 0.5)));
     let plasmaCol = mix(vec3<f32>(0.30, 0.05, 0.07),
                         vec3<f32>(0.62, 0.12, 0.16),
                         smoothstep(0.30, 0.85, plasma));
     col = mix(col, plasmaCol, 0.55);
+    var ribbon = sin(worldPx.y * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
+                     + time * 0.6);
+    ribbon = pow(max(0.0, ribbon), 6.0);
+    col = mix(col, vec3<f32>(0.88, 0.22, 0.25), ribbon * 0.18);
   }
 
   // Discrete RBC silhouettes on top of the plasma. World-tiled —
@@ -1151,7 +1168,8 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
           let inTile = vec2<f32>(fract(kSeed * 1.7), fract(kSeed * 2.3)) * TS;
           let cWorld = cell * TS + inTile
                      + vec2<f32>(40.0 * sin(time * 0.25 + kSeed),
-                                 40.0 * cos(time * 0.18 + kSeed));
+                                 40.0 * cos(time * 0.18 + kSeed))
+                     + vec2<f32>(-90.0, 9.0) * time;
           let rWorld = 18.0 + 16.0 * fract(kSeed * 0.41);
           let dEll = (worldPx - cWorld) / vec2<f32>(rWorld, rWorld * 0.78);
           let ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
@@ -2436,8 +2454,11 @@ export class WebGPURenderer extends RendererBase {
   // the post-pass below can sample FROM it.
   _causticBgEnsureRt() {
     const device = this.device;
-    const w = this.W | 0;
-    const h = this.H | 0;
+    // Canvas drawing-buffer pixels (dpr * renderScale) — sampling the bg
+    // pass at CSS-px size on a HiDPI display previously left only the
+    // top-left quarter of the screen showing caustics.
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
     if (this._causticBgRt && this._causticBgRt.w === w && this._causticBgRt.h === h) return;
     if (this._causticBgRt) { try { this._causticBgRt.tex.destroy(); } catch {} }
     const tex = device.createTexture({

@@ -130,3 +130,68 @@ passes.
   driving a virtual cell-age uniform). The table above becomes
   the spec for how each kind's `age` slider should change its
   appearance.
+
+---
+
+## Heartbeat HUD + shader-driven pulse
+
+**The idea.** Show a heart icon next to the lower-left FAB stack
+that beats at a real heart's rhythm — 60 bpm at rest, ramping up
+to 150 bpm during fights (more on-field pathogens, more recent
+damage events). The same beat drives a fragment-shader pulse that
+"shines through" the scene with each beat: a faint radial
+brightness bloom or warm-tint flash riding the systole peak.
+Toggle in settings, with off as the third state.
+
+**Settings shape (rough).**
+
+- `S.heartbeat: 'off' | 'icon' | 'icon+shader'` — three-way
+  toggle. Default `icon` so the HUD beat exists without the
+  shader cost.
+- `S.heartbeatBpmMin: 60`, `heartbeatBpmMax: 150` — locked for
+  now; could expose later.
+- HUD: an `<svg>` heart positioned next to the FAB stack
+  (bottom-left). Beat scaling animation runs off the same
+  `phase01` value used by the shader, so HUD and visual stay in
+  sync.
+
+**BPM driver.**
+
+- Per-frame inputs: count of on-field pathogens, recent damage
+  events (last ~3 s, decaying), recent kills (boost). Map to a
+  target BPM via a smooth curve, low-pass filter the result so
+  it doesn't twitch. Resting drift is fine — random ±2 BPM around
+  60 reads as "alive" on the HUD.
+
+**Shader hook.**
+
+- One new uniform: `u_heartbeat: vec2<f32>` carrying `(phase01,
+  amplitude)`. `phase01` is the seconds-since-last-systole
+  divided by current beat period; `amplitude` is 0 when the
+  toggle is off, 1 when on.
+- In the bg compose, modulate the existing tint by `1 + 0.05 *
+  smoothstep(0, 0.18, phase01) * (1 - phase01) * amplitude` —
+  a sharp ramp-up over ~180 ms then a slow decay over the rest
+  of the period, so each beat reads as a faint warm pulse
+  riding the scene.
+- Same uniform passed to disk shader if we want the cells to
+  brighten with each beat too. Probably overkill at first.
+
+**Why not yet.**
+
+- Adds a new HUD element + a new shader toggle + a per-frame
+  BPM driver. Each is small but the bundle is enough to want a
+  dedicated PR.
+- Need to confirm that the visual pulse reads as "atmospheric"
+  rather than distracting — likely needs A/B tuning of the
+  amplitude curve.
+- BPM calibration: the "fight intensity" curve has to feel
+  responsive without being twitchy. Worth a small
+  feel-engineering pass.
+
+**When to revisit.**
+
+- After the next round of bg-environment work has settled (so
+  there's a stable canvas to add the pulse to).
+- When we want a clearer "the body is alive" tell for the player
+  and the existing tells (RBC drift, scanlines) feel too quiet.
