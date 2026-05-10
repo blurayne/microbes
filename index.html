@@ -215,6 +215,13 @@
   <button id="reload" class="fab" type="button" aria-label="Reload" title="Hard reload" data-i18n-attr="aria-label=nav_reload,title=nav_reload">⟳</button>
   <div id="pauseOverlay" class="pause-overlay" aria-hidden="true"><div class="pause-text" data-i18n="paused">PAUSE</div></div>
   <div id="cellTagLayer" class="cell-tag-layer" aria-hidden="true"></div>
+  <!-- First-spawn banner overlay (PR-E phase 2). Pops a small
+       panel showing the cell type's friends / prey / foes from
+       the docs-derived relations table, only the first time the
+       user spawns each type. pointer-events: none on the layer
+       (canvas drag passes through); banner panel itself is
+       interactive for the close button. -->
+  <div id="spawnBannerLayer" class="spawn-banner-layer"></div>
 
   <div id="helpDialog" class="dialog hidden" role="dialog" aria-label="Cell help">
     <div class="dialog-backdrop" data-close></div>
