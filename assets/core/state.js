@@ -44,6 +44,7 @@ export const DEFAULTS = {
   compositionHud: true,
   cellTypeOverlay: false,   // eye-toggle: per-cell ring + text label identifying the cell type. HTML overlay above the canvas; renderer-agnostic.
   causticsOverlay: false,   // water-turbulence post-process applied on top of the rendered background. WebGL2 + WebGPU only; Canvas2D is a no-op.
+  liquidRipples: false,     // bg post-process: each on-screen cell radiates concentric ripples that distort the background — reads as cells moving through liquid. WebGL2 + WebGPU only; Canvas2D is a no-op.
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
@@ -263,6 +264,7 @@ export const LOCALES = {
     mode_survival_soon: 'Survival (soon)',
     composition_hud: 'Composition HUD',
     caustics_overlay: 'Caustics overlay',
+    liquid_ripples: 'Liquid ripples',
     cell_type_overlay: 'Show cell types',
     counters_needed: 'Counters needed',
     counters_covered: 'Fully covered',
@@ -389,6 +391,7 @@ export const LOCALES = {
     mode_survival_soon: 'Survival (bald)',
     composition_hud: 'Aufstellungs-HUD',
     caustics_overlay: 'Lichtspiel-Overlay',
+    liquid_ripples: 'Flüssigkeitswellen',
     cell_type_overlay: 'Zelltypen anzeigen',
     counters_needed: 'Konter benötigt',
     counters_covered: 'Voll abgedeckt',
@@ -511,6 +514,7 @@ export const LOCALES = {
     mode_survival_soon: 'Supervivencia (pronto)',
     composition_hud: 'HUD de composición',
     caustics_overlay: 'Cáusticas (luz)',
+    liquid_ripples: 'Ondas líquidas',
     cell_type_overlay: 'Mostrar tipos de célula',
     counters_needed: 'Contras necesarios',
     counters_covered: 'Cubierto',
@@ -634,6 +638,7 @@ export const LOCALES = {
     mode_survival_soon: 'Survival (boid)',
     composition_hud: 'Aufstöing-HUD',
     caustics_overlay: 'Liachtgflimm',
+    liquid_ripples: 'Flüssigkeitswelln',
     cell_type_overlay: 'Zoidnzaign',
     counters_needed: 'Konter braucht ma',
     counters_covered: 'Olls do',
@@ -759,6 +764,7 @@ export const LOCALES = {
     mode_survival_soon: 'Survival (gleisch)',
     composition_hud: 'Aufstellungs-HUD',
     caustics_overlay: 'Lichtspiel-Iwwerlach',
+    liquid_ripples: 'Flüssichkeits-Welle',
     cell_type_overlay: 'Zelltypen weisen',
     counters_needed: 'Konter braucht mer',
     counters_covered: 'Alles dabei',
@@ -884,6 +890,7 @@ export const LOCALES = {
     mode_survival_soon: 'Survival (bald)',
     composition_hud: 'Aufstellungs-HUD',
     caustics_overlay: 'Lichtspiel-Drüwwer',
+    liquid_ripples: 'Flüssichkeits-Welle',
     cell_type_overlay: 'Zelletype zeische',
     counters_needed: 'Konter braucht mer',
     counters_covered: 'Alles dabei',
@@ -1006,6 +1013,7 @@ export const LOCALES = {
     mode_survival_soon: 'Superstes (mox)',
     composition_hud: 'HUD compositionis',
     caustics_overlay: 'Lux undans',
+    liquid_ripples: 'Undae liquidae',
     cell_type_overlay: 'Genera cellularum',
     counters_needed: 'Repugnatores requiruntur',
     counters_covered: 'Plene defensus',
