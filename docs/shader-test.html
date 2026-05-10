@@ -509,6 +509,15 @@
         </select>
       </div>
       <div class="ctrl">
+        <label><span>theme</span></label>
+        <select id="theme">
+          <option value="0">microscope · H&amp;E (default)</option>
+          <option value="1">cartoon · saturated</option>
+          <option value="2">kurzgesagt · flat neon</option>
+          <option value="3">classic · canvas2d game look</option>
+        </select>
+      </div>
+      <div class="ctrl">
         <label><span>zoom</span><span id="zoom-val">1.00</span></label>
         <input id="zoom" type="range" min="0.5" max="2.5" step="0.01" value="1.0"/>
       </div>
@@ -580,6 +589,7 @@ struct Uniforms {
   activity   : f32,
   organelles : f32,
   cellType   : f32,
+  theme      : f32,    // 0 microscope · 1 cartoon · 2 kurzgesagt · 3 classic (canvas2d game look)
 };
 @group(0) @binding(0) var<uniform> U : Uniforms;
 
@@ -999,57 +1009,85 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     toxinGlow = pow(smoothstep(0.55, 0.42, r), 2.0) * smoothstep(0.30, 0.42, r);
   }
 
-  // ── compose ──
-  var col = bg;
-  col = mix(col, cyto, inside);
-  col = mix(col, mitoCol, mitoMask * inside);
-  col = mix(col, vec3<f32>(0.45, 0.20, 0.10), mitoEdge * inside * 0.6);
-  col = mix(col, vesCol, vesMask * inside);
-  col = mix(col, nucCol, nucMask);
-  col = mix(col, vec3<f32>(0.18, 0.08, 0.25), nucEdge * (1.0 - nucMask) * 0.7);
-
-  // virus capsid lattice tinting
-  col = col + vec3<f32>(0.30, 0.20, 0.45) * capsid * inside;
-
-  // bacterium flagellum (rendered outside the body)
-  col = mix(col, vec3<f32>(0.40, 0.55, 0.30), flagMask);
-
-  // spore double-wall ring
-  col = mix(col, vec3<f32>(0.45, 0.30, 0.10), wallMask);
-
-  // rbc biconcave depression — darken the disc centre
-  col = mix(col, col * 0.45, biconcave * inside);
-
-  // slime hyphal threads
-  col = mix(col, vec3<f32>(0.20, 0.30, 0.05), hyphae * 0.7);
-
-  // toxin glow — bright violet halo
-  col = col + vec3<f32>(0.50, 0.30, 0.80) * toxinGlow;
-
-  // bold cel-shaded membrane outline
-  col = mix(col, vec3<f32>(0.16, 0.06, 0.18), edge * 0.85);
-
-  // ── floating brownian particles ──
-  for (var k: i32 = 0; k < 18; k = k + 1) {
-    let fk = f32(k);
-    let speedK = 0.3 + 0.5 * hash(vec2<f32>(fk, 1.0));
-    let p = vec2<f32>(
-      0.55 * sin(fk * 3.71 + t * speedK),
-      0.55 * cos(fk * 5.19 + t * speedK * 1.13)
-    );
-    let d = length(uv - p);
-    col = col + vec3<f32>(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, d) * inside;
-  }
-
-  // ── microscope optics: cool chromatic limb ──
+  // ── compose ── (theme switch)
+  // All four themes read the same per-type pre-computed locals:
+  // cyto / vesCol / nucCol / nucMask / nucEdge / mito* / capsid /
+  // flagMask / wallMask / biconcave / hyphae / toxinGlow / edge /
+  // inside / bg. Each branch composes them differently to deliver
+  // a distinct visual language without any new helpers.
   let r = length(uv);
+  let theme = i32(round(U.theme));
+  var col: vec3<f32>;
 
-  // cool blue limb (microscope optics aberration)
-  col = col + vec3<f32>(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, r), 2.0) * 0.6;
+  if (theme == 1) {
+    // ─── cartoon · saturated, thick black outlines ───
+    col = vec3<f32>(0.10, 0.06, 0.22);
+    let cytoSat = clamp(cyto * 1.30, vec3<f32>(0.0), vec3<f32>(1.0));
+    col = mix(col, cytoSat, inside);
+    let hl = smoothstep(0.16, 0.0, length(uv - vec2<f32>(-0.18, 0.18)));
+    col = col + vec3<f32>(0.32, 0.30, 0.28) * hl * inside;
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col = col + vec3<f32>(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3<f32>(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3<f32>(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.45, biconcave * inside);
+    col = col + vec3<f32>(0.55, 0.30, 0.85) * toxinGlow;
+    col = mix(col, vec3<f32>(0.0, 0.0, 0.0), edge);
+  } else if (theme == 2) {
+    // ─── kurzgesagt · flat cyto, thin pale rim, neon halo ───
+    col = vec3<f32>(0.10, 0.06, 0.22);
+    col = mix(col, cyto, inside);
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col = col + vec3<f32>(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3<f32>(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3<f32>(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.55, biconcave * inside);
+    col = col + vec3<f32>(0.55, 0.30, 0.85) * toxinGlow;
+    let halo = pow(smoothstep(0.55, 0.42, r), 2.0);
+    col = col + cyto * 1.6 * halo * inside;
+    col = mix(col, vec3<f32>(0.95, 0.92, 0.85), edge * 0.4);
+  } else if (theme == 3) {
+    // ─── classic · canvas2d game look (radial fill + dark outline) ───
+    col = vec3<f32>(0.06, 0.04, 0.12);
+    let cytoTop = clamp(cyto * 1.35 + vec3<f32>(0.05), vec3<f32>(0.0), vec3<f32>(1.0));
+    let highlight = smoothstep(0.7, 0.0, length(uv - vec2<f32>(-0.15, 0.18)));
+    let cytoFill = mix(cyto, cytoTop, highlight);
+    col = mix(col, cytoFill, inside);
+    col = mix(col, vec3<f32>(0.04, 0.02, 0.08), edge);
+  } else {
+    // ─── microscope · H&E (default) — existing behaviour ───
+    col = bg;
+    col = mix(col, cyto, inside);
+    col = mix(col, mitoCol, mitoMask * inside);
+    col = mix(col, vec3<f32>(0.45, 0.20, 0.10), mitoEdge * inside * 0.6);
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col = mix(col, vec3<f32>(0.18, 0.08, 0.25), nucEdge * (1.0 - nucMask) * 0.7);
+    col = col + vec3<f32>(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3<f32>(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3<f32>(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.45, biconcave * inside);
+    col = mix(col, vec3<f32>(0.20, 0.30, 0.05), hyphae * 0.7);
+    col = col + vec3<f32>(0.50, 0.30, 0.80) * toxinGlow;
+    col = mix(col, vec3<f32>(0.16, 0.06, 0.18), edge * 0.85);
 
-  // film grain
-  let g = hash(frag.xy + vec2<f32>(t * 31.7, t * 17.3)) - 0.5;
-  col = col + vec3<f32>(g) * 0.025;
+    // brownian particles + chromatic limb + film grain — microscope only.
+    for (var k: i32 = 0; k < 18; k = k + 1) {
+      let fk = f32(k);
+      let speedK = 0.3 + 0.5 * hash(vec2<f32>(fk, 1.0));
+      let p = vec2<f32>(
+        0.55 * sin(fk * 3.71 + t * speedK),
+        0.55 * cos(fk * 5.19 + t * speedK * 1.13)
+      );
+      let d = length(uv - p);
+      col = col + vec3<f32>(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, d) * inside;
+    }
+    col = col + vec3<f32>(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, r), 2.0) * 0.6;
+    let g = hash(frag.xy + vec2<f32>(t * 31.7, t * 17.3)) - 0.5;
+    col = col + vec3<f32>(g) * 0.025;
+  }
 
   return vec4<f32>(col, 1.0);
 }
@@ -1091,6 +1129,7 @@ uniform float u_zoom;
 uniform float u_activity;
 uniform float u_organelles;
 uniform float u_cellType;
+uniform float u_theme;
 
 out vec4 outColor;
 
@@ -1446,40 +1485,78 @@ void main() {
     toxinGlow = pow(smoothstep(0.55, 0.42, r), 2.0) * smoothstep(0.30, 0.42, r);
   }
 
-  // compose
-  vec3 col = bg;
-  col = mix(col, cyto, inside);
-  col = mix(col, mitoCol, mitoMask * inside);
-  col = mix(col, vec3(0.45, 0.20, 0.10), mitoEdge * inside * 0.6);
-  col = mix(col, vesCol, vesMask * inside);
-  col = mix(col, nucCol, nucMask);
-  col = mix(col, vec3(0.18, 0.08, 0.25), nucEdge * (1.0 - nucMask) * 0.7);
-  col += vec3(0.30, 0.20, 0.45) * capsid * inside;
-  col = mix(col, vec3(0.40, 0.55, 0.30), flagMask);
-  col = mix(col, vec3(0.45, 0.30, 0.10), wallMask);
-  col = mix(col, col * 0.45, biconcave * inside);
-  col = mix(col, vec3(0.20, 0.30, 0.05), hyphae * 0.7);
-  col += vec3(0.50, 0.30, 0.80) * toxinGlow;
-  col = mix(col, vec3(0.16, 0.06, 0.18), edge * 0.85);
-
-  // brownian particles
-  for (int k = 0; k < 18; k++) {
-    float fk = float(k);
-    float speedK = 0.3 + 0.5 * hash(vec2(fk, 1.0));
-    vec2 p = vec2(
-      0.55 * sin(fk * 3.71 + t * speedK),
-      0.55 * cos(fk * 5.19 + t * speedK * 1.13)
-    );
-    col += vec3(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, length(uv - p)) * inside;
-  }
-
-  // optics
+  // compose · 4-theme switch (microscope / cartoon / kurzgesagt / classic)
   float r = length(uv);
-  col += vec3(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, r), 2.0) * 0.6;
+  int theme = int(floor(u_theme + 0.5));
+  vec3 col;
 
-  // grain
-  float g = hash(gl_FragCoord.xy + vec2(t * 31.7, t * 17.3)) - 0.5;
-  col += vec3(g) * 0.025;
+  if (theme == 1) {
+    // cartoon
+    col = vec3(0.10, 0.06, 0.22);
+    vec3 cytoSat = clamp(cyto * 1.30, 0.0, 1.0);
+    col = mix(col, cytoSat, inside);
+    float hl = smoothstep(0.16, 0.0, length(uv - vec2(-0.18, 0.18)));
+    col += vec3(0.32, 0.30, 0.28) * hl * inside;
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col += vec3(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.45, biconcave * inside);
+    col += vec3(0.55, 0.30, 0.85) * toxinGlow;
+    col = mix(col, vec3(0.0), edge);
+  } else if (theme == 2) {
+    // kurzgesagt
+    col = vec3(0.10, 0.06, 0.22);
+    col = mix(col, cyto, inside);
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col += vec3(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.55, biconcave * inside);
+    col += vec3(0.55, 0.30, 0.85) * toxinGlow;
+    float halo = pow(smoothstep(0.55, 0.42, r), 2.0);
+    col += cyto * 1.6 * halo * inside;
+    col = mix(col, vec3(0.95, 0.92, 0.85), edge * 0.4);
+  } else if (theme == 3) {
+    // classic — canvas2d game look
+    col = vec3(0.06, 0.04, 0.12);
+    vec3 cytoTop = clamp(cyto * 1.35 + vec3(0.05), 0.0, 1.0);
+    float highlight = smoothstep(0.7, 0.0, length(uv - vec2(-0.15, 0.18)));
+    vec3 cytoFill = mix(cyto, cytoTop, highlight);
+    col = mix(col, cytoFill, inside);
+    col = mix(col, vec3(0.04, 0.02, 0.08), edge);
+  } else {
+    // microscope · H&E (default — existing behaviour)
+    col = bg;
+    col = mix(col, cyto, inside);
+    col = mix(col, mitoCol, mitoMask * inside);
+    col = mix(col, vec3(0.45, 0.20, 0.10), mitoEdge * inside * 0.6);
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col = mix(col, vec3(0.18, 0.08, 0.25), nucEdge * (1.0 - nucMask) * 0.7);
+    col += vec3(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.45, biconcave * inside);
+    col = mix(col, vec3(0.20, 0.30, 0.05), hyphae * 0.7);
+    col += vec3(0.50, 0.30, 0.80) * toxinGlow;
+    col = mix(col, vec3(0.16, 0.06, 0.18), edge * 0.85);
+
+    for (int k = 0; k < 18; k++) {
+      float fk = float(k);
+      float speedK = 0.3 + 0.5 * hash(vec2(fk, 1.0));
+      vec2 p = vec2(
+        0.55 * sin(fk * 3.71 + t * speedK),
+        0.55 * cos(fk * 5.19 + t * speedK * 1.13)
+      );
+      col += vec3(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, length(uv - p)) * inside;
+    }
+    col += vec3(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, r), 2.0) * 0.6;
+    float g = hash(gl_FragCoord.xy + vec2(t * 31.7, t * 17.3)) - 0.5;
+    col += vec3(g) * 0.025;
+  }
 
   outColor = vec4(col, 1.0);
 }
@@ -1499,6 +1576,7 @@ const params = {
   activity: 1.0,
   organelles: 8,
   cellType: 0,
+  theme: 0,    // 0 microscope · 1 cartoon · 2 kurzgesagt · 3 classic
 };
 
 // hook up sliders ----------------------------------------------------------
@@ -1522,6 +1600,13 @@ celltypeSel.addEventListener('change', () => {
   params.cellType = parseInt(celltypeSel.value, 10) || 0;
 });
 params.cellType = parseInt(celltypeSel.value, 10) || 0;
+
+// theme dropdown
+const themeSel = $('theme');
+themeSel.addEventListener('change', () => {
+  params.theme = parseInt(themeSel.value, 10) || 0;
+});
+params.theme = parseInt(themeSel.value, 10) || 0;
 
 // inject shader sources into the side panel --------------------------------
 const wgslSrc = $('shader-wgsl').textContent.trim();
@@ -1714,7 +1799,7 @@ async function initWebGPU() {
       cpuBuf[4] = params.activity;
       cpuBuf[5] = params.organelles;
       cpuBuf[6] = params.cellType;
-      // [7] is alignment padding (struct rounded up to 32 bytes)
+      cpuBuf[7] = params.theme;
       device.queue.writeBuffer(ubo, 0, cpuBuf);
 
       const enc = device.createCommandEncoder();
@@ -1771,7 +1856,8 @@ function initWebGL2() {
   const u_zoom = gl.getUniformLocation(prog, 'u_zoom');
   const u_act  = gl.getUniformLocation(prog, 'u_activity');
   const u_org  = gl.getUniformLocation(prog, 'u_organelles');
-  const u_kind = gl.getUniformLocation(prog, 'u_cellType');
+  const u_kind  = gl.getUniformLocation(prog, 'u_cellType');
+  const u_theme = gl.getUniformLocation(prog, 'u_theme');
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -1789,7 +1875,8 @@ function initWebGL2() {
     gl.uniform1f(u_zoom, params.zoom);
     gl.uniform1f(u_act,  params.activity);
     gl.uniform1f(u_org,  params.organelles);
-    gl.uniform1f(u_kind, params.cellType);
+    gl.uniform1f(u_kind,  params.cellType);
+    gl.uniform1f(u_theme, params.theme);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
   return { name: 'webgl2 · glsl es 3.0', frame };
