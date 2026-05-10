@@ -137,10 +137,11 @@ html, body {
   padding: 0 24px;
 }
 /* While paused: disable every interactive element EXCEPT the
-   overlay (its own pointer-events:auto on .shown keeps it
-   click-receptive). The user has to tap/click to resume — no
-   button can be pressed in the meantime. */
-body.is-paused .fab,
+   overlay AND the pause button itself (so the user can always
+   click pause to resume — without this exception the FAB became
+   non-clickable and the only way out was to find the bare
+   overlay area, which dialogs sometimes covered). */
+body.is-paused .fab:not(#pause),
 body.is-paused #gear,
 body.is-paused #settings,
 body.is-paused .mode-btn,
