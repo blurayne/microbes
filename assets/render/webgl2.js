@@ -2222,6 +2222,30 @@ export class WebGL2Renderer extends RendererBase {
   beginFrame() {
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    // Scene render target — when caustics or ripples is on, EVERY
+    // draw pass (bg, cells, particles, antibodies, …) renders into
+    // this offscreen FBO and endFrame() composites it to canvas
+    // through the post-process. That's why the overlay now covers
+    // cells + pathogens, not just the bg.
+    this._sceneFbo = null;
+    this._scenePostProc = null;          // 'caustics' | 'ripples' | null
+    const useRipples  = !!S.liquidRipples;
+    const useCaustics = !!S.causticsOverlay && !useRipples;
+    if (useRipples) {
+      this._rippleEnsureRt();
+      this._rippleEnsureProg();
+      this._sceneFbo = this._rippleRt.fbo;
+      this._scenePostProc = 'ripples';
+    } else if (useCaustics) {
+      this._causticEnsureRt();
+      this._causticEnsureProg();
+      this._sceneFbo = this._causticRt.fbo;
+      this._scenePostProc = 'caustics';
+    } else {
+      if (this._rippleRt)  this._rippleDestroy();
+      if (this._causticRt) this._causticDestroy();
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
   }
 
   // ---- Reactor (Gray-Scott) helpers --------------------------------
@@ -2498,6 +2522,7 @@ export class WebGL2Renderer extends RendererBase {
     const gl = this.gl;
     const bg = currentBackground();
     const t = timeMs * 0.001 * (S.bgFlowSpeed || 1);
+    this._lastFrameSec = t;     // endFrame's post-pass reads this
 
     let kind = 0; // flat
     if (bg.kind === 'gradient') kind = 1;
@@ -2524,9 +2549,10 @@ export class WebGL2Renderer extends RendererBase {
         this._reactorLastSeedMs = timeMs;
       }
       this._reactorStep(5);
-      // Restore the main framebuffer + viewport for the display pass.
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, this.W, this.H);
+      // Restore the scene framebuffer + drawing-buffer viewport so
+      // the bg display pass renders into the same target as cells.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     } else if (this._reactorRtA) {
       // Theme switched away from reactor — release the RTs so we
       // don't carry the GPU memory across the rest of the session.
@@ -2577,59 +2603,11 @@ export class WebGL2Renderer extends RendererBase {
 
     gl.bindVertexArray(this._bgVao);
     gl.disable(gl.BLEND);
-
-    // Post-process overlays: caustics + liquid-ripples. Both render
-    // the bg into an offscreen FBO and run a fullscreen post-pass.
-    // If both toggles are on, ripples wins (more recent feature).
-    const useRipples = !!S.liquidRipples;
-    const useCaustics = !!S.causticsOverlay && !useRipples;
-    if (useRipples) {
-      this._rippleEnsureRt();
-      this._rippleEnsureProg();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this._rippleRt.fbo);
-      gl.viewport(0, 0, this._rippleRt.w, this._rippleRt.h);
-    } else if (useCaustics) {
-      this._causticEnsureRt();
-      this._causticEnsureProg();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this._causticRt.fbo);
-      gl.viewport(0, 0, this._causticRt.w, this._causticRt.h);
-    }
-
+    // bg targets the current framebuffer — set by beginFrame to
+    // _sceneFbo (caustics/ripples on) or null (canvas). The
+    // post-pass runs in endFrame so cells + particles drawn after
+    // this also pass through the overlay.
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-    if (useRipples && this._rippleProg) {
-      const cellCount = this._rippleCollectCells();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-      gl.useProgram(this._rippleProg);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this._rippleRt.tex);
-      gl.uniform1i(this._rippleU.bg, 0);
-      gl.uniform1f(this._rippleU.time, t);
-      gl.uniform2f(this._rippleU.res, this.canvas.width, this.canvas.height);
-      gl.uniform1i(this._rippleU.cellCount, cellCount);
-      gl.uniform3fv(this._rippleU.cells, this._rippleCellsBuf);
-      gl.uniform3f(this._rippleU.params,
-                   S.rippleDensity ?? 1.5,
-                   S.rippleReach ?? 0.7,
-                   S.rippleStrength ?? 1.0);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    } else if (useCaustics && this._causticProg) {
-      // Switch to the default framebuffer + caustic post-pass.
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-      gl.useProgram(this._causticProg);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this._causticRt.tex);
-      gl.uniform1i(this._causticU.bg, 0);
-      gl.uniform1f(this._causticU.time, t);
-      gl.uniform2f(this._causticU.res, this.canvas.width, this.canvas.height);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
-    // Release any RT for a feature the user toggled off mid-session.
-    if (!useRipples && this._rippleRt) this._rippleDestroy();
-    if (!useCaustics && this._causticRt) this._causticDestroy();
-
     gl.enable(gl.BLEND);
     gl.bindVertexArray(null);
     // Decor (lobules, villi, neurons, …) intentionally not ported —
@@ -2892,8 +2870,8 @@ export class WebGL2Renderer extends RendererBase {
       gl.bindTexture(gl.TEXTURE_2D, rt.texB);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-      // ---- Pass 4: tint+threshold scratchA → main canvas (alpha blend) ----
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      // ---- Pass 4: tint+threshold scratchA → scene fb (alpha blend) ----
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
       // Convert bbox from canvas top-left to GL bottom-left for viewport.
       gl.viewport(bboxX, fbH - bboxY - bboxH, bboxW, bboxH);
       gl.enable(gl.BLEND);
@@ -3522,7 +3500,46 @@ export class WebGL2Renderer extends RendererBase {
     // TODO Phase 4 wrap-up: cell-radius circles + count overlay.
   }
 
-  endFrame() { /* default framebuffer is auto-swapped by the browser */ }
+  endFrame() {
+    // Composite the scene RT to canvas through the active post-pass.
+    // When no post-process is on, _sceneFbo is null and everything
+    // already drew straight to canvas — nothing to do.
+    if (!this._sceneFbo || !this._scenePostProc) return;
+    const gl = this.gl;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(this._bgVao);
+    const t = this._lastFrameSec || 0;
+    if (this._scenePostProc === 'ripples' && this._rippleProg) {
+      const cellCount = this._rippleCollectCells();
+      gl.useProgram(this._rippleProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._rippleRt.tex);
+      gl.uniform1i(this._rippleU.bg, 0);
+      gl.uniform1f(this._rippleU.time, t);
+      gl.uniform2f(this._rippleU.res, this.canvas.width, this.canvas.height);
+      gl.uniform1i(this._rippleU.cellCount, cellCount);
+      gl.uniform3fv(this._rippleU.cells, this._rippleCellsBuf);
+      gl.uniform3f(this._rippleU.params,
+                   S.rippleDensity ?? 1.5,
+                   S.rippleReach ?? 0.7,
+                   S.rippleStrength ?? 1.0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    } else if (this._scenePostProc === 'caustics' && this._causticProg) {
+      gl.useProgram(this._causticProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._causticRt.tex);
+      gl.uniform1i(this._causticU.bg, 0);
+      gl.uniform1f(this._causticU.time, t);
+      gl.uniform2f(this._causticU.res, this.canvas.width, this.canvas.height);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    gl.enable(gl.BLEND);
+    gl.bindVertexArray(null);
+    this._sceneFbo = null;
+    this._scenePostProc = null;
+  }
 
   /** Short identifier for the FPS overlay's renderer suffix. */
   get info() { return 'webgl2'; }

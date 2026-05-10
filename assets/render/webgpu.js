@@ -2916,6 +2916,28 @@ export class WebGPURenderer extends RendererBase {
     this._frameEncoder = this.device.createCommandEncoder();
     const tex = this.context.getCurrentTexture();
     this._frameView = tex.createView();
+    // Scene render target — when caustics or ripples is on, all draw
+    // passes (bg, cells, particles, antibodies) render into the
+    // offscreen RT and endFrame() composites it to _frameView through
+    // the post-process. Mirrors WebGL2's _sceneFbo design.
+    this._sceneView = this._frameView;
+    this._scenePostProc = null;
+    const useRipples  = !!S.liquidRipples;
+    const useCaustics = !!S.causticsOverlay && !useRipples;
+    if (useRipples) {
+      this._rippleBgEnsureRt();
+      this._rippleBgEnsurePipeline();
+      this._sceneView = this._rippleBgRt.view;
+      this._scenePostProc = 'ripples';
+    } else if (useCaustics) {
+      this._causticBgEnsureRt();
+      this._causticBgEnsurePipeline();
+      this._sceneView = this._causticBgRt.view;
+      this._scenePostProc = 'caustics';
+    } else {
+      if (this._rippleBgRt)  this._rippleBgDestroy();
+      if (this._causticBgRt) this._causticBgDestroy();
+    }
   }
 
   drawBackground(timeMs) {
@@ -3022,29 +3044,13 @@ export class WebGPURenderer extends RendererBase {
       ],
     });
 
-    // Post-process overlays: caustics + liquid-ripples. Both render
-    // the bg into an offscreen RT, then run a fullscreen post-pass.
-    // If both toggles are on, ripples wins (more recent feature).
-    // When neither is on, the bg renders straight to _frameView for
-    // zero added cost.
-    const useRipples = !!S.liquidRipples;
-    const useCaustics = !!S.causticsOverlay && !useRipples;
-    let bgTarget = this._frameView;
-    if (useRipples) {
-      this._rippleBgEnsureRt();
-      this._rippleBgEnsurePipeline();
-      bgTarget = this._rippleBgRt.view;
-    } else if (useCaustics) {
-      this._causticBgEnsureRt();
-      this._causticBgEnsurePipeline();
-      bgTarget = this._causticBgRt.view;
-    }
-    if (!useRipples && this._rippleBgRt) this._rippleBgDestroy();
-    if (!useCaustics && this._causticBgRt) this._causticBgDestroy();
+    // bg targets the scene view set by beginFrame — either
+    // _frameView (no post-process) or one of the RT views. The
+    // composite happens in endFrame so cells + particles drawn
+    // after this also go through the overlay.
     const pass = this._frameEncoder.beginRenderPass({
       colorAttachments: [{
-        view: bgTarget,
-        // Clear value irrelevant — fragment writes every pixel.
+        view: this._sceneView,
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
         loadOp: 'clear',
         storeOp: 'store',
@@ -3054,70 +3060,7 @@ export class WebGPURenderer extends RendererBase {
     pass.setBindGroup(0, bgBindGroup);
     pass.draw(3, 1, 0, 0);             // big-triangle, 3 verts, no VBO
     pass.end();
-
-    if (useRipples && this._rippleBgPipeline) {
-      const cellCount = this._rippleBgCollectCells();
-      const u = this._rippleBgUboData;
-      u[0] = t;
-      u[1] = cellCount;
-      u[2] = this.canvas.width;
-      u[3] = this.canvas.height;
-      u[4] = S.rippleDensity ?? 1.5;
-      u[5] = S.rippleReach ?? 0.7;
-      u[6] = S.rippleStrength ?? 1.0;
-      u[7] = 0;
-      this.device.queue.writeBuffer(
-        this._rippleBgUbo, 0,
-        u.buffer, u.byteOffset, u.byteLength,
-      );
-      const rBg = this.device.createBindGroup({
-        layout: this._rippleBgPipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: this._rippleBgUbo } },
-          { binding: 1, resource: this._rippleBgSampler },
-          { binding: 2, resource: this._rippleBgRt.view },
-        ],
-      });
-      const post = this._frameEncoder.beginRenderPass({
-        colorAttachments: [{
-          view: this._frameView,
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          loadOp: 'clear',
-          storeOp: 'store',
-        }],
-      });
-      post.setPipeline(this._rippleBgPipeline);
-      post.setBindGroup(0, rBg);
-      post.draw(3, 1, 0, 0);
-      post.end();
-    } else if (useCaustics && this._causticBgPipeline) {
-      this._causticBgUboData[0] = t;
-      this.device.queue.writeBuffer(
-        this._causticBgUbo, 0,
-        this._causticBgUboData.buffer, this._causticBgUboData.byteOffset,
-        this._causticBgUboData.byteLength,
-      );
-      const cBg = this.device.createBindGroup({
-        layout: this._causticBgPipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: this._causticBgUbo } },
-          { binding: 1, resource: this._causticBgSampler },
-          { binding: 2, resource: this._causticBgRt.view },
-        ],
-      });
-      const post = this._frameEncoder.beginRenderPass({
-        colorAttachments: [{
-          view: this._frameView,
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
-          loadOp: 'clear',
-          storeOp: 'store',
-        }],
-      });
-      post.setPipeline(this._causticBgPipeline);
-      post.setBindGroup(0, cBg);
-      post.draw(3, 1, 0, 0);
-      post.end();
-    }
+    this._lastFrameSec = t;            // endFrame's post-pass reads this
   }
 
   drawCells(shapes, time /*, timeMs */) {
@@ -3220,7 +3163,7 @@ export class WebGPURenderer extends RendererBase {
 
       const pass = this._frameEncoder.beginRenderPass({
         colorAttachments: [{
-          view: this._frameView,
+          view: this._sceneView,
           loadOp: 'load',
           storeOp: 'store',
         }],
@@ -3430,7 +3373,7 @@ export class WebGPURenderer extends RendererBase {
       // ---- Pass 4: tint+threshold scratchA → main canvas ----
       const tintPass = this._frameEncoder.beginRenderPass({
         colorAttachments: [{
-          view: this._frameView,
+          view: this._sceneView,
           loadOp: 'load',
           storeOp: 'store',
         }],
@@ -3489,7 +3432,7 @@ export class WebGPURenderer extends RendererBase {
           this.W, this.H, -now * 0.04, fade,
         ]));
         const pass = this._frameEncoder.beginRenderPass({
-          colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+          colorAttachments: [{ view: this._sceneView, loadOp: 'load', storeOp: 'store' }],
         });
         pass.setPipeline(this._dashPipeline);
         pass.setBindGroup(0, this._dashBindGroup);
@@ -3510,7 +3453,7 @@ export class WebGPURenderer extends RendererBase {
       (3 / camScale) / quadR, 0, 0, 0,
     ]));
     const pass = this._frameEncoder.beginRenderPass({
-      colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+      colorAttachments: [{ view: this._sceneView, loadOp: 'load', storeOp: 'store' }],
     });
     pass.setPipeline(this._markerPipeline);
     pass.setBindGroup(0, this._markerBindGroup);
@@ -3556,7 +3499,7 @@ export class WebGPURenderer extends RendererBase {
       this.W, this.H, 0, 0,
     ]));
     const pass = this._frameEncoder.beginRenderPass({
-      colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+      colorAttachments: [{ view: this._sceneView, loadOp: 'load', storeOp: 'store' }],
     });
     pass.setPipeline(this._particlePipeline);
     pass.setBindGroup(0, this._particleBindGroup);
@@ -3614,7 +3557,7 @@ export class WebGPURenderer extends RendererBase {
       this.W, this.H, 0, 0,
     ]));
     const pass = this._frameEncoder.beginRenderPass({
-      colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+      colorAttachments: [{ view: this._sceneView, loadOp: 'load', storeOp: 'store' }],
     });
     pass.setPipeline(this._antibodyPipeline);
     pass.setBindGroup(0, this._antibodyBindGroup);
@@ -3700,7 +3643,7 @@ export class WebGPURenderer extends RendererBase {
       this.W, this.H, time, 0,
     ]));
     const pass = this._frameEncoder.beginRenderPass({
-      colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+      colorAttachments: [{ view: this._sceneView, loadOp: 'load', storeOp: 'store' }],
     });
     pass.setPipeline(this._facePipeline);
     pass.setBindGroup(0, this._faceBindGroup);
@@ -3712,9 +3655,79 @@ export class WebGPURenderer extends RendererBase {
 
   endFrame() {
     if (!this._frameEncoder) return;
+    // Composite the scene RT to the canvas surface through the active
+    // post-process (caustics or ripples). When neither is on,
+    // _sceneView === _frameView and there's nothing to do.
+    if (this._scenePostProc === 'ripples' && this._rippleBgPipeline && this._rippleBgRt) {
+      const t = this._lastFrameSec || 0;
+      const cellCount = this._rippleBgCollectCells();
+      const u = this._rippleBgUboData;
+      u[0] = t;
+      u[1] = cellCount;
+      u[2] = this.canvas.width;
+      u[3] = this.canvas.height;
+      u[4] = S.rippleDensity ?? 1.5;
+      u[5] = S.rippleReach ?? 0.7;
+      u[6] = S.rippleStrength ?? 1.0;
+      u[7] = 0;
+      this.device.queue.writeBuffer(
+        this._rippleBgUbo, 0,
+        u.buffer, u.byteOffset, u.byteLength,
+      );
+      const bg = this.device.createBindGroup({
+        layout: this._rippleBgPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._rippleBgUbo } },
+          { binding: 1, resource: this._rippleBgSampler },
+          { binding: 2, resource: this._rippleBgRt.view },
+        ],
+      });
+      const post = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: this._frameView,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      post.setPipeline(this._rippleBgPipeline);
+      post.setBindGroup(0, bg);
+      post.draw(3, 1, 0, 0);
+      post.end();
+    } else if (this._scenePostProc === 'caustics' && this._causticBgPipeline && this._causticBgRt) {
+      const t = this._lastFrameSec || 0;
+      this._causticBgUboData[0] = t;
+      this.device.queue.writeBuffer(
+        this._causticBgUbo, 0,
+        this._causticBgUboData.buffer, this._causticBgUboData.byteOffset,
+        this._causticBgUboData.byteLength,
+      );
+      const bg = this.device.createBindGroup({
+        layout: this._causticBgPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._causticBgUbo } },
+          { binding: 1, resource: this._causticBgSampler },
+          { binding: 2, resource: this._causticBgRt.view },
+        ],
+      });
+      const post = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: this._frameView,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      post.setPipeline(this._causticBgPipeline);
+      post.setBindGroup(0, bg);
+      post.draw(3, 1, 0, 0);
+      post.end();
+    }
     this.device.queue.submit([this._frameEncoder.finish()]);
     this._frameEncoder = null;
     this._frameView = null;
+    this._sceneView = null;
+    this._scenePostProc = null;
   }
 
   // Decoration pass (S.metaSplit-independent). Per-type spikes /
@@ -3837,7 +3850,7 @@ export class WebGPURenderer extends RendererBase {
         arr.buffer, arr.byteOffset, arr.byteLength,
       );
       const pass = this._frameEncoder.beginRenderPass({
-        colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+        colorAttachments: [{ view: this._sceneView, loadOp: 'load', storeOp: 'store' }],
       });
       pass.setPipeline(this._decorLinePipeline);
       pass.setBindGroup(0, this._decorBindGroup);
@@ -3854,7 +3867,7 @@ export class WebGPURenderer extends RendererBase {
         arr.buffer, arr.byteOffset, arr.byteLength,
       );
       const pass = this._frameEncoder.beginRenderPass({
-        colorAttachments: [{ view: this._frameView, loadOp: 'load', storeOp: 'store' }],
+        colorAttachments: [{ view: this._sceneView, loadOp: 'load', storeOp: 'store' }],
       });
       pass.setPipeline(this._decorTriPipeline);
       pass.setBindGroup(0, this._decorBindGroup);
