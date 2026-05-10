@@ -315,8 +315,8 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let nucColor = mix(in.nucleus, vec3<f32>(1.0), vec3<f32>(clamp(nucGlint, 0.0, 0.35)));
 
   // Theme switch (Phase 1) — same shape as webgl2 FRAG_DISK. Legacy
-  // (0) keeps today's behaviour exactly.
-  let theme = i32(round(u.cameraRot.y));
+  // (0) keeps today's behaviour exactly. (theme is already declared
+  // earlier in fs_main where bodyR branches on the same value.)
   var themedCyto = cyto;
   var themedOutline = in.cytoBot * 0.55;
   if (theme == 2) {
