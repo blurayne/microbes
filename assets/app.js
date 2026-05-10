@@ -723,10 +723,31 @@ bindCheckbox('causticsToggle', 'causticsOverlay');
 }
 
 // ----- Audio: music + SFX volume sliders, music on/off + next track -----
-// Volume scale applied to off-screen SFX events (e.g. an antibody
-// fire from a B-cell that's panned outside the viewport). 0.7 = 30 %
-// quieter, matching the spec.
-const SFX_OFFSCREEN_SCALE = 0.7;
+// Spatial-audio volume curve per user spec:
+//   on-screen        → 100 %
+//   just off-screen  → 80 %   (20 % quieter)
+//   far off-screen   → 40 %   (60 % quieter at extreme distance)
+// Smooth curve so density of events doesn't cliff at the viewport
+// edge. `distScreens` = screen-widths-from-viewport-edge (0 = inside
+// viewport, 1 = one screen away, etc.).
+function sfxSpatialScale(x, y) {
+  if (inView(x, y, 0, sim.camera, sim.W, sim.H)) return 1.0;
+  // Distance from viewport centre in screen-width units.
+  const s = sim.worldToScreen(x, y);
+  const cx = sim.W * 0.5, cy = sim.H * 0.5;
+  const halfW = sim.W * 0.5, halfH = sim.H * 0.5;
+  // 0 at viewport edge, 1 at one screen-radius beyond, …
+  const dxN = Math.max(0, (Math.abs(s.x - cx) - halfW) / Math.max(1, halfW));
+  const dyN = Math.max(0, (Math.abs(s.y - cy) - halfH) / Math.max(1, halfH));
+  const d = Math.hypot(dxN, dyN);
+  // Smooth interpolation: 0 → 0.80, ≥1.5 → 0.40, smoothstep in between.
+  const t = Math.max(0, Math.min(1, d / 1.5));
+  const eased = t * t * (3 - 2 * t);
+  return 0.80 - 0.40 * eased;
+}
+// Legacy constant — kept for the antibody handler that wasn't ported
+// to the curve yet; treated as the curve's edge value (just-off).
+const SFX_OFFSCREEN_SCALE = 0.8;
 
 Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ MusicPlayer }, { SfxPlayer }]) => {
   const player = new MusicPlayer();
@@ -763,12 +784,15 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
   // and gets ticked + rendered from the per-frame loop.
   sim.onFloatingText = (e) => floatingText.push(e);
 
-  // Antibody fire SFX. Random clip per shot; volume scaled to 70%
-  // when the firing B-cell is outside the visible viewport so off-
-  // screen events stay audible but don't drown the on-screen action.
+  // Antibody fire SFX. Random clip per shot; spatial-audio curve
+  // for distance attenuation (see sfxSpatialScale).
   sim.onAntibodyEmit = (owner /*, target */) => {
-    const visible = inView(owner.x, owner.y, owner.r, sim.camera, sim.W, sim.H);
-    sfx.play('antibody', { volumeScale: visible ? 1.0 : SFX_OFFSCREEN_SCALE });
+    sfx.play('antibody', { volumeScale: sfxSpatialScale(owner.x, owner.y) });
+  };
+
+  // Cell-split SFX. Random clip per event; spatial-curve volume.
+  sim.onSplit = (e) => {
+    sfx.play('split', { volumeScale: sfxSpatialScale(e.x, e.y) });
   };
 }).catch((err) => {
   console.warn('Audio modules failed to load:', err);

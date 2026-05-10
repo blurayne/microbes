@@ -1479,7 +1479,7 @@ export const PATHOGEN_GROUPS = [
 ];
 
 // ---------- Constants ----------
-export const SPLIT_DURATION = 1.8;
+export const SPLIT_DURATION = 0.9;   // 2× faster than the original 1.8 s
 export const BOND_DURATION = 2.0;
 export const CELL_RADIUS = 52;
 export const NUCLEUS_RATIO = 0.30;

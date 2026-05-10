@@ -242,6 +242,9 @@ export class Sim {
     }
     cell.state = 'SPLITTING';
     cell.splitProgress = 0;
+    // Event hook for app.js — emits {x, y, r, type} so the audio
+    // layer can play a split SFX with distance-based volume.
+    if (this.onSplit) this.onSplit({ x: cell.x, y: cell.y, r: cell.r, type: cell.type });
     const ctype = CELL_TYPES[cell.type];
     if (ctype && ctype.body && ctype.body.kind === 'oblong') {
       cell.splitAngle = cell.orientation;
