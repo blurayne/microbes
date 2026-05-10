@@ -26,7 +26,7 @@ export const DEFAULTS = {
   theme: 'legacy',
   // Colour palette tinting outlines + UI panel accent (was DEFAULTS.theme).
   // Renamed to interfaceColor to free up "theme" for the cell-shader theme.
-  interfaceColor: 'bloodstream',
+  interfaceColor: 'pink',
   activeTypes: ALL_CELL_KEYS.slice(),
   splitOnTap: false,
   randomSplit: false,
@@ -76,18 +76,14 @@ export const DEFAULTS = {
   renderer: 'webgpu',       // 'canvas2d' | 'webgl2' | 'webgpu'
 };
 
-// Interface-color palettes (formerly known as "themes"). Tints the
-// outline + UI accent.
+// Interface-colour accents — a SEPARATE small table from the
+// scene-render THEMES (which drive the background). The user
+// flagged the dropdown duplication in #114 ("why do we have the
+// same names from background and interface color?"); splitting
+// the two truly-distinct concepts.
 const KNOWN_INTERFACE_COLOR_KEYS = [
-  // Existing (kept for save-file compat; labels in THEMES updated).
-  // Aurora + Underwater dropped per user spec; saved settings on
-  // those keys reset to DEFAULTS.interfaceColor via the validation
-  // in loadSettings.
-  'bloodstream', 'bloodflow', 'cellShadow',
-  'cartoonNight', 'spectrum', 'lymphNode',
-  'lung', 'lavaFire', 'reactor',
-  // 2026 additions — five new palettes covering common gaps:
-  'dracula', 'boneMarrow', 'mitochondria', 'neuron', 'bile',
+  'pink', 'red', 'amber', 'yellow', 'green',
+  'cyan', 'blue', 'violet', 'mono',
 ];
 
 // Cell-shader themes — the new S.theme setting. 'legacy' renders
@@ -96,6 +92,30 @@ const KNOWN_INTERFACE_COLOR_KEYS = [
 const KNOWN_THEME_KEYS = [
   'legacy', 'microscope', 'cartoon', 'kurzgesagt', 'classic',
 ];
+
+// Background scene-render keys — entries in the THEMES table that
+// drive the bg shader. Used by both S.background validation and by
+// the legacy interface-colour migration (any saved interfaceColor
+// that's a bg key gets re-pointed to a sensible accent below).
+const KNOWN_BACKGROUND_KEYS = [
+  'bloodstream', 'bloodflow', 'cellShadow',
+  'cartoonNight', 'spectrum', 'lymphNode',
+  'lung', 'lavaFire', 'reactor',
+  'dracula', 'boneMarrow', 'mitochondria', 'neuron', 'bile',
+];
+
+// Map old THEMES keys → new accent keys for the interfaceColor
+// migration (when a saved settings blob still references the
+// old conflated table).
+const LEGACY_INTERFACE_COLOR_MIGRATION = {
+  bloodstream: 'red',  bloodflow: 'red',     cellShadow: 'red',
+  cartoonNight: 'cyan', spectrum: 'violet',  lymphNode: 'violet',
+  lung: 'pink',         lavaFire: 'amber',   reactor: 'green',
+  dracula: 'violet',    boneMarrow: 'amber', mitochondria: 'amber',
+  neuron: 'cyan',       bile: 'green',
+  // Removed scene keys (aurora / underwater) also map sensibly:
+  aurora: 'green',      underwater: 'cyan',
+};
 
 const VALID_RENDER_SCALES = [1, 0.5, 0.25, 0.125];
 
@@ -133,11 +153,15 @@ export function loadSettings() {
       parsed.theme = 'legacy';
     }
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
+    // Legacy interfaceColor migration: pre-PR-#115 the dropdown
+    // pointed at the same THEMES table the bg uses. Re-map any
+    // surviving theme-key value to a sensible accent.
     if (parsed.interfaceColor && !KNOWN_INTERFACE_COLOR_KEYS.includes(parsed.interfaceColor)) {
-      parsed.interfaceColor = DEFAULTS.interfaceColor;
+      parsed.interfaceColor =
+        LEGACY_INTERFACE_COLOR_MIGRATION[parsed.interfaceColor] || DEFAULTS.interfaceColor;
     }
     if (parsed.gameMode && !KNOWN_GAME_MODES.includes(parsed.gameMode)) parsed.gameMode = DEFAULTS.gameMode;
-    const validBackgrounds = ['solid', ...KNOWN_INTERFACE_COLOR_KEYS];
+    const validBackgrounds = ['solid', ...KNOWN_BACKGROUND_KEYS];
     if (!parsed.background || !validBackgrounds.includes(parsed.background)) {
       parsed.background = DEFAULTS.background;
     }
@@ -1108,16 +1132,36 @@ export const THEMES = {
   },
 };
 
-// Returns the active interface-colour palette object (was the old
-// currentTheme() before S.theme was repurposed for the cell shader).
+// Interface-accent palette — small standalone table separate from
+// the scene-render THEMES table. Each entry only carries what the
+// UI consumes: a label (for the dropdown), the accent colour (CSS
+// --accent), and a contrast colour (--accent-ink) for icons /
+// text on the accent background.
+export const INTERFACE_ACCENTS = {
+  pink:   { label: 'Pink',   accent: '#ff7a93', accentInk: '#2a0b14' },
+  red:    { label: 'Red',    accent: '#ff5a5a', accentInk: '#2a0606' },
+  amber:  { label: 'Amber',  accent: '#ffa040', accentInk: '#2a1606' },
+  yellow: { label: 'Yellow', accent: '#ffd166', accentInk: '#2a2406' },
+  green:  { label: 'Green',  accent: '#7eff8a', accentInk: '#062a0d' },
+  cyan:   { label: 'Cyan',   accent: '#5fe3d2', accentInk: '#062a26' },
+  blue:   { label: 'Blue',   accent: '#5ab8ff', accentInk: '#06162a' },
+  violet: { label: 'Violet', accent: '#bd93f9', accentInk: '#180a2a' },
+  mono:   { label: 'Mono',   accent: '#e8e8e8', accentInk: '#1a1a1a' },
+};
+
+// Returns the active interface-accent — { label, accent, accentInk }.
+// Falls back to pink if S.interfaceColor is stale or unknown (the
+// loadSettings migration shim should already have remapped legacy
+// theme-key values, this is the runtime safety net).
 export function currentInterfaceColor() {
-  return THEMES[S.interfaceColor] || THEMES[S.theme] || THEMES.bloodstream;
+  return INTERFACE_ACCENTS[S.interfaceColor] || INTERFACE_ACCENTS.pink;
 }
 
 // Backwards-compat alias for callers that read the palette via the
-// old name. New code should call currentInterfaceColor() directly.
+// old name. They still get the scene-render THEME (not the accent)
+// so existing background-related callers don't break.
 export function currentTheme() {
-  return currentInterfaceColor();
+  return THEMES[S.background] || THEMES.bloodstream;
 }
 
 // Effective highlight colour for selection visuals. When the user toggle is

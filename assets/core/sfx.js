@@ -58,13 +58,14 @@ export class SfxPlayer {
   }
 
   /**
-   * Trigger one shot of the named SFX. Picks a random clip from the
-   * group, instantiates a fresh Audio() so it can overlap with prior
-   * shots, and starts playback. `volumeScale` modulates the master
-   * SFX volume (e.g. 0.7 for off-screen events).
+   * Trigger one shot of the named SFX with optional stereo panning.
    *
    * @param {string} name — key in SFX_SOURCES
-   * @param {{ volumeScale?: number }} [opts]
+   * @param {{ volumeScale?: number, pan?: number }} [opts]
+   *   pan: -1 (full left) … 0 (centre) … +1 (full right). Routes
+   *   through a Web Audio MediaElementSource + StereoPannerNode
+   *   when an AudioContext is available; falls back to mono
+   *   <audio>.volume on older browsers.
    */
   play(name, opts) {
     if (!this._enabled || this._volume <= 0) return;
@@ -73,8 +74,21 @@ export class SfxPlayer {
     const proto = group[Math.floor(Math.random() * group.length)];
     if (!proto) return;
     const scale = (opts && typeof opts.volumeScale === 'number') ? opts.volumeScale : 1;
+    const pan = (opts && typeof opts.pan === 'number')
+      ? Math.max(-1, Math.min(1, opts.pan)) : 0;
     const a = new Audio(proto.src);
     a.volume = Math.max(0, Math.min(1, this._volume * scale));
+    // Lazy AudioContext on first play (browser autoplay policy
+    // forbids creation before a user gesture).
+    if (pan !== 0 && typeof AudioContext !== 'undefined') {
+      try {
+        if (!this._ctx) this._ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const src = this._ctx.createMediaElementSource(a);
+        const panner = this._ctx.createStereoPanner();
+        panner.pan.value = pan;
+        src.connect(panner).connect(this._ctx.destination);
+      } catch (_) { /* fall back to mono <audio> playback */ }
+    }
     const p = a.play();
     if (p && typeof p.then === 'function') p.catch(() => {});
   }
