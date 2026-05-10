@@ -32,7 +32,7 @@ export const DEFAULTS = {
   randomSplit: false,
   metaSplit: true,          // metaball merge between the two halves while SPLITTING
   metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu alike.
-  metaOutlineMode: 'sdf',   // 'edge' | 'sdf' | 'polygon' — outline style for the merged blob during SPLITTING. 'edge': trace blurred-mask threshold (1 shared rim). 'sdf': stroke each half polygon (2 rims). 'polygon': polygon-union rim, sharp/no-blur.
+  metaOutlineMode: 'edge',  // 'edge' | 'sdf' | 'polygon' — outline style for the merged blob during SPLITTING. 'edge' (default) traces the blurred-mask 0.5 contour, so the rim follows the actual rendered blob shape exactly. 'sdf' strokes each half polygon (2 overlapping rims). 'polygon' is a sharp polygon-union rim, no blur.
   // Game mode. The live simulator IS Free Game today — campaign +
   // survival are designed (docs/ch04-konzept.md §4.3) as RESTRICTIONS
   // overlaid on the same physics, not separate code paths. So this
@@ -189,6 +189,13 @@ export function loadSettings() {
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
     const validMetaOutlineModes = ['edge', 'sdf', 'polygon'];
     if (!validMetaOutlineModes.includes(parsed.metaOutlineMode)) parsed.metaOutlineMode = DEFAULTS.metaOutlineMode;
+    // 2026-05: user explicitly asked for the split outline to follow
+    // the actual rendered metaball shape. 'edge' mode traces the
+    // blurred-mask 0.5 contour, which IS the rendered blob silhouette
+    // exactly. 'sdf' was the previous default but draws two separate
+    // half-polygon strokes that cross through the bond — not the
+    // rendered shape. Bump any saved 'sdf' value to 'edge'.
+    if (parsed.metaOutlineMode === 'sdf') parsed.metaOutlineMode = 'edge';
     if (typeof parsed.cellBorderThickness !== 'number' || !Number.isFinite(parsed.cellBorderThickness)) {
       parsed.cellBorderThickness = DEFAULTS.cellBorderThickness;
     }
