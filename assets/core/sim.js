@@ -176,6 +176,10 @@ export class Sim {
       targetId: target.id,
       ownerId: owner.id,
     });
+    // Optional event hook so app.js can play SFX without sim.js
+    // having to import Audio. Owner is the firing B-cell; the
+    // listener can read owner.x/y to decide an on-screen volume.
+    if (this.onAntibodyEmit) this.onAntibodyEmit(owner, target);
   }
 
   // Subtract HP from a cell. Triggers the killCell death + particle
