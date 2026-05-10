@@ -18,6 +18,80 @@ import { WebGPURenderer } from './render/webgpu.js';
 // ---------- DOM ----------
 const canvas = document.getElementById('stage');
 
+// ---------- In-settings debug log ----------
+// Mobile devices have no DevTools console; intercept the four common
+// console methods and mirror their output into a ring buffer. Settings
+// → "Debug log" renders the buffer so the user can read runtime
+// diagnostics without a desktop. The originals still fire so desktop
+// DevTools is unaffected.
+const _debugLog = [];
+const _DEBUG_LOG_MAX = 200;
+function _formatArg(a) {
+  if (a == null) return String(a);
+  if (typeof a === 'string') return a;
+  if (typeof a === 'number' || typeof a === 'boolean') return String(a);
+  try {
+    const s = JSON.stringify(a);
+    return (s == null) ? String(a) : s;
+  } catch { return String(a); }
+}
+['log', 'info', 'warn', 'error'].forEach((level) => {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => {
+    orig(...args);
+    try {
+      _debugLog.push({ t: Date.now(), level, msg: args.map(_formatArg).join(' ') });
+      if (_debugLog.length > _DEBUG_LOG_MAX) _debugLog.shift();
+      _refreshDebugLog();
+    } catch { /* never let logging break the app */ }
+  };
+});
+function _refreshDebugLog() {
+  const el = document.getElementById('debugLogView');
+  if (!el) return;
+  // Skip render work when settings is hidden (cheap fast-path).
+  const settingsHidden = document.getElementById('settings')?.classList.contains('hidden');
+  if (settingsHidden) return;
+  // Render as innerHTML so per-level colour tints work via a span class.
+  // Escape anything that could be HTML.
+  const esc = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const lines = _debugLog.map((e) => {
+    const t = new Date(e.t);
+    const hh = String(t.getHours()).padStart(2, '0');
+    const mm = String(t.getMinutes()).padStart(2, '0');
+    const ss = String(t.getSeconds()).padStart(2, '0');
+    const ms = String(t.getMilliseconds()).padStart(3, '0');
+    const cls = (e.level === 'warn' || e.level === 'error' || e.level === 'info') ? ` class="lvl-${e.level}"` : '';
+    return `<span${cls}>[${hh}:${mm}:${ss}.${ms}] ${e.level.toUpperCase().padEnd(5)} ${esc(e.msg)}</span>`;
+  });
+  el.innerHTML = lines.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+function _hookDebugLogButtons() {
+  const clearBtn = document.getElementById('debugLogClear');
+  const copyBtn  = document.getElementById('debugLogCopy');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      _debugLog.length = 0;
+      _refreshDebugLog();
+    });
+  }
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
+      const txt = _debugLog.map((e) => {
+        const t = new Date(e.t).toISOString().slice(11, 23);
+        return `[${t}] ${e.level.toUpperCase().padEnd(5)} ${e.msg}`;
+      }).join('\n');
+      try {
+        await navigator.clipboard.writeText(txt);
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = copyBtn.dataset.label || 'Copy'; }, 800);
+      } catch { /* clipboard might be unavailable on some mobile browsers */ }
+    });
+    copyBtn.dataset.label = copyBtn.textContent;
+  }
+}
+
 // ---------- Sim + renderer ----------
 const sim = new Sim();
 
@@ -324,12 +398,16 @@ if (pauseBtn) {
   pauseBtn.addEventListener('click', () => setPaused(!_paused));
 }
 const allDialogs = [settingsEl, helpDialog, paletteDialog, paletteBadDialog].filter(Boolean);
+_hookDebugLogButtons();
 
 function openOnly(target) {
   for (const d of allDialogs) {
     if (d === target) d.classList.remove('hidden');
     else d.classList.add('hidden');
   }
+  // Re-render the debug log when settings opens (renders are skipped
+  // while hidden as a fast-path).
+  if (target === settingsEl) _refreshDebugLog();
 }
 function closeAll() {
   for (const d of allDialogs) d.classList.add('hidden');
