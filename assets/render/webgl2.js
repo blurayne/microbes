@@ -245,7 +245,13 @@ const vec2 POS[4] = vec2[4](
 );
 void main() {
   vec2 p = POS[gl_VertexID];
-  v_uv = p * 0.5 + 0.5;
+  // v_uv in canvas convention: v=0 at top, v=1 at bottom. Cells render
+  // in canvas coords (y=0 at top); the bg shader's worldPx reconstruction
+  // multiplies v_uv by the viewport, so v_uv must use the same y direction
+  // as the cell shader or the bg pans opposite to cells in y. Flip is
+  // free here; downstream code (worldPx, gradient mix, spots, RBC) all
+  // inherit the canvas convention.
+  v_uv = vec2(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
   gl_Position = vec4(p, 0.0, 1.0);
 }`;
 
