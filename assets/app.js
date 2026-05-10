@@ -5,8 +5,9 @@
 import {
   S, saveSettings, applyI18n,
   THEMES, BACKGROUNDS, CELL_TYPES, PATHOGEN_GROUPS, LOCALES,
+  INTERFACE_ACCENTS,
   T, cellLabel, cellDesc,
-  currentTheme, currentBackground, colorNameFor,
+  currentTheme, currentBackground, currentInterfaceColor, colorNameFor,
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { Sim } from './core/sim.js';
@@ -740,6 +741,15 @@ bindCheckbox('causticsToggle', 'causticsOverlay');
 // Smooth curve so density of events doesn't cliff at the viewport
 // edge. `distScreens` = screen-widths-from-viewport-edge (0 = inside
 // viewport, 1 = one screen away, etc.).
+// Stereo pan: −1 (full left) … +1 (full right). Linear map from
+// the event's normalised screen-x offset relative to viewport
+// centre, clamped to [−1, +1]. Off-screen events get the saturating
+// edge values, which feels natural ("over there").
+function sfxSpatialPan(x, y) {
+  const s = sim.worldToScreen(x, y);
+  const cx = sim.W * 0.5;
+  return Math.max(-1, Math.min(1, (s.x - cx) / Math.max(1, cx)));
+}
 function sfxSpatialScale(x, y) {
   if (inView(x, y, 0, sim.camera, sim.W, sim.H)) return 1.0;
   // Distance from viewport centre in screen-width units.
@@ -794,25 +804,31 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
   // and gets ticked + rendered from the per-frame loop.
   sim.onFloatingText = (e) => floatingText.push(e);
 
-  // Antibody fire SFX. Random clip per shot; spatial-audio curve
-  // for distance attenuation (see sfxSpatialScale).
+  // Antibody fire SFX. Spatial volume curve × 0.5 master scale
+  // (b-cell sound was too loud; user spec 50% quieter). Stereo
+  // pan from event's screen-x position.
   sim.onAntibodyEmit = (owner /*, target */) => {
-    sfx.play('antibody', { volumeScale: sfxSpatialScale(owner.x, owner.y) });
+    sfx.play('antibody', {
+      volumeScale: sfxSpatialScale(owner.x, owner.y) * 0.5,
+      pan: sfxSpatialPan(owner.x, owner.y),
+    });
   };
 
-  // Cell-split SFX. Random clip per event; spatial-curve volume.
   sim.onSplit = (e) => {
-    sfx.play('split', { volumeScale: sfxSpatialScale(e.x, e.y) });
+    sfx.play('split', {
+      volumeScale: sfxSpatialScale(e.x, e.y),
+      pan: sfxSpatialPan(e.x, e.y),
+    });
   };
 
-  // Per-type damage SFX. Currently: virus → virus-hit. Other types
-  // could be added by extending the switch below + dropping new
-  // clips into assets/audio/sfx/ and registering in sfx.js.
   sim.onDamage = (e) => {
     let name = null;
     if (e.type === 'virus') name = 'virusHit';
     if (!name) return;
-    sfx.play(name, { volumeScale: sfxSpatialScale(e.x, e.y) });
+    sfx.play(name, {
+      volumeScale: sfxSpatialScale(e.x, e.y),
+      pan: sfxSpatialPan(e.x, e.y),
+    });
   };
 }).catch((err) => {
   console.warn('Audio modules failed to load:', err);
@@ -842,28 +858,27 @@ if (dbg) {
   });
 }
 
-function applyThemeToCss(theme) {
-  document.documentElement.style.setProperty('--accent', theme.ui.panelAccent);
+function applyThemeToCss(accent) {
+  document.documentElement.style.setProperty('--accent', accent.accent);
+  document.documentElement.style.setProperty('--accent-ink', accent.accentInk);
 }
 
-// Interface-colour palette dropdown (renamed from themeSelect in
-// late 2026 when S.theme was repurposed for the cell-shader theme).
+// Interface-colour accent dropdown. Reads from the new
+// INTERFACE_ACCENTS table (separate from scene-render THEMES).
 const interfaceColorSelect = document.getElementById('interfaceColorSelect');
-for (const [key, t] of Object.entries(THEMES)) {
+for (const [key, a] of Object.entries(INTERFACE_ACCENTS)) {
   const opt = document.createElement('option');
   opt.value = key;
-  // Append the palette's accent colour in parens so users can scan by hue.
-  const accent = (t.ui && t.ui.panelAccent) || '';
-  opt.textContent = accent ? `${t.label} (${colorNameFor(accent)})` : t.label;
+  opt.textContent = a.label;
   interfaceColorSelect.appendChild(opt);
 }
-interfaceColorSelect.value = S.interfaceColor in THEMES ? S.interfaceColor : 'bloodstream';
-applyThemeToCss(currentTheme());
+interfaceColorSelect.value = S.interfaceColor in INTERFACE_ACCENTS ? S.interfaceColor : 'pink';
+applyThemeToCss(currentInterfaceColor());
 interfaceColorSelect.addEventListener('change', () => {
-  if (THEMES[interfaceColorSelect.value]) {
+  if (INTERFACE_ACCENTS[interfaceColorSelect.value]) {
     S.interfaceColor = interfaceColorSelect.value;
     saveSettings();
-    applyThemeToCss(currentTheme());
+    applyThemeToCss(currentInterfaceColor());
   }
 });
 
