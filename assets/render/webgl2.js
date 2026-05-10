@@ -631,7 +631,7 @@ const FRAG_BG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 
-uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid, 4 lung, 5 aurora, 6 underwater, 7 lava, 8 reactor
+uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid, 4 lung (smoke), 5 aurora, 6 underwater, 7 lava, 8 reactor, 9 bloodflow, 10 cell-shadow
 uniform sampler2D u_reactorTex;  // bound when u_kind == 8 (Gray-Scott RT)
 uniform vec3 u_base;
 uniform vec3 u_top;
@@ -729,6 +729,41 @@ void main() {
     col = mix(col, mix(hot, cool, clamp(v, 0.0, 1.0)), 0.85);
   }
 
+  // ---- Bloodflow (kind 9): port of shader-test's 'bloodflow ·
+  //      default' — fbm tint over deep red + drifting RBC ovals.
+  //      Distinct from the game's gradient+tile bloodstream (kind
+  //      0 path), this one keeps the shader-test aesthetic. ----
+  if (u_kind == 9) {
+    vec2 bf_p = worldPx * 0.0012 + vec2(u_time * 0.04, u_time * 0.03);
+    float bf_n = bgFbm(bf_p);
+    float bf_rbc = bgFbm(worldPx * 0.0030 + vec2(0.0, u_time * 0.15));
+    vec3 bf_base = mix(vec3(0.18, 0.03, 0.05), vec3(0.42, 0.06, 0.08), bf_n);
+    bf_base = mix(bf_base, vec3(0.62, 0.10, 0.14), smoothstep(0.55, 0.75, bf_rbc) * 0.5);
+    col = mix(col, bf_base, 0.85);
+  }
+  // ---- Cell shadow (kind 10): port of shader-test's voronoi ---
+  //      Smooth-min Voronoi field over 3×3 cell neighbourhood,
+  //      animated point positions. CC BY-NC-SA 3.0 (see About).
+  if (u_kind == 10) {
+    vec2 cs_st = worldPx * 0.005;
+    vec2 cs_cellPos   = floor(cs_st);
+    vec2 cs_cellCoord = fract(cs_st);
+    float cs_sum = 0.0;
+    for (int ix = -1; ix <= 1; ix++) {
+      for (int iy = -1; iy <= 1; iy++) {
+        vec2 nb = vec2(float(ix), float(iy));
+        float h0 = bgHash(cs_cellPos + nb);
+        float h1 = bgHash(cs_cellPos + nb + vec2(17.3, 41.7));
+        vec2 nb_pos = 0.5 + 0.5 * sin(u_time * 0.4 + vec2(h0, h1) * 6.0);
+        vec2 diff = (nb + nb_pos) - cs_cellCoord;
+        cs_sum += exp(-32.0 * dot(diff, diff));
+      }
+    }
+    float cs_v = -(1.0 / 32.0) * log(max(cs_sum, 1e-6));
+    float cs_intensity = 0.03 / pow(max(1.2 - sqrt(max(cs_v, 0.0)), 0.05), 3.0);
+    vec3 cs_baseCol = vec3(200.0/255.0, 50.0/255.0, 69.0/255.0);
+    col = mix(col, clamp(cs_baseCol * cs_intensity, 0.0, 2.0), 0.95);
+  }
   // ---- Aurora borealis: vertical ribbons of green/violet (kind 5) ----
   // Ribbon density driven by domain-warped fbm; brightness peaks in
   // a horizontal band (the "sky strip"). Hue oscillates between
@@ -2290,6 +2325,8 @@ export class WebGL2Renderer extends RendererBase {
     else if (bg.kind === 'underwater') kind = 6;
     else if (bg.kind === 'lava') kind = 7;
     else if (bg.kind === 'reactor') kind = 8;
+    else if (bg.kind === 'bloodflow') kind = 9;
+    else if (bg.kind === 'cell-shadow') kind = 10;
     // 'flat' / 'navy-ghost' / unknown all fall through to flat.
 
     // Reactor (Gray-Scott) — run N step iterations + maybe seed before

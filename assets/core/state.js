@@ -1001,6 +1001,25 @@ export const THEMES = {
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#ff6b6b' },
   },
+  bloodflow: {
+    // Port of shader-test's "bloodflow" (was 'bloodstream · default'):
+    // fbm-tinted base + per-theme RBC drift, no plasma wash. Visually
+    // distinct from the game's original 'bloodstream' (which keeps
+    // the gradient + tiled RBCs + plasma look).
+    label: 'Bloodflow',
+    bg: { kind: 'bloodflow', topColor: '#3a0a12', botColor: '#0e0205', vignette: 0.30 },
+    outline: { color: '#1c0306', defaultPx: 4 },
+    ui: { panelAccent: '#d63333' },
+  },
+  cellShadow: {
+    // Port of shader-test's "cell shadow · voronoi" (was 'red cells'):
+    // smooth-min Voronoi field with animated point positions, deep
+    // red palette. CC BY-NC-SA 3.0 — see About dialog.
+    label: 'Cell shadow',
+    bg: { kind: 'cell-shadow', base: '#3a060e', vignette: 0.35 },
+    outline: { color: '#1c0306', defaultPx: 4 },
+    ui: { panelAccent: '#c83246' },
+  },
   cartoonNight: {
     label: 'Cartoon Night',
     bg: { kind: 'flat', base: '#0c1a3a', spotColors: ['#ff7ab8','#ffb84d','#5fe3d2','#ff5d6e'], spotCount: 6, vignette: 0.30 },

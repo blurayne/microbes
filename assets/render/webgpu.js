@@ -1040,6 +1040,36 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     col = mix(col, mix(hot, cool, clamp(v, 0.0, 1.0)), 0.85);
   }
 
+  // ---- Bloodflow (kind 9): shader-test bloodflow default port. ----
+  if (kind == 9) {
+    let bfP = worldPx * 0.0012 + vec2<f32>(time * 0.04, time * 0.03);
+    let bfN = bgFbm(bfP);
+    let bfRbc = bgFbm(worldPx * 0.0030 + vec2<f32>(0.0, time * 0.15));
+    var bfBase = mix(vec3<f32>(0.18, 0.03, 0.05), vec3<f32>(0.42, 0.06, 0.08), vec3<f32>(bfN));
+    bfBase = mix(bfBase, vec3<f32>(0.62, 0.10, 0.14), vec3<f32>(smoothstep(0.55, 0.75, bfRbc) * 0.5));
+    col = mix(col, bfBase, vec3<f32>(0.85));
+  }
+  // ---- Cell shadow (kind 10): voronoi port. CC BY-NC-SA 3.0. ----
+  if (kind == 10) {
+    let csSt = worldPx * 0.005;
+    let csCellPos   = floor(csSt);
+    let csCellCoord = fract(csSt);
+    var csSum: f32 = 0.0;
+    for (var ix: i32 = -1; ix <= 1; ix = ix + 1) {
+      for (var iy: i32 = -1; iy <= 1; iy = iy + 1) {
+        let nb = vec2<f32>(f32(ix), f32(iy));
+        let h0 = bgHash(csCellPos + nb);
+        let h1 = bgHash(csCellPos + nb + vec2<f32>(17.3, 41.7));
+        let nbPos = vec2<f32>(0.5) + vec2<f32>(0.5) * sin(time * 0.4 + vec2<f32>(h0, h1) * 6.0);
+        let diff = (nb + nbPos) - csCellCoord;
+        csSum = csSum + exp(-32.0 * dot(diff, diff));
+      }
+    }
+    let csV = -(1.0 / 32.0) * log(max(csSum, 1e-6));
+    let csIntensity = 0.03 / pow(max(1.2 - sqrt(max(csV, 0.0)), 0.05), 3.0);
+    let csBaseCol = vec3<f32>(200.0/255.0, 50.0/255.0, 69.0/255.0);
+    col = mix(col, clamp(csBaseCol * csIntensity, vec3<f32>(0.0), vec3<f32>(2.0)), vec3<f32>(0.95));
+  }
   // ---- Aurora borealis: vertical green/violet ribbons (kind 5) ----
   if (kind == 5) {
     let sky = vec2<f32>(worldPx.x * 0.0015, worldPx.y * 0.001 - time * 0.05);
@@ -2702,6 +2732,8 @@ export class WebGPURenderer extends RendererBase {
     else if (bg.kind === 'underwater') kind = 6;
     else if (bg.kind === 'lava') kind = 7;
     else if (bg.kind === 'reactor') kind = 8;
+    else if (bg.kind === 'bloodflow') kind = 9;
+    else if (bg.kind === 'cell-shadow') kind = 10;
 
     // Reactor (Gray-Scott): allocate RTs lazily, run N step iterations
     // and refresh seeds, all encoded into the frame's command encoder
