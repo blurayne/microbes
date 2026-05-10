@@ -13,6 +13,7 @@ import { Sim } from './core/sim.js';
 import { FloatingText } from './core/floating-text.js';
 import { CellTagOverlay } from './core/cell-tag.js';
 import { SpawnBanner } from './core/spawn-banner.js';
+import { buildCodename } from './core/build-codename.js';
 import { getShapes, inView } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
@@ -1105,7 +1106,12 @@ function renderBuildStamp() {
   const parts = [];
   if (b.branch) parts.push(b.branch);
   parts.push(sha);
-  if (b.run > 0) parts.push(`#${b.run}`);
+  if (b.run > 0) {
+    // Each deploy run gets a deterministic codename so the user
+    // can tell at a glance which build is loaded after a refresh.
+    // See assets/core/build-codename.js for the word lists.
+    parts.push(`#${b.run} · ${buildCodename(b.run)}`);
+  }
   if (when) parts.push(when);
   el.textContent = parts.join(' · ');
 }
