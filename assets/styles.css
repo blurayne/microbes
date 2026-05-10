@@ -79,16 +79,13 @@ body.no-bad #eyeToggle  { bottom: 266px; }
   display: block;
 }
 
-/* Split mode button — mitosis-style icon (two daughter cells with
-   chromosomes + a division arrow) on a strict-black background. The
-   inline SVG inherits currentColor so the active-state recolour
-   below works without changes. */
-.mode-split {
-  background: #000 !important;
-  color: #fff !important;
-  padding: 0;
-}
-.mode-split svg {
+/* Mode-button SVG icons all use currentColor + fit the 40 px
+   round chassis at 22 px. Background + colour come from the
+   shared .mode-btn rules below — the legacy black-bg override
+   for split was removed (PR-fix per user spec: "every button
+   should have the background of the color theme we have
+   chosen. the icons are monochrome"). */
+.mode-btn svg {
   width: 22px;
   height: 22px;
   display: block;
@@ -687,21 +684,26 @@ body.adding #stage    { cursor: crosshair; }
   height: 40px;
   border-radius: 50%;
   border: 2px solid #000;
-  background: #ffffff14;
-  color: var(--ink);
+  /* Themed bg + accent-ink icon → monochrome glyph on the active
+     theme colour. Active state pops via filter, not a colour swap,
+     so the contrast contract is preserved. */
+  background: var(--accent);
+  color: var(--accent-ink);
   display: grid;
   place-items: center;
   cursor: pointer;
   font: 600 18px/1 system-ui, sans-serif;
   box-shadow: 0 2px 8px #0008;
-  transition: transform 100ms ease, background 120ms ease;
+  transition: transform 100ms ease, filter 120ms ease;
   padding: 0;
 }
-.mode-btn:hover  { transform: scale(1.05); }
+.mode-btn:hover  { transform: scale(1.05); filter: brightness(1.10); }
 .mode-btn:active { transform: scale(0.95); }
+/* Active state — slightly brighter + ring shadow so it reads
+   without changing the bg colour (which is already themed). */
 .mode-btn.active {
-  background: var(--accent);
-  color: var(--accent-ink);
+  filter: brightness(1.15);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18), 0 2px 8px #0008;
 }
 
 /* Generic dialog (help + palette) — same chrome as the settings dialog */
