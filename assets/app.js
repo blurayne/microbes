@@ -704,6 +704,11 @@ bindCheckbox('compositionHud', 'compositionHud');
 // rAF picks up the new value.
 bindCheckbox('causticsToggle', 'causticsOverlay');
 
+// Liquid-ripples toggle. Same per-frame read pattern as caustics;
+// the renderer redirects the bg pass through a ripple post-process
+// that distorts the bg around each on-screen cell.
+bindCheckbox('liquidRipplesToggle', 'liquidRipples');
+
 // Fullscreen toggle. Browsers REQUIRE a user gesture to enter
 // fullscreen, so this can't be a saved-and-restored S.* setting —
 // we only react to the user's click. The checkbox state is kept

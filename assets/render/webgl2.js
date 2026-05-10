@@ -963,6 +963,50 @@ void main() {
 }
 `;
 
+// Liquid-ripples overlay: each on-screen cell radiates concentric
+// ripples that distort the bg sample UV. Reads as cells moving
+// through liquid. Cells render on top normally; only the bg layer
+// is distorted, so the pass is cheap (one fullscreen quad with an
+// inner loop bounded by the cap).
+const RIPPLE_MAX = 24;
+const FRAG_RIPPLE_BG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_bg;
+uniform float u_time;
+uniform vec2 u_resolution;       // canvas drawing-buffer (W, H)
+uniform int u_cellCount;
+uniform vec3 u_cells[${RIPPLE_MAX}];   // (uvX, uvY, uvR_minAxis)
+out vec4 outColor;
+
+void main() {
+  vec2 uv = v_uv;
+  vec2 disp = vec2(0.0);
+  float minAx = min(u_resolution.x, u_resolution.y);
+  for (int i = 0; i < ${RIPPLE_MAX}; i++) {
+    if (i >= u_cellCount) break;
+    vec3 c = u_cells[i];
+    vec2 dvUv = uv - c.xy;
+    vec2 dvPx = dvUv * u_resolution;
+    float dPx  = length(dvPx);
+    float rPx  = max(c.z * minAx, 4.0);
+    if (dPx > rPx * 8.0) continue;
+    // Wavelength scales with cell radius — tighter rings on small
+    // cells, wider on big ones. Wave travels outward at ~1.5× λ/s.
+    float wavelen = rPx * 0.7;
+    float k = 6.28318 / wavelen;
+    float wave = sin(dPx * k - u_time * (wavelen * 1.5) * k);
+    float falloff = exp(-dPx / (rPx * 4.0));
+    vec2 dirUv = dvUv / max(1e-4, length(dvUv));
+    disp += dirUv * wave * falloff;
+  }
+  // Convert cumulative displacement to UV space; ~6 px peak.
+  vec2 uvDisp = disp * (6.0 / minAx);
+  vec3 bg = texture(u_bg, clamp(uv + uvDisp, 0.0, 1.0)).rgb;
+  outColor = vec4(bg, 1.0);
+}
+`;
+
 // Step shader runs N iterations per visible frame; seed shader writes
 // fresh B-discs every ~10 s so the pattern keeps regrowing.
 const FRAG_REACTOR_STEP = `#version 300 es
@@ -2321,6 +2365,87 @@ export class WebGL2Renderer extends RendererBase {
     }
   }
 
+  // ── Liquid-ripples overlay (S.liquidRipples) ──
+  // Shares the bg-RT plumbing with caustics: the bg pass renders to
+  // an offscreen RGBA8 FBO, then a fullscreen ripple shader samples
+  // it with per-cell UV displacement and writes to the default fb.
+  // Cells render on top after this pass so the ripples appear in the
+  // liquid-bg around them, not on the cells themselves.
+  _rippleEnsureRt() {
+    const gl = this.gl;
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
+    if (this._rippleRt && this._rippleRt.w === w && this._rippleRt.h === h) return;
+    if (this._rippleRt) {
+      gl.deleteFramebuffer(this._rippleRt.fbo);
+      gl.deleteTexture(this._rippleRt.tex);
+    }
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    this._rippleRt = { fbo, tex, w, h };
+  }
+  _rippleEnsureProg() {
+    if (this._rippleProg) return;
+    const gl = this.gl;
+    const prog = link(gl, VERT_FULLSCREEN, FRAG_RIPPLE_BG);
+    this._rippleProg = prog;
+    this._rippleU = {
+      bg:        gl.getUniformLocation(prog, 'u_bg'),
+      time:      gl.getUniformLocation(prog, 'u_time'),
+      res:       gl.getUniformLocation(prog, 'u_resolution'),
+      cellCount: gl.getUniformLocation(prog, 'u_cellCount'),
+      cells:     gl.getUniformLocation(prog, 'u_cells'),
+    };
+    this._rippleCellsBuf = new Float32Array(RIPPLE_MAX * 3);
+  }
+  _rippleDestroy() {
+    const gl = this.gl;
+    if (this._rippleRt) {
+      gl.deleteFramebuffer(this._rippleRt.fbo);
+      gl.deleteTexture(this._rippleRt.tex);
+      this._rippleRt = null;
+    }
+    if (this._rippleProg) {
+      gl.deleteProgram(this._rippleProg);
+      this._rippleProg = null;
+      this._rippleU = null;
+    }
+  }
+  // Pack at most RIPPLE_MAX on-screen cells into _rippleCellsBuf as
+  // (uvX, uvY, uvR_minAxis) triplets. Returns the count actually used.
+  _rippleCollectCells() {
+    const buf = this._rippleCellsBuf;
+    const cells = (this.sim && this.sim.cells) || [];
+    const W = this.W, H = this.H;
+    const minAx = Math.max(1, Math.min(W, H));
+    let n = 0;
+    for (let i = 0; i < cells.length && n < RIPPLE_MAX; i++) {
+      const c = cells[i];
+      const s = this.sim.worldToScreen(c.x, c.y);
+      // Skip off-screen + a tiny margin so the post-pass cost stays
+      // proportional to visible cells rather than total population.
+      const m = c.r * 1.5;
+      if (s.x < -m || s.y < -m || s.x > W + m || s.y > H + m) continue;
+      buf[n * 3 + 0] = s.x / W;
+      buf[n * 3 + 1] = s.y / H;
+      buf[n * 3 + 2] = (c.r * this.camera.scale) / minAx;
+      n++;
+    }
+    // Zero out the unused tail so the GPU doesn't read stale data.
+    for (let i = n * 3; i < RIPPLE_MAX * 3; i++) buf[i] = 0;
+    return n;
+  }
+
   drawBackground(timeMs) {
     const gl = this.gl;
     const bg = currentBackground();
@@ -2405,13 +2530,17 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindVertexArray(this._bgVao);
     gl.disable(gl.BLEND);
 
-    // Caustics-overlay path: render the bg into our offscreen FBO,
-    // then run a second fullscreen pass that samples it with a
-    // water-turbulence UV-displacement + tint. When the toggle is
-    // off (default) we skip both the FBO bind and the post-pass —
-    // zero added cost.
-    const useCaustics = !!S.causticsOverlay;
-    if (useCaustics) {
+    // Post-process overlays: caustics + liquid-ripples. Both render
+    // the bg into an offscreen FBO and run a fullscreen post-pass.
+    // If both toggles are on, ripples wins (more recent feature).
+    const useRipples = !!S.liquidRipples;
+    const useCaustics = !!S.causticsOverlay && !useRipples;
+    if (useRipples) {
+      this._rippleEnsureRt();
+      this._rippleEnsureProg();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._rippleRt.fbo);
+      gl.viewport(0, 0, this._rippleRt.w, this._rippleRt.h);
+    } else if (useCaustics) {
       this._causticEnsureRt();
       this._causticEnsureProg();
       gl.bindFramebuffer(gl.FRAMEBUFFER, this._causticRt.fbo);
@@ -2420,7 +2549,20 @@ export class WebGL2Renderer extends RendererBase {
 
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-    if (useCaustics && this._causticProg) {
+    if (useRipples && this._rippleProg) {
+      const cellCount = this._rippleCollectCells();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      gl.useProgram(this._rippleProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._rippleRt.tex);
+      gl.uniform1i(this._rippleU.bg, 0);
+      gl.uniform1f(this._rippleU.time, t);
+      gl.uniform2f(this._rippleU.res, this.canvas.width, this.canvas.height);
+      gl.uniform1i(this._rippleU.cellCount, cellCount);
+      gl.uniform3fv(this._rippleU.cells, this._rippleCellsBuf);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    } else if (useCaustics && this._causticProg) {
       // Switch to the default framebuffer + caustic post-pass.
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, this.canvas.width, this.canvas.height);
@@ -2431,11 +2573,10 @@ export class WebGL2Renderer extends RendererBase {
       gl.uniform1f(this._causticU.time, t);
       gl.uniform2f(this._causticU.res, this.canvas.width, this.canvas.height);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    } else if (this._causticRt) {
-      // Toggled off mid-session — release the offscreen RT so the
-      // memory doesn't sit around for the rest of the page lifetime.
-      this._causticDestroy();
     }
+    // Release any RT for a feature the user toggled off mid-session.
+    if (!useRipples && this._rippleRt) this._rippleDestroy();
+    if (!useCaustics && this._causticRt) this._causticDestroy();
 
     gl.enable(gl.BLEND);
     gl.bindVertexArray(null);

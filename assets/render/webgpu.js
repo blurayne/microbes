@@ -928,6 +928,56 @@ struct CausticU { time: f32 };
 }
 `;
 
+// Liquid-ripples post-process. Mirror of FRAG_RIPPLE_BG. Each cell
+// is packed as vec4(uvX, uvY, uvR, _); WGSL pads vec3 arrays to
+// vec4 anyway, so explicit vec4 keeps the JS-side layout simple.
+const RIPPLE_MAX_WGPU = 24;
+const RIPPLE_BG_WGSL = /* wgsl */ `
+struct RippleU {
+  time: f32,
+  cellCount: f32,           // packed as float for tight 16-byte alignment
+  resW: f32,
+  resH: f32,
+  cells: array<vec4<f32>, ${RIPPLE_MAX_WGPU}>,
+};
+@group(0) @binding(0) var<uniform> U : RippleU;
+@group(0) @binding(1) var bgSamp : sampler;
+@group(0) @binding(2) var bgTex  : texture_2d<f32>;
+
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+  let x = f32((vi << 1u) & 2u) * 2.0 - 1.0;
+  let y = f32(vi & 2u) * 2.0 - 1.0;
+  return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+@fragment fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+  let res = vec2<f32>(U.resW, U.resH);
+  let uv  = frag.xy / res;
+  var disp = vec2<f32>(0.0, 0.0);
+  let minAx = min(res.x, res.y);
+  let n = i32(U.cellCount + 0.5);
+  for (var i: i32 = 0; i < ${RIPPLE_MAX_WGPU}; i = i + 1) {
+    if (i >= n) { break; }
+    let c = U.cells[i];
+    let dvUv = uv - c.xy;
+    let dvPx = dvUv * res;
+    let dPx  = length(dvPx);
+    let rPx  = max(c.z * minAx, 4.0);
+    if (dPx > rPx * 8.0) { continue; }
+    let wavelen = rPx * 0.7;
+    let k = 6.28318 / wavelen;
+    let wave = sin(dPx * k - U.time * (wavelen * 1.5) * k);
+    let falloff = exp(-dPx / (rPx * 4.0));
+    let dirUv = dvUv / max(1e-4, length(dvUv));
+    disp = disp + dirUv * wave * falloff;
+  }
+  let uvDisp = disp * (6.0 / minAx);
+  let bg = textureSample(bgTex, bgSamp,
+                         clamp(uv + uvDisp, vec2<f32>(0.0), vec2<f32>(1.0))).rgb;
+  return vec4<f32>(bg, 1.0);
+}
+`;
+
 const BG_WGSL = /* wgsl */ `
 struct BgU {
   // (kind, vignette, gridStep, time)
@@ -2522,6 +2572,76 @@ export class WebGPURenderer extends RendererBase {
     this._causticBgUboData = null;
   }
 
+  // ── Liquid-ripples overlay (S.liquidRipples) ──
+  // Mirror of WebGL2 _ripple* helpers. Shares no state with caustics
+  // — separate RT + pipeline + UBO. drawBackground picks one or the
+  // other to run; if both toggles are on, ripples wins.
+  _rippleBgEnsureRt() {
+    const device = this.device;
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
+    if (this._rippleBgRt && this._rippleBgRt.w === w && this._rippleBgRt.h === h) return;
+    if (this._rippleBgRt) { try { this._rippleBgRt.tex.destroy(); } catch {} }
+    const tex = device.createTexture({
+      size: [w, h],
+      format: this.format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    this._rippleBgRt = { tex, view: tex.createView(), w, h };
+  }
+  _rippleBgEnsurePipeline() {
+    if (this._rippleBgPipeline) return;
+    const device = this.device;
+    const mod = device.createShaderModule({ code: RIPPLE_BG_WGSL });
+    this._rippleBgPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex:   { module: mod, entryPoint: 'vs_main' },
+      fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format }] },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._rippleBgSampler = device.createSampler({
+      magFilter: 'linear', minFilter: 'linear',
+      addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
+    });
+    // Layout: time, cellCount, resW, resH, then 24 × vec4 cells.
+    const floats = 4 + RIPPLE_MAX_WGPU * 4;
+    this._rippleBgUbo = device.createBuffer({
+      size: floats * 4,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._rippleBgUboData = new Float32Array(floats);
+  }
+  _rippleBgDestroy() {
+    if (this._rippleBgRt) { try { this._rippleBgRt.tex.destroy(); } catch {} this._rippleBgRt = null; }
+    if (this._rippleBgUbo) { try { this._rippleBgUbo.destroy(); } catch {} this._rippleBgUbo = null; }
+    this._rippleBgPipeline = null;
+    this._rippleBgSampler = null;
+    this._rippleBgUboData = null;
+  }
+  // Pack visible cells into the UBO data buffer; returns the count.
+  _rippleBgCollectCells() {
+    const buf = this._rippleBgUboData;
+    const cells = (this.sim && this.sim.cells) || [];
+    const W = this.W, H = this.H;
+    const minAx = Math.max(1, Math.min(W, H));
+    let n = 0;
+    for (let i = 0; i < cells.length && n < RIPPLE_MAX_WGPU; i++) {
+      const c = cells[i];
+      const s = this.sim.worldToScreen(c.x, c.y);
+      const m = c.r * 1.5;
+      if (s.x < -m || s.y < -m || s.x > W + m || s.y > H + m) continue;
+      const off = 4 + n * 4;
+      buf[off + 0] = s.x / W;
+      buf[off + 1] = s.y / H;
+      buf[off + 2] = (c.r * this.camera.scale) / minAx;
+      buf[off + 3] = 0;
+      n++;
+    }
+    // Zero out the unused tail.
+    for (let i = 4 + n * 4; i < buf.length; i++) buf[i] = 0;
+    return n;
+  }
+
   _buildDiskPipeline() {
     const device = this.device;
 
@@ -2868,21 +2988,25 @@ export class WebGPURenderer extends RendererBase {
       ],
     });
 
-    // Caustics-overlay path: the bg pass renders into our offscreen
-    // RT instead of straight to the canvas, then a post-pass below
-    // samples that texture with a water-turbulence UV displacement
-    // + tint. When the toggle is off (default) we render straight
-    // to _frameView — zero added cost, no allocation.
-    const useCaustics = !!S.causticsOverlay;
+    // Post-process overlays: caustics + liquid-ripples. Both render
+    // the bg into an offscreen RT, then run a fullscreen post-pass.
+    // If both toggles are on, ripples wins (more recent feature).
+    // When neither is on, the bg renders straight to _frameView for
+    // zero added cost.
+    const useRipples = !!S.liquidRipples;
+    const useCaustics = !!S.causticsOverlay && !useRipples;
     let bgTarget = this._frameView;
-    if (useCaustics) {
+    if (useRipples) {
+      this._rippleBgEnsureRt();
+      this._rippleBgEnsurePipeline();
+      bgTarget = this._rippleBgRt.view;
+    } else if (useCaustics) {
       this._causticBgEnsureRt();
       this._causticBgEnsurePipeline();
       bgTarget = this._causticBgRt.view;
-    } else if (this._causticBgRt) {
-      // Toggled off mid-session — release.
-      this._causticBgDestroy();
     }
+    if (!useRipples && this._rippleBgRt) this._rippleBgDestroy();
+    if (!useCaustics && this._causticBgRt) this._causticBgDestroy();
     const pass = this._frameEncoder.beginRenderPass({
       colorAttachments: [{
         view: bgTarget,
@@ -2897,7 +3021,38 @@ export class WebGPURenderer extends RendererBase {
     pass.draw(3, 1, 0, 0);             // big-triangle, 3 verts, no VBO
     pass.end();
 
-    if (useCaustics && this._causticBgPipeline) {
+    if (useRipples && this._rippleBgPipeline) {
+      const cellCount = this._rippleBgCollectCells();
+      const u = this._rippleBgUboData;
+      u[0] = t;
+      u[1] = cellCount;
+      u[2] = this.canvas.width;
+      u[3] = this.canvas.height;
+      this.device.queue.writeBuffer(
+        this._rippleBgUbo, 0,
+        u.buffer, u.byteOffset, u.byteLength,
+      );
+      const rBg = this.device.createBindGroup({
+        layout: this._rippleBgPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._rippleBgUbo } },
+          { binding: 1, resource: this._rippleBgSampler },
+          { binding: 2, resource: this._rippleBgRt.view },
+        ],
+      });
+      const post = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: this._frameView,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      post.setPipeline(this._rippleBgPipeline);
+      post.setBindGroup(0, rBg);
+      post.draw(3, 1, 0, 0);
+      post.end();
+    } else if (useCaustics && this._causticBgPipeline) {
       this._causticBgUboData[0] = t;
       this.device.queue.writeBuffer(
         this._causticBgUbo, 0,
@@ -3922,6 +4077,7 @@ export class WebGPURenderer extends RendererBase {
     this._metaDestroyPool();
     this._reactorDestroy();
     this._causticBgDestroy();
+    this._rippleBgDestroy();
     tryDestroy(this._reactorStepUniformBuffer);
     tryDestroy(this._reactorSeedUniformBuffer);
     tryDestroy(this._reactorDummyTex);
