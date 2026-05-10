@@ -481,3 +481,49 @@ body.adding #stage    { cursor: crosshair; }
 }
 .cell-tile:hover { border-color: var(--accent); transform: translateY(-1px); }
 .cell-tile span { font-size: 11px; text-align: center; }
+
+/* Debug log viewer in settings — captures console.log/info/warn/error
+   so mobile users (no DevTools) can read runtime logs in-app. */
+.debug-log {
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  background: #00000080;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.debug-log:empty::before {
+  content: "(no log yet)";
+  color: #ffffff66;
+  font-style: italic;
+}
+.debug-log-actions {
+  display: flex;
+  gap: 8px;
+}
+.debug-log-actions button {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  background: #00000044;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.debug-log-actions button:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+/* Severity tints — applied to lines via class-stamped <span>s. */
+.debug-log .lvl-warn  { color: #ffd479; }
+.debug-log .lvl-error { color: #ff8a92; }
+.debug-log .lvl-info  { color: #6cf2ff; }
