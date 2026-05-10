@@ -50,11 +50,28 @@
     grid-template-rows: 64px 1fr;
     height: 100%;
   }
-  /* When the source aside is collapsed, the column shrinks to fit
-     the tab bar so the canvas reclaims the freed space. The aside
-     keeps min-width:0 so it can shrink below its content width. */
-  .layout.src-collapsed { --aside-w: max-content; }
+  /* When the source aside is collapsed it leaves the grid entirely
+     and becomes an absolutely-positioned strip — pinned to the
+     viewport's right edge on desktop, bottom edge on mobile. The
+     canvas grid column then expands to fill the freed space. */
+  .layout.src-collapsed { grid-template-columns: 1fr; }
   aside.collapsed { min-width: 0; }
+  .layout.src-collapsed > aside.collapsed {
+    position: absolute;
+    z-index: 5;
+    /* Desktop default — vertical strip on the right edge, beneath
+       the header. Tab bar runs top-to-bottom; chevron stays on top. */
+    top: 64px;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    background: rgba(11, 7, 18, 0.85);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-left: 1px solid var(--line);
+    border-bottom: none;
+    border-top: none;
+  }
 
   header {
     grid-column: 1 / -1;
@@ -333,7 +350,14 @@
     align-items: stretch;
     border-bottom: 1px solid var(--line);
     background: rgba(0,0,0,0.25);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    flex: 0 0 auto;
   }
+  .tabs::-webkit-scrollbar { height: 4px; }
+  .tabs::-webkit-scrollbar-track { background: transparent; }
+  .tabs::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
   .copy-btn {
     flex: 0 0 auto;
     display: inline-flex;
@@ -461,14 +485,23 @@
     align-items: center;
     justify-content: center;
     width: 32px;
-    background: none;
+    min-width: 32px;
+    background: rgba(11, 7, 18, 0.95);
     border: none;
     border-right: 1px solid var(--line);
     color: var(--dim);
     cursor: pointer;
     transition: color 0.15s, background 0.15s, transform 0.2s;
+    /* Sticky so the chevron stays anchored at the start of the
+       tab bar even when the user scrolls the other tabs sideways
+       (or vertically when the bar is rotated). z-index keeps it
+       layered over the other tabs as they slide past. */
+    position: sticky;
+    left: 0;
+    top: 0;
+    z-index: 2;
   }
-  .src-toggle:hover { color: var(--accent); background: rgba(108, 242, 255, 0.05); }
+  .src-toggle:hover { color: var(--accent); background: rgba(108, 242, 255, 0.10); }
   .src-toggle svg { display: block; }
   /* Chevron points right when collapsed, down when expanded. */
   aside.collapsed .src-toggle svg { transform: rotate(0deg); }
@@ -476,6 +509,69 @@
   aside.collapsed .code-info,
   aside.collapsed .code-pane,
   aside.collapsed .wgsl-status { display: none; }
+
+  /* Vertical tab bar when collapsed on desktop — the right-edge
+     strip. Tabs stack top-to-bottom; chevron stays at the top.
+     Tab text reads horizontally still (no rotation), just in a
+     narrower slot. */
+  .layout.src-collapsed > aside.collapsed .tabs {
+    flex-direction: column;
+    align-items: stretch;
+    border-bottom: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    height: 100%;
+  }
+  .layout.src-collapsed > aside.collapsed .tab,
+  .layout.src-collapsed > aside.collapsed .copy-btn {
+    flex: 0 0 auto;
+    border-right: none;
+    border-left: none;
+    border-bottom: 1px solid var(--line);
+    padding: 14px 18px;
+    min-width: 0;
+  }
+  .layout.src-collapsed > aside.collapsed .src-toggle {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    width: auto;
+    height: 36px;
+    min-height: 36px;
+  }
+  /* Mobile: pin the bar to the bottom edge of the viewport, run
+     horizontally. Threshold 700 px is well below any realistic
+     desktop viewport but covers tablets in portrait. */
+  @media (max-width: 700px) {
+    .layout.src-collapsed > aside.collapsed {
+      top: auto;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      height: auto;
+      border-left: none;
+      border-top: 1px solid var(--line);
+    }
+    .layout.src-collapsed > aside.collapsed .tabs {
+      flex-direction: row;
+      overflow-x: auto;
+      overflow-y: hidden;
+      height: auto;
+    }
+    .layout.src-collapsed > aside.collapsed .tab,
+    .layout.src-collapsed > aside.collapsed .copy-btn {
+      border-bottom: none;
+      border-right: 1px solid var(--line);
+      padding: 12px 16px;
+    }
+    .layout.src-collapsed > aside.collapsed .src-toggle {
+      border-bottom: none;
+      border-right: 1px solid var(--line);
+      width: 36px;
+      height: auto;
+      min-height: 0;
+    }
+  }
 
   /* Console pane: a scroll buffer for window.console.* output that's
      mirrored into a tab next to JS. Each line is a single entry
@@ -2660,17 +2756,42 @@ function setBadge(name, isFallback) {
 }
 
 async function initWebGPU() {
+  console.log('[webgpu] init: navigator.gpu present?', !!navigator.gpu);
   if (!navigator.gpu) return null;
   try {
     const adapter = await navigator.gpu.requestAdapter();
+    console.log('[webgpu] adapter:', adapter ? `ok (${adapter.info?.vendor || '?'} ${adapter.info?.architecture || ''})` : 'null');
     if (!adapter) return null;
     const device = await adapter.requestDevice();
+    console.log('[webgpu] device acquired');
+    // Catch every WebGPU validation / out-of-memory error (these
+    // are otherwise async-fired and never surface in our log).
+    device.addEventListener?.('uncapturederror', (e) => {
+      console.error('[webgpu] uncaptured error:', e.error?.message || e.error);
+    });
+    device.lost?.then((info) => {
+      console.error('[webgpu] device lost:', info.reason, info.message);
+    });
     const ctx = canvas.getContext('webgpu');
+    console.log('[webgpu] context:', ctx ? 'ok' : 'null');
     if (!ctx) return null;
     const format = navigator.gpu.getPreferredCanvasFormat();
+    console.log('[webgpu] format:', format, 'canvas css', canvas.clientWidth + 'x' + canvas.clientHeight, 'dpr', window.devicePixelRatio);
     ctx.configure({ device, format, alphaMode: 'opaque' });
 
     let module = device.createShaderModule({ code: wgslSrc });
+    // Surface any compile diagnostics from the INITIAL module — the
+    // live-recompile path already does this for user edits, but
+    // boot-time issues were silent until now.
+    try {
+      const info = await module.getCompilationInfo?.();
+      const msgs = info?.messages || [];
+      const errs = msgs.filter(m => m.type === 'error');
+      const warns = msgs.filter(m => m.type === 'warning');
+      if (errs.length)  console.error('[webgpu] WGSL errors:', errs.map(m => `L${m.lineNum}: ${m.message}`).join('\n'));
+      if (warns.length) console.warn('[webgpu] WGSL warnings:', warns.map(m => `L${m.lineNum}: ${m.message}`).join('\n'));
+      if (!errs.length && !warns.length) console.log('[webgpu] WGSL compiled clean');
+    } catch (e) { console.warn('[webgpu] getCompilationInfo failed:', e.message); }
 
     let pipeline = device.createRenderPipeline({
       layout: 'auto',
@@ -2678,6 +2799,7 @@ async function initWebGPU() {
       fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
       primitive: { topology: 'triangle-list' },
     });
+    console.log('[webgpu] pipeline created');
 
     // 8 floats = 32 bytes (matches std140-ish padding in WGSL Uniforms)
     const uboSize = 64;
@@ -2689,8 +2811,10 @@ async function initWebGPU() {
       layout: pipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: ubo } }],
     });
+    console.log('[webgpu] ubo + bindGroup ready');
 
     const cpuBuf = new Float32Array(16);
+    let firstFrameLogged = false;
 
     function frame(time) {
       // resize-safe
@@ -2698,7 +2822,18 @@ async function initWebGPU() {
       const w = canvas.clientWidth  * dpr | 0;
       const h = canvas.clientHeight * dpr | 0;
       if (canvas.width !== w || canvas.height !== h) {
+        if (w === 0 || h === 0) {
+          // Bail this frame — drawing into a 0x0 canvas yields a
+          // permanently-cleared swap chain on some WebGPU drivers
+          // and is the most likely root cause of "everything is
+          // black after page load".
+          console.warn('[webgpu] skipping frame: canvas client size is 0 (' + canvas.clientWidth + 'x' + canvas.clientHeight + ')');
+          return;
+        }
         canvas.width = w; canvas.height = h;
+      }
+      if (!firstFrameLogged) {
+        console.log('[webgpu] first frame at', w + 'x' + h);
       }
 
       cpuBuf[0] = canvas.width;
@@ -2731,6 +2866,10 @@ async function initWebGPU() {
       pass.draw(3, 1, 0, 0);
       pass.end();
       device.queue.submit([enc.finish()]);
+      if (!firstFrameLogged) {
+        firstFrameLogged = true;
+        console.log('[webgpu] first frame submitted ok');
+      }
     }
 
     // Live-recompile path: rebuild shader module + pipeline + bind
@@ -2769,22 +2908,25 @@ async function initWebGPU() {
 
     return { name: 'webgpu · wgsl', frame, setWgslSource };
   } catch (e) {
-    console.warn('webgpu init failed:', e);
+    console.error('[webgpu] init failed (caught):', e?.message || e, e?.stack);
     return null;
   }
 }
 
 function initWebGL2() {
+  console.log('[webgl2] init: requesting context');
   const gl = canvas.getContext('webgl2', { antialias: true, premultipliedAlpha: false });
-  if (!gl) return null;
+  if (!gl) { console.error('[webgl2] no context'); return null; }
+  console.log('[webgl2] context ok · vendor:', gl.getParameter(gl.VENDOR), '· renderer:', gl.getParameter(gl.RENDERER));
 
   function compile(type, src) {
     const sh = gl.createShader(type);
     gl.shaderSource(sh, src);
     gl.compileShader(sh);
     if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
-      console.error(gl.getShaderInfoLog(sh));
-      throw new Error('shader compile failed');
+      const log = gl.getShaderInfoLog(sh);
+      console.error('[webgl2]', type === gl.VERTEX_SHADER ? 'vertex' : 'fragment', 'shader compile failed:\n' + log);
+      throw new Error('shader compile failed: ' + log);
     }
     return sh;
   }
@@ -2794,9 +2936,11 @@ function initWebGL2() {
   gl.attachShader(prog, vs); gl.attachShader(prog, fs);
   gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
-    console.error(gl.getProgramInfoLog(prog));
-    throw new Error('link failed');
+    const log = gl.getProgramInfoLog(prog);
+    console.error('[webgl2] program link failed:\n' + log);
+    throw new Error('link failed: ' + log);
   }
+  console.log('[webgl2] program linked ok');
   gl.useProgram(prog);
 
   const u_res  = gl.getUniformLocation(prog, 'u_resolution');
