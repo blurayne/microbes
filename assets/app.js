@@ -12,6 +12,7 @@ import {
 import { Sim } from './core/sim.js';
 import { FloatingText } from './core/floating-text.js';
 import { CellTagOverlay } from './core/cell-tag.js';
+import { SpawnBanner } from './core/spawn-banner.js';
 import { getShapes, inView } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
@@ -98,6 +99,7 @@ function _hookDebugLogButtons() {
 const sim = new Sim();
 const floatingText = new FloatingText(document.getElementById('floatingText'));
 const cellTags = new CellTagOverlay(document.getElementById('cellTagLayer'));
+const spawnBanner = new SpawnBanner(document.getElementById('spawnBannerLayer'));
 
 async function tryWebGPU() {
   const r = new WebGPURenderer(canvas, sim);
@@ -207,7 +209,12 @@ canvas.addEventListener('pointerdown', (ev) => {
 
   if (sim.addMode && ev.button === 0) {
     const w0 = sim.screenToWorld(sp.x, sp.y);
-    sim.spawnAtWorld(sim.addMode.type, w0.x, w0.y);
+    const justSpawnedType = sim.addMode.type;
+    sim.spawnAtWorld(justSpawnedType, w0.x, w0.y);
+    // First-spawn banner: SpawnBanner.notify is a no-op for any
+    // type the user has already seen (localStorage-tracked) so
+    // it's safe to call unconditionally.
+    spawnBanner.notify(justSpawnedType);
     cancelAddMode();
     return;
   }
