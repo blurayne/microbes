@@ -63,8 +63,25 @@
         <label><input type="checkbox" id="pinchRotation" /> <span data-i18n="pinch_rotation">Two-finger rotation</span></label>
         <label><input type="checkbox" id="compositionHud" /> <span data-i18n="composition_hud">Composition HUD</span></label>
         <label><input type="checkbox" id="causticsToggle" /> <span data-i18n="caustics_overlay">Caustics overlay</span></label>
+        <div id="causticsControls" class="sub-controls" hidden>
+          <label><span data-i18n="caustic_tint_r">Tint R</span> <span id="causticTintRVal" class="val"></span>
+            <input type="range" id="causticTintR" min="0" max="2.0" step="0.05" />
+          </label>
+          <label><span data-i18n="caustic_tint_g">Tint G</span> <span id="causticTintGVal" class="val"></span>
+            <input type="range" id="causticTintG" min="0" max="2.0" step="0.05" />
+          </label>
+          <label><span data-i18n="caustic_tint_b">Tint B</span> <span id="causticTintBVal" class="val"></span>
+            <input type="range" id="causticTintB" min="0" max="2.0" step="0.05" />
+          </label>
+        </div>
         <label><input type="checkbox" id="liquidRipplesToggle" /> <span data-i18n="liquid_ripples">Liquid ripples</span></label>
         <div id="rippleControls" class="sub-controls" hidden>
+          <label><span data-i18n="ripple_scope">Wave scope</span>
+            <select id="rippleScope">
+              <option value="scene" data-i18n="ripple_scope_scene">Whole scene</option>
+              <option value="bg"    data-i18n="ripple_scope_bg">Background only</option>
+            </select>
+          </label>
           <label><span data-i18n="ripple_density">Wave density</span> <span id="rippleDensityVal" class="val"></span>
             <input type="range" id="rippleDensity" min="0.5" max="4.0" step="0.1" />
           </label>

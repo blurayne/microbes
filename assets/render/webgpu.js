@@ -897,7 +897,11 @@ const MAX_SPOTS = 8;
 // Hoskins (https://www.shadertoy.com/view/ltSczG · CC BY-NC-SA 3.0).
 // Same maths as PR #73's shader-test path.
 const CAUSTIC_BG_WGSL = /* wgsl */ `
-struct CausticU { time: f32 };
+struct CausticU {
+  // (time, _, _, _) header; tint is vec4 for 16-byte alignment.
+  hdr:  vec4<f32>,
+  tint: vec4<f32>,
+};
 @group(0) @binding(0) var<uniform> U : CausticU;
 @group(0) @binding(1) var bgSamp : sampler;
 @group(0) @binding(2) var bgTex  : texture_2d<f32>;
@@ -917,7 +921,7 @@ struct CausticU { time: f32 };
   // stays roughly square. Tile factor 3 ⇒ ~3 cells tall, 3*aspect wide.
   let aspect = dim.x / max(1.0, dim.y);
   let cuv = uv * vec2<f32>(aspect, 1.0) * 3.0;
-  let time2 = U.time * 0.5 + 23.0;
+  let time2 = U.hdr.x * 0.5 + 23.0;
   var p0 = ((cuv * TAU) % vec2<f32>(TAU) + vec2<f32>(TAU)) % vec2<f32>(TAU) - vec2<f32>(150.0);
   var i = p0;
   var c: f32 = 1.0;
@@ -933,7 +937,7 @@ struct CausticU { time: f32 };
   c = c / 5.0;
   c = 1.17 - pow(c, 1.4);
   let shade = pow(abs(c), 8.0);
-  let tint = clamp((vec3<f32>(shade) + vec3<f32>(0.0, 1.35, 0.5)) * 2.0,
+  let tint = clamp((vec3<f32>(shade) + U.tint.rgb) * 2.0,
                    vec3<f32>(0.0), vec3<f32>(1.0));
   let off = vec2<f32>(cos(c) - 0.75, sin(c) - 0.75) * 0.04;
   let sampleUv = clamp(uv + off, vec2<f32>(0.0), vec2<f32>(1.0));
@@ -2590,11 +2594,12 @@ export class WebGPURenderer extends RendererBase {
       magFilter: 'linear', minFilter: 'linear',
       addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
     });
+    // Layout: hdr (vec4, time at [0]) + tint (vec4, rgb at [4..6]).
     this._causticBgUbo = device.createBuffer({
-      size: 16,                            // 1 float + 12 padding bytes
+      size: 32,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    this._causticBgUboData = new Float32Array(4);
+    this._causticBgUboData = new Float32Array(8);
   }
   _causticBgDestroy() {
     if (this._causticBgRt) { try { this._causticBgRt.tex.destroy(); } catch {} this._causticBgRt = null; }
@@ -2922,9 +2927,10 @@ export class WebGPURenderer extends RendererBase {
     // the post-process. Mirrors WebGL2's _sceneFbo design.
     this._sceneView = this._frameView;
     this._scenePostProc = null;
-    const useRipples  = !!S.liquidRipples;
-    const useCaustics = !!S.causticsOverlay && !useRipples;
-    if (useRipples) {
+    const useRipples       = !!S.liquidRipples;
+    const ripplesSceneWide = useRipples && S.rippleScope !== 'bg';
+    const useCaustics      = !!S.causticsOverlay && !ripplesSceneWide;
+    if (ripplesSceneWide) {
       this._rippleBgEnsureRt();
       this._rippleBgEnsurePipeline();
       this._sceneView = this._rippleBgRt.view;
@@ -2934,10 +2940,11 @@ export class WebGPURenderer extends RendererBase {
       this._causticBgEnsurePipeline();
       this._sceneView = this._causticBgRt.view;
       this._scenePostProc = 'caustics';
-    } else {
-      if (this._rippleBgRt)  this._rippleBgDestroy();
-      if (this._causticBgRt) this._causticBgDestroy();
     }
+    if (!ripplesSceneWide && !(useRipples && S.rippleScope === 'bg') && this._rippleBgRt) {
+      this._rippleBgDestroy();
+    }
+    if (!useCaustics && this._causticBgRt) this._causticBgDestroy();
   }
 
   drawBackground(timeMs) {
@@ -3044,13 +3051,21 @@ export class WebGPURenderer extends RendererBase {
       ],
     });
 
-    // bg targets the scene view set by beginFrame — either
-    // _frameView (no post-process) or one of the RT views. The
-    // composite happens in endFrame so cells + particles drawn
-    // after this also go through the overlay.
+    // Bg-only ripple mode (rippleScope='bg'): redirect THIS pass into
+    // the ripple RT, then run the ripple post-pass straight back to
+    // _frameView. Subsequent draws (cells, particles, antibodies)
+    // stay on the canvas surface (scene-view = _frameView). Scene-
+    // wide mode is the default and handled by endFrame().
+    const bgOnlyRipples = !!S.liquidRipples && S.rippleScope === 'bg';
+    let bgTarget = this._sceneView;
+    if (bgOnlyRipples) {
+      this._rippleBgEnsureRt();
+      this._rippleBgEnsurePipeline();
+      bgTarget = this._rippleBgRt.view;
+    }
     const pass = this._frameEncoder.beginRenderPass({
       colorAttachments: [{
-        view: this._sceneView,
+        view: bgTarget,
         clearValue: { r: 0, g: 0, b: 0, a: 1 },
         loadOp: 'clear',
         storeOp: 'store',
@@ -3060,6 +3075,42 @@ export class WebGPURenderer extends RendererBase {
     pass.setBindGroup(0, bgBindGroup);
     pass.draw(3, 1, 0, 0);             // big-triangle, 3 verts, no VBO
     pass.end();
+    if (bgOnlyRipples && this._rippleBgPipeline) {
+      const cellCount = this._rippleBgCollectCells();
+      const u = this._rippleBgUboData;
+      u[0] = t;
+      u[1] = cellCount;
+      u[2] = this.canvas.width;
+      u[3] = this.canvas.height;
+      u[4] = S.rippleDensity ?? 1.5;
+      u[5] = S.rippleReach ?? 0.7;
+      u[6] = S.rippleStrength ?? 1.0;
+      u[7] = 0;
+      this.device.queue.writeBuffer(
+        this._rippleBgUbo, 0,
+        u.buffer, u.byteOffset, u.byteLength,
+      );
+      const bind = this.device.createBindGroup({
+        layout: this._rippleBgPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._rippleBgUbo } },
+          { binding: 1, resource: this._rippleBgSampler },
+          { binding: 2, resource: this._rippleBgRt.view },
+        ],
+      });
+      const post = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: this._frameView,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      post.setPipeline(this._rippleBgPipeline);
+      post.setBindGroup(0, bind);
+      post.draw(3, 1, 0, 0);
+      post.end();
+    }
     this._lastFrameSec = t;            // endFrame's post-pass reads this
   }
 
@@ -3697,6 +3748,9 @@ export class WebGPURenderer extends RendererBase {
     } else if (this._scenePostProc === 'caustics' && this._causticBgPipeline && this._causticBgRt) {
       const t = this._lastFrameSec || 0;
       this._causticBgUboData[0] = t;
+      this._causticBgUboData[4] = S.causticTintR ?? 0.0;
+      this._causticBgUboData[5] = S.causticTintG ?? 1.35;
+      this._causticBgUboData[6] = S.causticTintB ?? 0.5;
       this.device.queue.writeBuffer(
         this._causticBgUbo, 0,
         this._causticBgUboData.buffer, this._causticBgUboData.byteOffset,

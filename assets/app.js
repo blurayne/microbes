@@ -741,7 +741,17 @@ bindCheckbox('compositionHud', 'compositionHud');
 // Caustics-overlay toggle. Renderer reads S.causticsOverlay each
 // frame inside drawBackground; no listener hook needed — the next
 // rAF picks up the new value.
-bindCheckbox('causticsToggle', 'causticsOverlay');
+const causticsControlsEl = document.getElementById('causticsControls');
+function applyCausticsControlsVis() {
+  if (causticsControlsEl) causticsControlsEl.hidden = !S.causticsOverlay;
+}
+bindCheckbox('causticsToggle', 'causticsOverlay', applyCausticsControlsVis);
+applyCausticsControlsVis();
+// RGB tint sliders feed straight into the caustic shader uniform on
+// the next rAF — the renderer reads S.causticTintR/G/B each frame.
+bindRange('causticTintR', 'causticTintR', 'causticTintRVal', v => v.toFixed(2));
+bindRange('causticTintG', 'causticTintG', 'causticTintGVal', v => v.toFixed(2));
+bindRange('causticTintB', 'causticTintB', 'causticTintBVal', v => v.toFixed(2));
 
 // Liquid-ripples toggle. Same per-frame read pattern as caustics;
 // the renderer redirects the bg pass through a ripple post-process
@@ -756,6 +766,14 @@ applyRippleControlsVis();
 // Ripple sub-controls — feed straight into the renderer's per-frame
 // uniform pack on the next rAF, so no listener hook is needed beyond
 // the value-label sync that bindRange handles.
+const rippleScopeEl = document.getElementById('rippleScope');
+if (rippleScopeEl) {
+  rippleScopeEl.value = (S.rippleScope === 'bg') ? 'bg' : 'scene';
+  rippleScopeEl.addEventListener('change', () => {
+    S.rippleScope = (rippleScopeEl.value === 'bg') ? 'bg' : 'scene';
+    saveSettings();
+  });
+}
 bindRange('rippleDensity',  'rippleDensity',  'rippleDensityVal',  v => v.toFixed(1) + '×');
 bindRange('rippleReach',    'rippleReach',    'rippleReachVal',    v => v.toFixed(1) + '×');
 bindRange('rippleStrength', 'rippleStrength', 'rippleStrengthVal', v => v.toFixed(1) + '×');
