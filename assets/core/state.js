@@ -27,6 +27,11 @@ export const DEFAULTS = {
   metaSplit: true,          // metaball merge between the two halves while SPLITTING
   metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu alike.
   metaOutlineMode: 'edge',  // 'edge' | 'sdf' | 'polygon' — outline style for the merged blob during SPLITTING. 'edge': trace blurred-mask threshold (1 shared rim). 'sdf': stroke each half polygon (2 rims). 'polygon': polygon-union rim, sharp/no-blur.
+  // Game mode. The live simulator IS Free Game today — campaign +
+  // survival are designed (docs/ch04-konzept.md §4.3) as RESTRICTIONS
+  // overlaid on the same physics, not separate code paths. So this
+  // field declares the schema; only 'free' is wired today.
+  gameMode: 'free',
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
@@ -63,6 +68,11 @@ const KNOWN_THEME_KEYS = [
 
 const VALID_RENDER_SCALES = [1, 0.5, 0.25, 0.125];
 
+// Currently only 'free' is wired. 'campaign' and 'survival' are
+// reserved for future modes (see docs/ch04-konzept.md §4.3); the
+// settings dropdown shows them as disabled "(soon)" entries.
+const KNOWN_GAME_MODES = ['free'];
+
 export function loadSettings() {
   if (typeof localStorage === 'undefined') return { ...DEFAULTS };
   try {
@@ -85,6 +95,7 @@ export function loadSettings() {
     // on a removed theme (petriDish, neonBloom, …) silently migrate
     // to the new default on load.
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
+    if (parsed.gameMode && !KNOWN_GAME_MODES.includes(parsed.gameMode)) parsed.gameMode = DEFAULTS.gameMode;
     const validBackgrounds = ['solid', ...KNOWN_THEME_KEYS];
     if (!parsed.background || !validBackgrounds.includes(parsed.background)) {
       parsed.background = DEFAULTS.background;
@@ -144,6 +155,10 @@ export const LOCALES = {
     performance: 'Performance', language: 'Language',
     allow_pathogens: 'Allow pathogens',
     pinch_rotation: 'Two-finger rotation',
+    game_mode: 'Game mode',
+    mode_free: 'Free Game',
+    mode_campaign_soon: 'Campaign (soon)',
+    mode_survival_soon: 'Survival (soon)',
     audio: 'Audio',
     music_enabled: 'Music',
     music_volume: 'Music volume',
@@ -234,6 +249,10 @@ export const LOCALES = {
     performance: 'Leistung', language: 'Sprache',
     allow_pathogens: 'Krankheitserreger erlauben',
     pinch_rotation: 'Zwei-Finger-Drehung',
+    game_mode: 'Spielmodus',
+    mode_free: 'Free Game',
+    mode_campaign_soon: 'Kampagne (bald)',
+    mode_survival_soon: 'Survival (bald)',
     audio: 'Audio',
     music_enabled: 'Musik',
     music_volume: 'Musiklautstärke',
@@ -320,6 +339,10 @@ export const LOCALES = {
     performance: 'Rendimiento', language: 'Idioma',
     allow_pathogens: 'Permitir patógenos',
     pinch_rotation: 'Rotación con dos dedos',
+    game_mode: 'Modo de juego',
+    mode_free: 'Juego libre',
+    mode_campaign_soon: 'Campaña (pronto)',
+    mode_survival_soon: 'Supervivencia (pronto)',
     audio: 'Audio',
     music_enabled: 'Música',
     music_volume: 'Volumen de música',
@@ -407,6 +430,10 @@ export const LOCALES = {
     performance: 'Leistung', language: 'Sproch',
     allow_pathogens: 'Bazilln daloum',
     pinch_rotation: 'Mit zwoa Finga drahn',
+    game_mode: 'Spuimodus',
+    mode_free: 'Frei spuin',
+    mode_campaign_soon: 'Kampagne (boid)',
+    mode_survival_soon: 'Survival (boid)',
     audio: 'Tone',
     music_enabled: 'Musi',
     music_volume: 'Musi-Laudstärk',
@@ -493,6 +520,10 @@ export const LOCALES = {
     performance: 'Celeritas', language: 'Lingua',
     allow_pathogens: 'Pathogenes admittere',
     pinch_rotation: 'Rotatio bidigitalis',
+    game_mode: 'Modus ludendi',
+    mode_free: 'Lusus liber',
+    mode_campaign_soon: 'Expeditio (mox)',
+    mode_survival_soon: 'Superstes (mox)',
     audio: 'Audio',
     music_enabled: 'Musica',
     music_volume: 'Volumen musicae',
