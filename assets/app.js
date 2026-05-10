@@ -233,10 +233,10 @@ function enterAddMode(typeKey) {
   const lbl = document.getElementById('addBadgeLabel');
   if (lbl) lbl.textContent = T('adding', { name: localised });
   document.body.classList.add('adding');
-  console.debug('[add] enter', typeKey);
+  console.info('[add] enter', typeKey);
 }
 function cancelAddMode() {
-  if (sim.addMode) console.debug('[add] cancel', sim.addMode.type);
+  if (sim.addMode) console.info('[add] cancel', sim.addMode.type);
   sim.addMode = null;
   document.body.classList.remove('adding');
 }
@@ -258,7 +258,7 @@ canvas.addEventListener('pointerdown', (ev) => {
     const w0 = sim.screenToWorld(sp.x, sp.y);
     const justSpawnedType = sim.addMode.type;
     const spawned = sim.spawnAtWorld(justSpawnedType, w0.x, w0.y);
-    console.debug('[add] spawn',
+    console.info('[add] canvas-spawn',
       justSpawnedType,
       'at', Math.round(w0.x), Math.round(w0.y),
       spawned ? 'ok' : 'CAP',
@@ -416,6 +416,38 @@ function endPointer(ev) {
 }
 document.addEventListener('pointerup', endPointer);
 document.addEventListener('pointercancel', endPointer);
+
+// Add-mode safety net. If something between body and canvas swallows
+// the click (a misbehaving overlay with pointer-events: auto, a
+// captured pointer never released, etc.) the user is stuck — the
+// "Adding: …" badge says we're armed but the spawn never fires.
+// Listen at window-level too: when in addMode, treat any non-UI
+// pointerdown as the spawn click. Logs into the in-app Debug log
+// (settings → Debug log) so we can see whether this fallback is
+// what actually fired the spawn.
+function _isOverUi(target) {
+  if (!target || target.nodeType !== 1) return false;
+  return !!target.closest(
+    '.fab,.mode-btn,#gear,#addBadge,.dialog,.settings-panel,.spawn-banner'
+  );
+}
+window.addEventListener('pointerdown', (ev) => {
+  if (!sim.addMode || ev.button !== 0) return;
+  if (_isOverUi(ev.target)) return;
+  const rect = canvas.getBoundingClientRect();
+  const sx = ev.clientX - rect.left;
+  const sy = ev.clientY - rect.top;
+  if (sx < 0 || sy < 0 || sx > rect.width || sy > rect.height) return;
+  const w = sim.screenToWorld(sx, sy);
+  const justSpawnedType = sim.addMode.type;
+  const spawned = sim.spawnAtWorld(justSpawnedType, w.x, w.y);
+  console.info('[add] window-spawn', justSpawnedType,
+    'tgt', ev.target && ev.target.id ? '#' + ev.target.id : (ev.target && ev.target.tagName),
+    spawned ? 'ok' : 'CAP',
+  );
+  spawnBanner.notify(justSpawnedType);
+  cancelAddMode();
+}, true);   // capture phase — runs before any inner-element handler
 
 canvas.addEventListener('wheel', (ev) => {
   ev.preventDefault();
