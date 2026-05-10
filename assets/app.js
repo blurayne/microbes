@@ -619,6 +619,7 @@ if (themeSelect) {
   themeSelect.addEventListener('change', () => {
     S.theme = themeSelect.value;
     saveSettings();
+    console.info('[microbes] theme dropdown → S.theme=' + S.theme);
   });
 }
 
