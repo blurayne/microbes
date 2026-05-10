@@ -651,8 +651,13 @@ struct VsOut {
   else              { p = vec2<f32>(-1.0,  3.0); }
   var out: VsOut;
   out.pos = vec4<f32>(p, 0.0, 1.0);
-  // 0..1 with v=0 at the bottom of the framebuffer (matches webgl2).
-  out.uv  = (p + vec2<f32>(1.0, 1.0)) * 0.5;
+  // uv in canvas convention: v=0 at TOP of the canvas, v=1 at bottom.
+  // Cells render in canvas coords (y=0 at top); the bg shader's worldPx
+  // reconstruction multiplies uv by the viewport, so uv must use the
+  // same y direction as the cell shader or the bg pans opposite to
+  // cells in y. The flip is free here; downstream worldPx, gradient,
+  // spots and RBC all inherit it. Mirrors webgl2.js VERT_FULLSCREEN.
+  out.uv  = vec2<f32>((p.x + 1.0) * 0.5, (1.0 - p.y) * 0.5);
   return out;
 }
 
