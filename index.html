@@ -247,7 +247,19 @@
             data-i18n-attr="aria-label=mode_target,title=mode_target_tip">🎯</button>
     <button id="modeSplit" type="button" class="mode-btn mode-split"
             aria-label="Split mode" title="Tap a cell to split it"
-            data-i18n-attr="aria-label=mode_split,title=mode_split_tip">⎘</button>
+            data-i18n-attr="aria-label=mode_split,title=mode_split_tip"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <!-- Two daughter cells (mitosis silhouette) -->
+        <circle cx="8" cy="8.5" r="4.6"/>
+        <circle cx="16" cy="15.5" r="4.6"/>
+        <!-- Chromosomes (paired strokes) inside each cell -->
+        <line x1="6" y1="6.6" x2="7.6" y2="10.4"/>
+        <line x1="9" y1="6.6" x2="7.4" y2="10.4"/>
+        <line x1="14" y1="13.6" x2="15.6" y2="17.4"/>
+        <line x1="17" y1="13.6" x2="15.4" y2="17.4"/>
+        <!-- Curved division arrow connecting the two -->
+        <path d="M 10.5 12 Q 13 12 13.5 14"/>
+        <polyline points="12.0,13.7 13.5,14 13.7,12.5"/>
+      </svg></button>
     <button id="modeKill" type="button" class="mode-btn"
             aria-label="Kill mode" title="Tap a cell to make it explode"
             data-i18n-attr="aria-label=mode_kill,title=mode_kill_tip">💥</button>

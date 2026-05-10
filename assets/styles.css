@@ -72,13 +72,19 @@ body.no-bad #pause { bottom: 216px; }
   display: block;
 }
 
-/* Split mode button — duplicate-style icon on a strict-black
-   background so it reads as "split / duplicate" rather than the
-   previous scissors glyph. */
+/* Split mode button — mitosis-style icon (two daughter cells with
+   chromosomes + a division arrow) on a strict-black background. The
+   inline SVG inherits currentColor so the active-state recolour
+   below works without changes. */
 .mode-split {
   background: #000 !important;
   color: #fff !important;
-  font-size: 22px;
+  padding: 0;
+}
+.mode-split svg {
+  width: 22px;
+  height: 22px;
+  display: block;
 }
 
 /* Pause overlay — dims the play area + shows "PAUSE" centred. */
