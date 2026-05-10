@@ -88,6 +88,11 @@ uniform float u_wobbleAmp;  // S.wobbleAmp
 uniform vec3 u_highlight;   // S.highlightColor as rgb
 uniform float u_membraneIntensity; // S.membraneIntensity 0..1
 uniform float u_borderThickness;   // S.cellBorderThickness multiplier (~0.5..5)
+// Cell-shader theme. 0 legacy (default · today's look) · 1 microscope ·
+// 2 cartoon · 3 kurzgesagt · 4 classic. Set from S.theme each frame.
+// Phase 1 only swaps body saturation + outline colour + halo per theme;
+// Phase 2 will port the test-shader's per-type SDF detail.
+uniform int u_theme;
 out vec4 outColor;
 
 // v_kind packs:
@@ -242,11 +247,34 @@ void main() {
   float nucGlint = max(0.0, 0.18 - distance(v_uv, vec2(-0.10, -0.13))) * 4.0;
   vec3 nucColor = mix(v_nucleus, vec3(1.0), clamp(nucGlint, 0.0, 0.35));
 
-  vec3 col = cyto;
+  // Theme switch (Phase 1): saturate / flatten cyto + override
+  // outline colour per theme. Legacy (0) keeps today's look exactly.
+  vec3 themedCyto = cyto;
+  vec3 themedOutline = v_cytoBot * 0.55;   // legacy default
+  if (u_theme == 2) {
+    // cartoon · saturated body, thick black outline
+    themedCyto = clamp(cyto * 1.25, 0.0, 1.0);
+    themedOutline = vec3(0.0);
+  } else if (u_theme == 3) {
+    // kurzgesagt · flat cyto (drop the gradient), thin pale outline
+    themedCyto = v_cytoBot;
+    themedOutline = vec3(0.88, 0.85, 0.78);
+  } else if (u_theme == 4) {
+    // classic · existing radial gradient + dark game-style outline
+    themedOutline = vec3(0.04, 0.02, 0.08);
+  } else if (u_theme == 1) {
+    // microscope · keep cyto, dark purple H&E-style outline
+    themedOutline = vec3(0.10, 0.04, 0.12);
+  }
+  vec3 col = themedCyto;
   col = mix(col, nucColor, nucleusMask);
-  // Border colour: 0.55 × cytoBot — darker than the previous 0.80 so a
-  // bolder rim reads with more contrast against the body fill.
-  col = mix(col, v_cytoBot * 0.55, clamp(outlineMask, 0.0, 1.0));
+  col = mix(col, themedOutline, clamp(outlineMask, 0.0, 1.0));
+  // kurzgesagt — additive neon halo just inside the membrane.
+  if (u_theme == 3) {
+    float r2 = dot(v_uv, v_uv);
+    float halo = pow(clamp(1.0 - r2, 0.0, 1.0), 1.5) * 0.45;
+    col += v_cytoBot * halo;
+  }
 
   // Tap flash overlay — c.flash decays in Sim.update(); fade out across 200 ms.
   float flashA = clamp(v_outline.a / 0.2, 0.0, 1.0) * 0.6;
@@ -1170,6 +1198,12 @@ function hexToVec3(hex) {
   ];
 }
 
+// Cell-shader theme key → integer for the FRAG_DISK u_theme uniform.
+// Mirrors KNOWN_THEME_KEYS in core/state.js. Unknown values fall back
+// to 0 (legacy) so a stale localStorage entry never breaks rendering.
+const _THEME_IDS = { legacy: 0, microscope: 1, cartoon: 2, kurzgesagt: 3, classic: 4 };
+function _themeId(key) { return _THEME_IDS[key] || 0; }
+
 // Theme `ringColor` / `spotColor` / `gridColor` strings, returning rgb +
 // optional alpha (defaulting to 1 for hex / no-alpha rgba).
 function rgbaStringToVec3(s) {
@@ -1297,6 +1331,7 @@ export class WebGL2Renderer extends RendererBase {
     this._diskU.highlight = gl.getUniformLocation(this._diskProg, 'u_highlight');
     this._diskU.membraneIntensity = gl.getUniformLocation(this._diskProg, 'u_membraneIntensity');
     this._diskU.borderThickness = gl.getUniformLocation(this._diskProg, 'u_borderThickness');
+    this._diskU.theme = gl.getUniformLocation(this._diskProg, 'u_theme');
 
     // Static unit-square corners (two triangles).
     const corners = new Float32Array([
@@ -2027,6 +2062,7 @@ export class WebGL2Renderer extends RendererBase {
         (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
       gl.uniform1f(this._diskU.borderThickness,
         (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0);
+      gl.uniform1i(this._diskU.theme, _themeId(S.theme));
       gl.bindVertexArray(this._diskVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, singletons.length);
       gl.bindVertexArray(null);
