@@ -2632,7 +2632,12 @@ export class WebGPURenderer extends RendererBase {
       u[12] = cam.rotation || 0;
       // u[13] cell-shader theme id (0 legacy, 1 microscope, 2 cartoon,
       // 3 kurzgesagt, 4 classic) — read by fs_main as u.cameraRot.y.
-      u[13] = _wgpuThemeId(S.theme);
+      const _tid = _wgpuThemeId(S.theme);
+      if (_tid !== this._lastThemeId) {
+        this._lastThemeId = _tid;
+        console.info('[microbes] disk theme set (webgpu): S.theme=' + S.theme + ' id=' + _tid);
+      }
+      u[13] = _tid;
       // u[14..15] padding
       device.queue.writeBuffer(this._uniformBuffer, 0, u.buffer, u.byteOffset, u.byteLength);
 

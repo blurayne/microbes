@@ -92,9 +92,12 @@ uniform float u_membraneIntensity; // S.membraneIntensity 0..1
 uniform float u_borderThickness;   // S.cellBorderThickness multiplier (~0.5..5)
 // Cell-shader theme. 0 legacy (default · today's look) · 1 microscope ·
 // 2 cartoon · 3 kurzgesagt · 4 classic. Set from S.theme each frame.
-// Phase 1 only swaps body saturation + outline colour + halo per theme;
-// Phase 2 will port the test-shader's per-type SDF detail.
-uniform int u_theme;
+// Float (with the existing precision highp float covering it) is more
+// portable than uniform int here — some GLSL ES 3.00 drivers refuse to
+// link an int uniform that lacks an explicit precision qualifier, even
+// with precision highp int set, returning a null uniform location and
+// silently turning the per-frame uniform writes into no-ops.
+uniform float u_theme;
 out vec4 outColor;
 
 // v_kind packs:
@@ -256,8 +259,10 @@ void main() {
   // Pick the per-cell silhouette: legacy bodyScale (today's 5-kind
   // dispatch on bodyKind) or the per-test-kind testShape with a small
   // wobble overlay so themed cells still breathe.
+  // Decode the float u_theme uniform once per fragment.
+  int themeId = int(u_theme + 0.5);
   float bodyR;
-  if (u_theme == 0) {
+  if (themeId == 0) {
     bodyR = bodyScale(v_uv);
   } else {
     float ang = atan(v_uv.y, v_uv.x);
@@ -343,18 +348,18 @@ void main() {
   // outline colour per theme. Legacy (0) keeps today's look exactly.
   vec3 themedCyto = cyto;
   vec3 themedOutline = v_cytoBot * 0.55;   // legacy default
-  if (u_theme == 2) {
+  if (themeId == 2) {
     // cartoon · saturated body, thick black outline
     themedCyto = clamp(cyto * 1.25, 0.0, 1.0);
     themedOutline = vec3(0.0);
-  } else if (u_theme == 3) {
+  } else if (themeId == 3) {
     // kurzgesagt · flat cyto (drop the gradient), thin pale outline
     themedCyto = v_cytoBot;
     themedOutline = vec3(0.88, 0.85, 0.78);
-  } else if (u_theme == 4) {
+  } else if (themeId == 4) {
     // classic · existing radial gradient + dark game-style outline
     themedOutline = vec3(0.04, 0.02, 0.08);
-  } else if (u_theme == 1) {
+  } else if (themeId == 1) {
     // microscope · keep cyto, dark purple H&E-style outline
     themedOutline = vec3(0.10, 0.04, 0.12);
   }
@@ -362,7 +367,7 @@ void main() {
   col = mix(col, nucColor, nucleusMask);
   col = mix(col, themedOutline, clamp(outlineMask, 0.0, 1.0));
   // kurzgesagt — additive neon halo just inside the membrane.
-  if (u_theme == 3) {
+  if (themeId == 3) {
     float r2 = dot(v_uv, v_uv);
     float halo = pow(clamp(1.0 - r2, 0.0, 1.0), 1.5) * 0.45;
     col += v_cytoBot * halo;
@@ -373,7 +378,7 @@ void main() {
   // constant for every other cell. Ported from docs/shader-test.html
   // (rbc biconcave, virus capsid lattice, dendritic tendrils, slime
   // hyphal threads, toxin glow). All work inside v_uv (cell-local).
-  if (u_theme != 0 && d < bodyR) {
+  if (themeId != 0 && d < bodyR) {
     int tk = testKind();
     float insideMask = 1.0 - smoothstep(-0.005, 0.015, sdf);
     if (tk == 16) {
@@ -2192,7 +2197,13 @@ export class WebGL2Renderer extends RendererBase {
         (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
       gl.uniform1f(this._diskU.borderThickness,
         (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0);
-      gl.uniform1i(this._diskU.theme, _themeId(S.theme));
+      const _tid = _themeId(S.theme);
+      if (_tid !== this._lastThemeId) {
+        this._lastThemeId = _tid;
+        console.info('[microbes] disk theme set: S.theme=' + S.theme +
+          ' id=' + _tid + ' uniform_loc=' + this._diskU.theme);
+      }
+      gl.uniform1f(this._diskU.theme, _tid);
       gl.bindVertexArray(this._diskVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, singletons.length);
       gl.bindVertexArray(null);
