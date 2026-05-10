@@ -21,7 +21,7 @@
     <h3>Adaptiver Codex und 3-Akt-Struktur</h3>
     <p style="color: var(--ink-dim); font-size: 14px; margin-bottom: 12px;">Das Spiel lehrt sich selbst — adaptive Immunität als Tutorial-Mechanik.</p>
     <ul>
-      <li><strong>Lebende Zellen statt Türme</strong>Platzierte Zellen jagen, driften, sterben autonom (siehe §11)</li>
+      <li><strong>Lebende, autonome Zellen</strong>Platzierte Zellen jagen, driften, sterben autonom (siehe §11)</li>
       <li><strong>Free Game Modus</strong>Sandbox: jede Zelle, jedes Pathogen, kein Roster-Limit (siehe §4.3)</li>
       <li><strong>Pre-Level &amp; In-Level Briefing + Status-Line</strong>Gegner + Konter strategisch (modal) und taktisch (HUD-Zeile, modus-übergreifend) — siehe §12</li>
       <li><strong>Adaptiver Codex</strong>Spieler entdeckt Schwächen durch Kontakt — biologisch korrekt!</li>

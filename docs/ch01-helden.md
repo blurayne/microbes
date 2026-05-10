@@ -204,7 +204,7 @@
         <div class="section-num">1.2</div>
         <div>
           <div class="section-title">Filler: Red Blood Cell</div>
-          <div class="section-desc">Kein Tower, aber visuell und mechanisch wichtig. Sie machen die Blutbahn lebendig.</div>
+          <div class="section-desc">Passive Filler, visuell und mechanisch wichtig. Sie machen die Blutbahn lebendig.</div>
         </div>
       </div>
 
@@ -212,7 +212,7 @@
         <div class="filler-icon"></div>
         <div>
           <h4>Red Blood Cell <span class="badge badge-filler">FILLER</span></h4>
-          <p>Erythrozyten — bikonkave Scheiben voller Hämoglobin, transportieren Sauerstoff. <strong>Sie sind keine Tower</strong> — sie strömen passiv durch die Blutbahn als atmosphärische Hintergrund-Animation. Aber: <strong>Pathogene können sie infizieren</strong> (Viren) oder beschädigen (Toxine). Sichtbarer Schaden = Spielfeedback. Außerdem: jede tote RBC = +1 Energie für den Spieler (Hämoglobin-Boost).</p>
+          <p>Erythrozyten — bikonkave Scheiben voller Hämoglobin, transportieren Sauerstoff. Sie strömen <strong>passiv durch die Blutbahn</strong> als atmosphärische Hintergrund-Animation. Aber: <strong>Pathogene können sie infizieren</strong> (Viren) oder beschädigen (Toxine). Sichtbarer Schaden = Spielfeedback. Außerdem: jede tote RBC = +1 Energie für den Spieler (Hämoglobin-Boost).</p>
         </div>
       </div>
     </section>

@@ -15,8 +15,8 @@
     <div class="principle">
       <div class="principle-symbol">⇌</div>
       <div>
-        <h3>Zellen sind keine Türme — sie leben</h3>
-        <p><strong>Das ist der Kern des Spiels.</strong> Platzierte Zellen verharren nicht an ihrem Spawn-Punkt; sie reagieren aufeinander mit <strong>Anziehung</strong>, <strong>Abstoßung</strong> oder <strong>neutralem Drift</strong>. RBCs strömen kontinuierlich durch die Blutbahn und schaffen Bewegung im Hintergrund. Aus diesen drei Kräften entstehen organische Formationen — ein Schwarm Neutrophiler, der Pathogene umkreist; eine Mast Cell, die zu einer Toxin-Wolke driftet; ein NK-Trupp, der virusinfizierte Zellen verfolgt. Statisches Tower-Defense-Verhalten ist hier explizit kein Designziel.</p>
+        <h3>Lebende, autonome Zellen</h3>
+        <p><strong>Das ist der Kern des Spiels.</strong> Platzierte Zellen verharren nicht an ihrem Spawn-Punkt; sie reagieren aufeinander mit <strong>Anziehung</strong>, <strong>Abstoßung</strong> oder <strong>neutralem Drift</strong>. RBCs strömen kontinuierlich durch die Blutbahn und schaffen Bewegung im Hintergrund. Aus diesen drei Kräften entstehen organische Formationen — ein Schwarm Neutrophiler, der Pathogene umkreist; eine Mast Cell, die zu einer Toxin-Wolke driftet; ein NK-Trupp, der virusinfizierte Zellen verfolgt. Bewegung, Schwarmverhalten und autonome Reaktionen sind das Designziel.</p>
       </div>
     </div>
 
