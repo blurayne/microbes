@@ -108,7 +108,18 @@ export class Canvas2DRenderer extends RendererBase {
     ctx.fillRect(0, 0, W, H);
 
     ctx.save();
-    ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+    // Mirror the rotation-aware composition that `withCameraCtx` applies
+    // to the cell pass. Without this the bg only scales + translates, so
+    // when the camera rotates (pinchRotation on) the bg pattern stays
+    // axis-aligned while cells turn with the camera — they appear to
+    // move in opposite directions. Reduces to the original
+    // scale + translate matrix exactly when cam.rotation === 0.
+    if (cam.rotation === 0) {
+      ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+    } else {
+      const co = Math.cos(cam.rotation), si = Math.sin(cam.rotation);
+      ctx.transform(cam.scale * co, cam.scale * si, -cam.scale * si, cam.scale * co, cam.tx, cam.ty);
+    }
     const wx = -cam.tx / cam.scale;
     const wy = -cam.ty / cam.scale;
     const ww = W / cam.scale;
@@ -372,7 +383,7 @@ export class Canvas2DRenderer extends RendererBase {
     this._drawGranules(shapes, theme, time);
     this._drawDecorations(shapes, theme, time);
     this._drawMembrane(shapes, time, theme);
-    this._drawNuclei(ts);
+    this._drawNuclei(shapes, ts);
     this._drawCartoonFaces(shapes, time);
   }
 
@@ -1288,18 +1299,28 @@ export class Canvas2DRenderer extends RendererBase {
   }
 
   // ---------- Nuclei ----------
-  _drawNuclei(ts) {
+  // `shapes` is the same culled list the body pass iterates. Gating the
+  // nucleus loop on it keeps body + nucleus visibility in lock-step:
+  // when inView (rotation-aware since PR #40) culls a cell, both passes
+  // skip it. WebGL2 + WebGPU's disk shader composites body + nucleus
+  // together so they don't have this asymmetry; canvas2d does because
+  // the nucleus is a separate pass with a blur filter.
+  _drawNuclei(shapes, ts) {
+    if (shapes.length === 0) return;
     const ctx = this.ctx;
     const t = ts * 0.001;
+    const visibleIds = new Set();
+    for (const s of shapes) visibleIds.add(s.cell.id);
     ctx.save();
     ctx.filter = 'blur(2px)';
     ctx.globalAlpha = 0.78;
-    this.withCameraCtx(() => this._drawNucleiInner(ts, t));
+    this.withCameraCtx(() => this._drawNucleiInner(visibleIds, ts, t));
     ctx.restore();
   }
 
-  _drawNucleiInner(ts, t) {
+  _drawNucleiInner(visibleIds, ts, t) {
     for (const c of this.sim.cells) {
+      if (!visibleIds.has(c.id)) continue;
       const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
       if (type.nucleus.kind === 'none') continue;
 
