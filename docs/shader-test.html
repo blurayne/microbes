@@ -529,6 +529,12 @@
         </select>
       </div>
       <div class="ctrl">
+        <label style="display: flex; align-items: center; gap: 8px;">
+          <input id="caustics" type="checkbox"/>
+          <span>caustics overlay</span>
+        </label>
+      </div>
+      <div class="ctrl">
         <label><span>zoom</span><span id="zoom-val">1.00</span></label>
         <input id="zoom" type="range" min="0.5" max="2.5" step="0.01" value="1.0"/>
       </div>
@@ -605,6 +611,7 @@ struct Uniforms {
   cellOffsetX : f32,   // cell centre offset in UV space (drag)
   cellOffsetY : f32,
   cellRadius  : f32,   // cell radius multiplier (pinch / wheel) — 1.0 default
+  caustics    : f32,   // 0 off · 1 on (water-turbulence overlay on bg)
 };
 @group(0) @binding(0) var<uniform> U : Uniforms;
 
@@ -1023,6 +1030,39 @@ fn envBackground(uv: vec2<f32>, kind: i32, theme: i32, t: f32) -> vec3<f32> {
   return col;
 }
 
+// Caustics overlay — adapted from "Tileable Water Caustic" by
+// David Hoskins (modified joltz0r), https://www.shadertoy.com/view/ltSczG.
+// Shadertoy default licence (CC BY-NC-SA 3.0). Returns a {tint,
+// offset} pair: callers use offset to displace the bg sample and
+// multiply the result by tint.
+struct CausticOut { tint: vec3<f32>, offset: vec2<f32> };
+fn computeCaustics(uv: vec2<f32>, t: f32) -> CausticOut {
+  let TAU = 6.28318530718;
+  let time2 = t * 0.5 + 23.0;
+  let p0 = ((uv * TAU) % vec2<f32>(TAU) + vec2<f32>(TAU)) % vec2<f32>(TAU) - vec2<f32>(150.0);
+  var i = p0;
+  var c: f32 = 1.0;
+  let inten: f32 = 0.005;
+  for (var n: i32 = 0; n < 5; n = n + 1) {
+    let tn = time2 * (1.0 - (3.5 / f32(n + 1)));
+    i = p0 + vec2<f32>(cos(tn - i.x) + sin(tn + i.y),
+                       sin(tn - i.y) + cos(tn + i.x));
+    let denom = vec2<f32>(p0.x / (sin(i.x + tn) / inten),
+                          p0.y / (cos(i.y + tn) / inten));
+    c = c + 1.0 / max(length(denom), 1e-4);
+  }
+  c = c / 5.0;
+  c = 1.17 - pow(c, 1.4);
+  let shade = pow(abs(c), 8.0);
+  let tint = clamp((vec3<f32>(shade) + vec3<f32>(0.0, 1.35, 0.5)) * 2.0,
+                   vec3<f32>(0.0), vec3<f32>(1.0));
+  let off  = vec2<f32>(cos(c) - 0.75, sin(c) - 0.75) * 0.04;
+  var out: CausticOut;
+  out.tint = tint;
+  out.offset = off;
+  return out;
+}
+
 // ── fragment ────────────────────────────────────────────────
 @fragment
 fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
@@ -1046,7 +1086,13 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   let uvCell = (uv - vec2<f32>(U.cellOffsetX, U.cellOffsetY)) / max(U.cellRadius, 0.01);
 
   // ── extracellular medium ──
-  let bg = envBackground(uv, bgKind, theme, t);
+  var bg: vec3<f32>;
+  if (U.caustics > 0.5) {
+    let cx = computeCaustics((uv + vec2<f32>(0.5)) * 1.0, t);
+    bg = envBackground(uv + cx.offset, bgKind, theme, t) * cx.tint;
+  } else {
+    bg = envBackground(uv, bgKind, theme, t);
+  }
 
   // ── cell body ──
   let mem = membraneFor(uvCell, kind, t);
@@ -1349,6 +1395,7 @@ uniform float u_bgKind;
 uniform float u_cellOffsetX;
 uniform float u_cellOffsetY;
 uniform float u_cellRadius;
+uniform float u_caustics;
 
 out vec4 outColor;
 
@@ -1698,6 +1745,31 @@ vec3 envBackground(vec2 uv, int kind, int theme, float t) {
   return col;
 }
 
+// Caustics overlay (mirrors WGSL). CC BY-NC-SA 3.0 · David Hoskins.
+// Returns the caustic tint; the displaced uv is computed inline.
+vec3 computeCaustics(vec2 uv, float t, out vec2 outOffset) {
+  const float TAU = 6.28318530718;
+  float time2 = t * 0.5 + 23.0;
+  vec2 p0 = mod(uv * TAU, TAU) - 150.0;
+  vec2 i = p0;
+  float c = 1.0;
+  float inten = 0.005;
+  for (int n = 0; n < 5; n++) {
+    float tn = time2 * (1.0 - (3.5 / float(n + 1)));
+    i = p0 + vec2(cos(tn - i.x) + sin(tn + i.y),
+                  sin(tn - i.y) + cos(tn + i.x));
+    vec2 denom = vec2(p0.x / (sin(i.x + tn) / inten),
+                      p0.y / (cos(i.y + tn) / inten));
+    c += 1.0 / max(length(denom), 1e-4);
+  }
+  c /= 5.0;
+  c = 1.17 - pow(c, 1.4);
+  float shade = pow(abs(c), 8.0);
+  vec3 tint = clamp((vec3(shade) + vec3(0.0, 1.35, 0.5)) * 2.0, 0.0, 1.0);
+  outOffset = vec2(cos(c) - 0.75, sin(c) - 0.75) * 0.04;
+  return tint;
+}
+
 void main() {
   vec2 res = u_resolution;
   float t = u_time * u_activity;
@@ -1712,7 +1784,14 @@ void main() {
   vec2 uvCell = (uv - vec2(u_cellOffsetX, u_cellOffsetY)) / max(u_cellRadius, 0.01);
 
   // extracellular medium
-  vec3 bg = envBackground(uv, bgKind, theme, t);
+  vec3 bg;
+  if (u_caustics > 0.5) {
+    vec2 cx_off;
+    vec3 cx_tint = computeCaustics((uv + vec2(0.5)) * 1.0, t, cx_off);
+    bg = envBackground(uv + cx_off, bgKind, theme, t) * cx_tint;
+  } else {
+    bg = envBackground(uv, bgKind, theme, t);
+  }
 
   // membrane
   float mem = membraneFor(uvCell, kind, t);
@@ -1979,6 +2058,7 @@ const params = {
   cellOffsetX: 0.0, // UV-space drag offset (0,0 = centred)
   cellOffsetY: 0.0,
   cellRadius: 1.0,  // mouse-wheel / pinch scale (clamped 0.3..3.0)
+  caustics: 0,      // 0 off · 1 on (water-turbulence overlay on bg)
 };
 
 // hook up sliders ----------------------------------------------------------
@@ -2016,6 +2096,15 @@ bgkindSel.addEventListener('change', () => {
   params.bgKind = parseInt(bgkindSel.value, 10) || 0;
 });
 params.bgKind = parseInt(bgkindSel.value, 10) || 0;
+
+// caustics overlay checkbox (default: off)
+const causticsChk = $('caustics');
+if (causticsChk) {
+  causticsChk.addEventListener('change', () => {
+    params.caustics = causticsChk.checked ? 1 : 0;
+  });
+  params.caustics = causticsChk.checked ? 1 : 0;
+}
 
 // ── Drag + pinch/wheel: move and resize the cell ────────────
 // Pointer events handle both mouse and touch. CSS `touch-action:
@@ -2251,7 +2340,7 @@ async function initWebGPU() {
     });
 
     // 8 floats = 32 bytes (matches std140-ish padding in WGSL Uniforms)
-    const uboSize = 48;
+    const uboSize = 64;
     const ubo = device.createBuffer({
       size: uboSize,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -2261,7 +2350,7 @@ async function initWebGPU() {
       entries: [{ binding: 0, resource: { buffer: ubo } }],
     });
 
-    const cpuBuf = new Float32Array(12);
+    const cpuBuf = new Float32Array(16);
 
     function frame(time) {
       // resize-safe
@@ -2284,6 +2373,7 @@ async function initWebGPU() {
       cpuBuf[9]  = params.cellOffsetX;
       cpuBuf[10] = params.cellOffsetY;
       cpuBuf[11] = params.cellRadius;
+      cpuBuf[12] = params.caustics;
       device.queue.writeBuffer(ubo, 0, cpuBuf);
 
       const enc = device.createCommandEncoder();
@@ -2346,6 +2436,7 @@ function initWebGL2() {
   const u_cox     = gl.getUniformLocation(prog, 'u_cellOffsetX');
   const u_coy     = gl.getUniformLocation(prog, 'u_cellOffsetY');
   const u_cr      = gl.getUniformLocation(prog, 'u_cellRadius');
+  const u_cau     = gl.getUniformLocation(prog, 'u_caustics');
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -2369,6 +2460,7 @@ function initWebGL2() {
     gl.uniform1f(u_cox,    params.cellOffsetX);
     gl.uniform1f(u_coy,    params.cellOffsetY);
     gl.uniform1f(u_cr,     params.cellRadius);
+    gl.uniform1f(u_cau,    params.caustics);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
   return { name: 'webgl2 · glsl es 3.0', frame };
