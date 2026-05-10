@@ -66,20 +66,25 @@ export class Canvas2DRenderer extends RendererBase {
   withCameraCtx(fn) {
     const ctx = this.ctx;
     const cam = this.camera;
+    // resize() seeds the ctx with `setTransform(dpr*rs, 0, 0, dpr*rs, 0, 0)`
+    // — the DPR + renderScale baseline that drawBackground composes onto
+    // via `ctx.transform(...)`. Because `ctx.setTransform` REPLACES the
+    // matrix (vs. `ctx.transform` which multiplies), we must bake k = dpr*rs
+    // into every entry here or the cell pass loses DPR scaling — cells
+    // would shrink to 1/dpr and shift toward the top-left while the
+    // bg fills the canvas at full size. Forward transform:
+    //   screen = R(θ) · (world · scale) + (tx, ty)
+    // composed with DPR by left-multiplication.
+    const k = (this.dpr || 1) * (this.renderScale || 1);
     ctx.save();
-    // Forward transform: screen = R(θ) · (world · scale) + (tx, ty).
-    // ctx.setTransform takes the matrix in (a, b, c, d, e, f) form
-    // where the resulting transform is [[a, c, e], [b, d, f], [0, 0, 1]].
-    // Composing scale then rotate gives:
-    //   a =  scale·cos    c = -scale·sin
-    //   b =  scale·sin    d =  scale·cos
-    //   e = tx            f = ty
-    // Falls back to the original setTransform when rotation === 0.
     if (cam.rotation === 0) {
-      ctx.setTransform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+      ctx.setTransform(cam.scale * k, 0, 0, cam.scale * k, cam.tx * k, cam.ty * k);
     } else {
       const co = Math.cos(cam.rotation), si = Math.sin(cam.rotation);
-      ctx.setTransform(cam.scale * co, cam.scale * si, -cam.scale * si, cam.scale * co, cam.tx, cam.ty);
+      ctx.setTransform(
+        cam.scale * co * k,  cam.scale * si * k,
+        -cam.scale * si * k, cam.scale * co * k,
+        cam.tx * k, cam.ty * k);
     }
     try { fn(); } finally { ctx.restore(); }
   }
