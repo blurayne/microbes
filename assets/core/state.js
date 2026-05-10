@@ -37,6 +37,7 @@ export const DEFAULTS = {
   // the player learns the matrix; toggle hides it for purists.
   compositionHud: true,
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
+  virusShader3D: false,     // experimental: render virus cells with a 3D sphere shader (cnoise-displaced surface + diffuse lighting) adapted from webgl-shaders.com/sphere-example. WebGL2 only today; WebGPU + Canvas2D the toggle is a no-op (documented in the plan file).
   showFPS: false,
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
@@ -161,6 +162,7 @@ export const LOCALES = {
     performance: 'Performance', language: 'Language',
     allow_pathogens: 'Allow pathogens',
     pinch_rotation: 'Two-finger rotation',
+    virus_shader_3d: 'Virus 3D shader (experimental)',
     game_mode: 'Game mode',
     mode_free: 'Free Game',
     mode_campaign_soon: 'Campaign (soon)',
@@ -259,6 +261,7 @@ export const LOCALES = {
     performance: 'Leistung', language: 'Sprache',
     allow_pathogens: 'Krankheitserreger erlauben',
     pinch_rotation: 'Zwei-Finger-Drehung',
+    virus_shader_3d: 'Virus-3D-Shader (experimentell)',
     game_mode: 'Spielmodus',
     mode_free: 'Free Game',
     mode_campaign_soon: 'Kampagne (bald)',
@@ -353,6 +356,7 @@ export const LOCALES = {
     performance: 'Rendimiento', language: 'Idioma',
     allow_pathogens: 'Permitir patógenos',
     pinch_rotation: 'Rotación con dos dedos',
+    virus_shader_3d: 'Shader 3D de virus (experimental)',
     game_mode: 'Modo de juego',
     mode_free: 'Juego libre',
     mode_campaign_soon: 'Campaña (pronto)',
@@ -448,6 +452,7 @@ export const LOCALES = {
     performance: 'Leistung', language: 'Sproch',
     allow_pathogens: 'Bazilln daloum',
     pinch_rotation: 'Mit zwoa Finga drahn',
+    virus_shader_3d: 'Virus-3D-Shoda (experimentell)',
     game_mode: 'Spuimodus',
     mode_free: 'Frei spuin',
     mode_campaign_soon: 'Kampagne (boid)',
@@ -542,6 +547,7 @@ export const LOCALES = {
     performance: 'Celeritas', language: 'Lingua',
     allow_pathogens: 'Pathogenes admittere',
     pinch_rotation: 'Rotatio bidigitalis',
+    virus_shader_3d: 'Shader virus tridimensionalis (experimentalis)',
     game_mode: 'Modus ludendi',
     mode_free: 'Lusus liber',
     mode_campaign_soon: 'Expeditio (mox)',
