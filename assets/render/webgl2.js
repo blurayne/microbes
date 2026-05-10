@@ -423,13 +423,18 @@ void main() {
       col += vec3(0.30, 0.20, 0.45) * pow(h, 6.0) * insideMask;
     } else if (tk == 11) {
       // dendritic — accentuate the tendril rim with a faint cyto glow.
+      // Rotation direction follows sign(freq) so siblings from a split
+      // rotate opposite ways.
+      float dirT = sign(v_phase.z + 1e-6);
       float ang = atan(v_uv.y, v_uv.x);
-      float t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + u_time * 0.20 + v_phase.x), 14.0);
+      float t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + u_time * 0.20 * dirT + v_phase.x), 14.0);
       col += v_cytoBot * t6 * 0.25 * insideMask;
     } else if (tk == 18) {
-      // slime — faint dark hyphal threads at the rim.
+      // slime — faint dark hyphal threads at the rim. Phase
+      // direction follows sign(freq).
+      float dirH = sign(v_phase.z + 1e-6);
       float ang = atan(v_uv.y, v_uv.x);
-      float lines = pow(abs(cos(ang * 1.5 + u_time * 0.10 + v_phase.x)), 50.0);
+      float lines = pow(abs(cos(ang * 1.5 + u_time * 0.10 * dirH + v_phase.x)), 50.0);
       float ring  = smoothstep(1.05, 0.80, d) * smoothstep(0.45, 0.65, d);
       col = mix(col, vec3(0.20, 0.30, 0.05), lines * ring * 0.7);
     } else if (tk == 20) {
@@ -448,12 +453,17 @@ void main() {
                    tk3 == 16 || tk3 == 17 || tk3 == 20);
     if (!noMito) {
       float mito = 1e9;
+      // Orbit direction = sign(freq): split-children inherit the
+      // parent's phase + seed but their freqs have opposite signs, so
+      // their mito orbits spin opposite ways from the same starting
+      // arrangement — visibly readable as mitotic siblings.
+      float orbitDir = sign(v_phase.z + 1e-6);
       for (int i = 0; i < 8; i++) {
         float fi = float(i);
         // Per-cell phase rotates the orbit; per-cell seed jitters
         // each capsule's radius + jitter phase so two same-type
         // cells don't show identical mito layouts.
-        float baseA = fi * 0.7853 + u_time * 0.08 + v_phase.x;
+        float baseA = fi * 0.7853 + u_time * 0.08 * orbitDir + v_phase.x;
         float radM  = 0.40 + 0.05 * sin(fi * 1.7 + v_phase.y * 0.21);
         vec2 centre = vec2(cos(baseA), sin(baseA)) * radM
                     + vec2(0.015 * sin(u_time * 1.3 + fi + v_phase.y),
@@ -521,17 +531,20 @@ void main() {
     if (vesCount > 0) {
       float ves = 1e9;
       // Per-cell seed shifts the angular phase + drift speed of every
-      // vesicle so each cell's granule arrangement is unique.
+      // vesicle so each cell's granule arrangement is unique. Drift
+      // direction follows sign(freq) so split-siblings' granules
+      // diverge in opposite rotational senses.
       float vSeed = v_phase.y;
+      float vDir  = sign(v_phase.z + 1e-6);
       for (int j = 0; j < 16; j++) {
         if (j >= vesCount) break;
         float fj = float(j);
         vec2 pos = vec2(
-          0.42 * sin(fj * 1.91 + vSeed * 0.71 + u_time * (0.18 + 0.03 * fj)),
-          0.42 * cos(fj * 2.37 + vSeed * 0.93 + u_time * (0.21 + 0.02 * fj))
+          0.42 * sin(fj * 1.91 + vSeed * 0.71 + u_time * (0.18 + 0.03 * fj) * vDir),
+          0.42 * cos(fj * 2.37 + vSeed * 0.93 + u_time * (0.21 + 0.02 * fj) * vDir)
         );
-        vec2 jit = vec2(0.008 * sin(u_time * 3.0 + fj * 7.0 + vSeed),
-                        0.008 * cos(u_time * 2.6 + fj * 5.0 + vSeed * 1.3));
+        vec2 jit = vec2(0.008 * sin(u_time * 3.0 * vDir + fj * 7.0 + vSeed),
+                        0.008 * cos(u_time * 2.6 * vDir + fj * 5.0 + vSeed * 1.3));
         ves = min(ves, length(v_uv - pos - jit) - vesRadius);
       }
       float vesMask = smoothstep(0.003, -0.003, ves);

@@ -267,6 +267,22 @@ export class Sim {
     const right = this.makeCell(cell.x + cx * sep, cell.y + cy * sep, cell.r, cell.type);
     left.orientation = cell.orientation;
     right.orientation = cell.orientation;
+    // Shader state inheritance: children keep the parent's seed +
+    // phase so the cytoplasm grain, mito starting angles, vesicle
+    // layout and ER stripes start where the parent left off — they
+    // read as mitotic siblings, not strangers. They diverge over
+    // time through:
+    //   • slight per-child jitter on wobbleFreq (different speed)
+    //   • one child gets a negated wobbleFreq (different direction
+    //     for orbital + drift animations — see render shaders'
+    //     `dir = sign(v_phase.z)` term).
+    left.phase = cell.phase;
+    right.phase = cell.phase;
+    left.wobbleSeed = cell.wobbleSeed;
+    right.wobbleSeed = cell.wobbleSeed;
+    const baseFreq = Math.abs(cell.wobbleFreq) || 0.7;
+    left.wobbleFreq  =  baseFreq * (0.85 + Math.random() * 0.30);
+    right.wobbleFreq = -baseFreq * (0.85 + Math.random() * 0.30);
     // Inherit parent's velocity. The push-apart impulse below is NOT
     // applied directly — we store it as splitImpulseRemaining* and ramp
     // it in over SPLIT_IMPULSE_FADE_S so the cells don't suddenly snap
