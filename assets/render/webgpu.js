@@ -513,6 +513,100 @@ struct VsOut {
 }
 `;
 
+// ---- Reactor (Gray-Scott) shaders ---------------------------------
+// WGSL ports of FRAG_REACTOR_STEP / FRAG_REACTOR_SEED in webgl2.js.
+// Two RGBA8 textures ping-pong each iteration; encoding stores
+// (A * 0.05, B, 0, 1) so both concentrations fit in 0..1.
+
+const REACTOR_STEP_WGSL = /* wgsl */ `
+struct StepU {
+  // (resolutionX, resolutionY, _, _) — RT pixel size for the laplacian.
+  res: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> u: StepU;
+@group(0) @binding(1) var samp: sampler;
+@group(0) @binding(2) var src: texture_2d<f32>;
+
+fn readConc(uv: vec2<f32>) -> vec2<f32> {
+  return textureSample(src, samp, uv).rg / vec2<f32>(0.05, 1.0);
+}
+
+fn lapConc(uv: vec2<f32>) -> vec2<f32> {
+  let du = 1.0 / u.res.x;
+  let dv = 1.0 / u.res.y;
+  var lap = -readConc(uv);
+  lap = lap + 0.20 * readConc(uv + vec2<f32>(-du,  0.0));
+  lap = lap + 0.20 * readConc(uv + vec2<f32>( du,  0.0));
+  lap = lap + 0.20 * readConc(uv + vec2<f32>( 0.0, -dv));
+  lap = lap + 0.20 * readConc(uv + vec2<f32>( 0.0,  dv));
+  lap = lap + 0.05 * readConc(uv + vec2<f32>(-du, -dv));
+  lap = lap + 0.05 * readConc(uv + vec2<f32>( du, -dv));
+  lap = lap + 0.05 * readConc(uv + vec2<f32>( du,  dv));
+  lap = lap + 0.05 * readConc(uv + vec2<f32>(-du,  dv));
+  return lap;
+}
+
+@vertex fn vs_main(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {
+  var corners = array<vec2<f32>, 4>(
+    vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0),
+    vec2<f32>(-1.0,  1.0), vec2<f32>(1.0,  1.0),
+  );
+  return vec4<f32>(corners[vid], 0.0, 1.0);
+}
+
+@fragment fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+  let uv = pos.xy / u.res.xy;
+  let D_A = 0.8;
+  let D_B = 0.4;
+  let feed = 0.06 * uv.x;
+  let kill = 0.035 + 0.03 * uv.x + (0.022 - 0.015 * uv.x) * uv.y;
+  let c   = readConc(uv);
+  let lap = lapConc(uv);
+  let dA = D_A * lap.x - c.x * c.y * c.y + feed * (1.0 - c.x);
+  let dB = D_B * lap.y + c.x * c.y * c.y - (kill + feed) * c.y;
+  let cN = c + vec2<f32>(dA, dB);
+  return vec4<f32>(cN * vec2<f32>(0.05, 1.0), 0.0, 1.0);
+}
+`;
+
+const REACTOR_MAX_SEEDS_WGPU = 8;
+const REACTOR_SEED_WGSL = /* wgsl */ `
+struct SeedU {
+  // (resolutionX, resolutionY, seedCount, _)
+  res_count: vec4<f32>,
+  // Up to 8 discs; (cx, cy, r, _) in UV space. vec4 stride satisfies
+  // WGSL's 16-byte uniform-array element alignment.
+  seeds: array<vec4<f32>, ${REACTOR_MAX_SEEDS_WGPU}>,
+};
+@group(0) @binding(0) var<uniform> u: SeedU;
+@group(0) @binding(1) var samp: sampler;
+@group(0) @binding(2) var src: texture_2d<f32>;
+
+@vertex fn vs_main(@builtin(vertex_index) vid: u32) -> @builtin(position) vec4<f32> {
+  var corners = array<vec2<f32>, 4>(
+    vec2<f32>(-1.0, -1.0), vec2<f32>(1.0, -1.0),
+    vec2<f32>(-1.0,  1.0), vec2<f32>(1.0,  1.0),
+  );
+  return vec4<f32>(corners[vid], 0.0, 1.0);
+}
+
+@fragment fn fs_main(@builtin(position) pos: vec4<f32>) -> @location(0) vec4<f32> {
+  let uv = pos.xy / u.res_count.xy;
+  let srcCol = textureSample(src, samp, uv);
+  var c = srcCol.rg / vec2<f32>(0.05, 1.0);
+  let count = i32(u.res_count.z);
+  for (var i: i32 = 0; i < ${REACTOR_MAX_SEEDS_WGPU}; i = i + 1) {
+    if (i >= count) { break; }
+    let seed = u.seeds[i];
+    if (length(uv - seed.xy) < seed.z) {
+      c.y = max(c.y, 0.9);
+    }
+  }
+  return vec4<f32>(c * vec2<f32>(0.05, 1.0), 0.0, 1.0);
+}
+`;
+
+
 // ---------- Background: gradient + spots + drifting RBC silhouettes ----
 // Mirrors webgl2.js FRAG_BG (lines 249-340) bit-for-bit. One uniform
 // buffer carries kind/vignette/grid/time + camera + viewport +
@@ -537,6 +631,11 @@ struct BgU {
   spotCols: array<vec4<f32>, ${MAX_SPOTS}>,
 };
 @group(0) @binding(0) var<uniform> u: BgU;
+// Reactor display: only sampled when kind == 8. For every other kind a
+// 1x1 dummy texture is bound (WebGPU validation requires the bind-group
+// to be complete; the shader simply doesn't sample it for kinds 0-7).
+@group(0) @binding(1) var reactorSamp: sampler;
+@group(0) @binding(2) var reactorTex: texture_2d<f32>;
 
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
@@ -713,6 +812,21 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
       let dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
       col = mix(col, vec3<f32>(0.47, 0.08, 0.08), dotA);
     }
+  }
+
+  // ---- Reactor: Gray-Scott reaction-diffusion display (kind 8) ----
+  // Reads the front ping-pong RT (set up by drawBackground before this
+  // pass). Decodes (A * 0.05, B, 0, 1), ramps an acid-green palette on
+  // the B concentration. Mirrors webgl2.js FRAG_BG kind == 8 branch.
+  if (kind == 8) {
+    let rxColor = textureSample(reactorTex, reactorSamp, uv);
+    let rxConc = rxColor.rg / vec2<f32>(0.05, 1.0);
+    let bN = clamp(rxConc.y * 1.6, 0.0, 1.0);
+    let dark = vec3<f32>(0.02, 0.06, 0.04);
+    let mid  = vec3<f32>(0.10, 0.40, 0.20);
+    let hot  = vec3<f32>(0.49, 1.00, 0.54);   // panel accent #7eff8a
+    col = mix(mix(dark, mid, smoothstep(0.0, 0.45, bN)),
+              hot, smoothstep(0.45, 0.92, bN));
   }
 
   // Vignette: darken the corners.
@@ -1185,6 +1299,20 @@ export class WebGPURenderer extends RendererBase {
     this._bgUniformBuffer = null;
     this._bgBindGroup = null;
     this._bgUniformData = new Float32Array(0);
+    // Reactor (Gray-Scott) — eager: sampler + 1x1 dummy texture, lazy:
+    // pipelines + ping-pong RT pair. Built in _buildReactorEager().
+    this._reactorSampler = null;
+    this._reactorDummyTex = null;
+    this._reactorDummyView = null;
+    this._reactorStepPipeline = null;
+    this._reactorSeedPipeline = null;
+    this._reactorStepUniformBuffer = null;
+    this._reactorSeedUniformBuffer = null;
+    this._reactorRtA = null;
+    this._reactorRtB = null;
+    this._reactorRtSize = { w: 0, h: 0 };
+    this._reactorFront = 0;
+    this._reactorLastSeedMs = -Infinity;
     // One-time random light-spot layout, mirrors webgl2.js:935.
     this._spots = [];
     for (let i = 0; i < MAX_SPOTS; i++) {
@@ -1232,6 +1360,7 @@ export class WebGPURenderer extends RendererBase {
     this._growInstanceBuffer(64);
     this._buildMetaPipelines();
     this._buildOverlayPipelines();
+    this._buildReactorEager();
   }
 
   // Dashed-line target lines, pulsing-circle marker, particles, and
@@ -1333,10 +1462,11 @@ export class WebGPURenderer extends RendererBase {
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
     this._bgUniformData = new Float32Array(96);
-    this._bgBindGroup = device.createBindGroup({
-      layout: this._bgPipeline.getBindGroupLayout(0),
-      entries: [{ binding: 0, resource: { buffer: this._bgUniformBuffer } }],
-    });
+    // Bind group is rebuilt each frame in drawBackground because the
+    // texture view at binding 2 changes between the dummy 1x1 (every
+    // theme but reactor) and the active reactor RT view (which itself
+    // ping-pongs each step). Cached here as null; never read directly.
+    this._bgBindGroup = null;
 
     // ---- Particles (instanced quad, 8 floats per particle) ----
     const partModule = device.createShaderModule({ code: PARTICLE_WGSL });
@@ -1616,6 +1746,208 @@ export class WebGPURenderer extends RendererBase {
     this._metaPolyData = new Float32Array(this._metaPolyCapacity);
   }
 
+  // ---- Reactor (Gray-Scott) ---------------------------------------
+  // Two ping-pong RTs read+write the Gray-Scott state. Step + seed
+  // pipelines compile **lazily** on first reactor frame (most sessions
+  // never enter the theme). The sampler + 1x1 dummy texture, however,
+  // are eager: BG_WGSL declares the reactor texture binding
+  // unconditionally, so every frame's bg bind group must supply a
+  // valid texture even when kind != 8. Dummy contents are ignored
+  // (the shader only samples the texture inside the kind == 8 branch).
+  _buildReactorEager() {
+    const device = this.device;
+    this._reactorSampler = device.createSampler({
+      magFilter: 'nearest',
+      minFilter: 'nearest',
+      addressModeU: 'clamp-to-edge',
+      addressModeV: 'clamp-to-edge',
+    });
+    this._reactorDummyTex = device.createTexture({
+      size: [1, 1],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT,
+    });
+    this._reactorDummyView = this._reactorDummyTex.createView();
+    // Initial fill of the dummy: clear-render-pass with (0, 0, 0, 1).
+    // Shader never samples it for non-reactor kinds, but WebGPU
+    // validation rejects sampling from a never-written texture.
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [{
+        view: this._reactorDummyView,
+        clearValue: { r: 0, g: 0, b: 0, a: 1 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+    pass.end();
+    device.queue.submit([enc.finish()]);
+
+    // Lazy fields (populated on first reactor frame)
+    this._reactorStepPipeline = null;
+    this._reactorSeedPipeline = null;
+    this._reactorStepUniformBuffer = null;
+    this._reactorSeedUniformBuffer = null;
+    this._reactorRtA = null;
+    this._reactorRtB = null;
+    this._reactorRtSize = { w: 0, h: 0 };
+    this._reactorFront = 0;
+    this._reactorLastSeedMs = -Infinity;
+    this._reactorSeedScratch = new Float32Array(4 + REACTOR_MAX_SEEDS_WGPU * 4);
+    this._reactorStepScratch = new Float32Array(4);
+  }
+
+  _reactorEnsurePipelines() {
+    if (this._reactorStepPipeline) return;
+    const device = this.device;
+    const stepModule = device.createShaderModule({ code: REACTOR_STEP_WGSL });
+    this._reactorStepPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex:   { module: stepModule, entryPoint: 'vs_main' },
+      fragment: { module: stepModule, entryPoint: 'fs_main', targets: [{ format: 'rgba8unorm' }] },
+      primitive: { topology: 'triangle-strip' },
+    });
+    this._reactorStepUniformBuffer = device.createBuffer({
+      size: 16,                          // vec4 (resX, resY, _, _)
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const seedModule = device.createShaderModule({ code: REACTOR_SEED_WGSL });
+    this._reactorSeedPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex:   { module: seedModule, entryPoint: 'vs_main' },
+      fragment: { module: seedModule, entryPoint: 'fs_main', targets: [{ format: 'rgba8unorm' }] },
+      primitive: { topology: 'triangle-strip' },
+    });
+    this._reactorSeedUniformBuffer = device.createBuffer({
+      // 1 vec4 (resX, resY, count, _) + 8 vec4 seed entries = 144 bytes.
+      size: 16 + REACTOR_MAX_SEEDS_WGPU * 16,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+  }
+
+  _reactorMakeRt(w, h) {
+    const device = this.device;
+    const tex = device.createTexture({
+      size: [w, h],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    const view = tex.createView();
+    // Initial fill: encode A=1, B=0 → (0.05, 0, 0, 1). Matches webgl2.js
+    // _reactorMakeRt's gl.clearColor / gl.clear pattern.
+    const enc = device.createCommandEncoder();
+    const pass = enc.beginRenderPass({
+      colorAttachments: [{
+        view,
+        clearValue: { r: 0.05, g: 0.0, b: 0.0, a: 1.0 },
+        loadOp: 'clear',
+        storeOp: 'store',
+      }],
+    });
+    pass.end();
+    device.queue.submit([enc.finish()]);
+    return { tex, view };
+  }
+
+  _reactorEnsureRts() {
+    this._reactorEnsurePipelines();
+    const targetW = Math.max(64, Math.min(256, Math.floor(this.W * 0.5)));
+    const targetH = Math.max(64, Math.min(256, Math.floor(this.H * 0.5)));
+    if (this._reactorRtA && this._reactorRtSize.w === targetW && this._reactorRtSize.h === targetH) return;
+    if (this._reactorRtA) { try { this._reactorRtA.tex.destroy(); } catch {} }
+    if (this._reactorRtB) { try { this._reactorRtB.tex.destroy(); } catch {} }
+    this._reactorRtA = this._reactorMakeRt(targetW, targetH);
+    this._reactorRtB = this._reactorMakeRt(targetW, targetH);
+    this._reactorRtSize = { w: targetW, h: targetH };
+    this._reactorFront = 0;
+    this._reactorLastSeedMs = -Infinity;
+  }
+
+  _reactorRt(idx) { return idx === 0 ? this._reactorRtA : this._reactorRtB; }
+
+  _reactorSeed() {
+    const device = this.device;
+    const front = this._reactorRt(this._reactorFront);
+    const back  = this._reactorRt(1 - this._reactorFront);
+    const count = 5 + Math.floor(Math.random() * 4);
+    const u = this._reactorSeedScratch;
+    u[0] = this._reactorRtSize.w;
+    u[1] = this._reactorRtSize.h;
+    u[2] = count;
+    u[3] = 0;
+    for (let i = 0; i < count; i++) {
+      u[4 + i * 4]     = Math.random();
+      u[4 + i * 4 + 1] = Math.random();
+      u[4 + i * 4 + 2] = 0.025 + Math.random() * 0.015;
+      u[4 + i * 4 + 3] = 0;
+    }
+    // Zero out unused entries so stale data from prior seeds doesn't
+    // leak through (count bounds the loop in WGSL, but be defensive).
+    for (let i = count; i < REACTOR_MAX_SEEDS_WGPU; i++) {
+      u[4 + i * 4]     = 0;
+      u[4 + i * 4 + 1] = 0;
+      u[4 + i * 4 + 2] = 0;
+      u[4 + i * 4 + 3] = 0;
+    }
+    device.queue.writeBuffer(this._reactorSeedUniformBuffer, 0, u.buffer, u.byteOffset, u.byteLength);
+
+    const bindGroup = device.createBindGroup({
+      layout: this._reactorSeedPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this._reactorSeedUniformBuffer } },
+        { binding: 1, resource: this._reactorSampler },
+        { binding: 2, resource: front.view },
+      ],
+    });
+    const pass = this._frameEncoder.beginRenderPass({
+      colorAttachments: [{ view: back.view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'load', storeOp: 'store' }],
+    });
+    pass.setPipeline(this._reactorSeedPipeline);
+    pass.setBindGroup(0, bindGroup);
+    pass.draw(4, 1, 0, 0);
+    pass.end();
+    this._reactorFront = 1 - this._reactorFront;
+  }
+
+  _reactorStep(iters) {
+    const device = this.device;
+    const u = this._reactorStepScratch;
+    u[0] = this._reactorRtSize.w;
+    u[1] = this._reactorRtSize.h;
+    u[2] = 0;
+    u[3] = 0;
+    device.queue.writeBuffer(this._reactorStepUniformBuffer, 0, u.buffer, u.byteOffset, u.byteLength);
+    for (let i = 0; i < iters; i++) {
+      const front = this._reactorRt(this._reactorFront);
+      const back  = this._reactorRt(1 - this._reactorFront);
+      const bindGroup = device.createBindGroup({
+        layout: this._reactorStepPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._reactorStepUniformBuffer } },
+          { binding: 1, resource: this._reactorSampler },
+          { binding: 2, resource: front.view },
+        ],
+      });
+      const pass = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{ view: back.view, clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'load', storeOp: 'store' }],
+      });
+      pass.setPipeline(this._reactorStepPipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(4, 1, 0, 0);
+      pass.end();
+      this._reactorFront = 1 - this._reactorFront;
+    }
+  }
+
+  _reactorDestroy() {
+    const tryDestroy = (b) => { if (b) { try { b.destroy(); } catch {} } };
+    if (this._reactorRtA) { tryDestroy(this._reactorRtA.tex); this._reactorRtA = null; }
+    if (this._reactorRtB) { tryDestroy(this._reactorRtB.tex); this._reactorRtB = null; }
+    this._reactorRtSize = { w: 0, h: 0 };
+    this._reactorFront = 0;
+    this._reactorLastSeedMs = -Infinity;
+  }
+
   _buildDiskPipeline() {
     const device = this.device;
 
@@ -1872,6 +2204,24 @@ export class WebGPURenderer extends RendererBase {
     else if (bg.kind === 'aurora') kind = 5;
     else if (bg.kind === 'underwater') kind = 6;
     else if (bg.kind === 'lava') kind = 7;
+    else if (bg.kind === 'reactor') kind = 8;
+
+    // Reactor (Gray-Scott): allocate RTs lazily, run N step iterations
+    // and refresh seeds, all encoded into the frame's command encoder
+    // BEFORE the bg display pass below. Mirrors the WebGL2 sequence in
+    // webgl2.js drawBackground.
+    if (kind === 8) {
+      this._reactorEnsureRts();
+      if (timeMs - this._reactorLastSeedMs > 10000) {
+        this._reactorSeed();
+        this._reactorLastSeedMs = timeMs;
+      }
+      this._reactorStep(5);
+    } else if (this._reactorRtA) {
+      // Theme switched away — release RT GPU memory. Pipelines + the
+      // sampler + dummy stay so a return to the theme is cheap.
+      this._reactorDestroy();
+    }
 
     const data = this._bgUniformData;
     // misc
@@ -1926,6 +2276,22 @@ export class WebGPURenderer extends RendererBase {
       this._bgUniformBuffer, 0, data.buffer, data.byteOffset, data.byteLength,
     );
 
+    // Pick the texture view BG_WGSL's binding 2 sees this frame:
+    // the active reactor RT (front side, post-step) for kind == 8,
+    // else the 1x1 dummy. Built fresh each frame because the front
+    // index ping-pongs and the RT view itself changes on resize.
+    const bgTexView = (kind === 8 && this._reactorRtA)
+      ? this._reactorRt(this._reactorFront).view
+      : this._reactorDummyView;
+    const bgBindGroup = this.device.createBindGroup({
+      layout: this._bgPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this._bgUniformBuffer } },
+        { binding: 1, resource: this._reactorSampler },
+        { binding: 2, resource: bgTexView },
+      ],
+    });
+
     const pass = this._frameEncoder.beginRenderPass({
       colorAttachments: [{
         view: this._frameView,
@@ -1936,7 +2302,7 @@ export class WebGPURenderer extends RendererBase {
       }],
     });
     pass.setPipeline(this._bgPipeline);
-    pass.setBindGroup(0, this._bgBindGroup);
+    pass.setBindGroup(0, bgBindGroup);
     pass.draw(3, 1, 0, 0);             // big-triangle, 3 verts, no VBO
     pass.end();
   }
@@ -2871,6 +3237,10 @@ export class WebGPURenderer extends RendererBase {
     tryDestroy(this._decorLineBuffer);
     tryDestroy(this._decorTriBuffer);
     this._metaDestroyPool();
+    this._reactorDestroy();
+    tryDestroy(this._reactorStepUniformBuffer);
+    tryDestroy(this._reactorSeedUniformBuffer);
+    tryDestroy(this._reactorDummyTex);
     this._instanceBuffer = null;
     this._cornerBuffer = null;
     this._uniformBuffer = null;
