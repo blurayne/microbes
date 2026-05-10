@@ -11,6 +11,7 @@ file in sync.
 ## Open
 
 - [ ] **Virus 3D shader — WebGPU + Canvas2D ports** — [`.claude/plan/06-virus-shader-gpu-port.md`](./.claude/plan/06-virus-shader-gpu-port.md)
+- [ ] **Reactive faces + smooth eye movement** — [`.claude/plan/07-reactive-faces.md`](./.claude/plan/07-reactive-faces.md)
 
 ## Done
 

@@ -22,6 +22,7 @@ import {
   currentBackground, currentTheme, currentHighlightColor, cellColors, frac,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
+import { effectiveMouthKind } from '../core/sim-faces.js';
 import { RendererBase } from './renderer.js';
 
 // ---------- Layout constants (must match WGSL `VsIn` + JS pack loop) ----------
@@ -2941,16 +2942,12 @@ export class WebGPURenderer extends RendererBase {
       const c = s.cell;
       const cfg = FACE[c.type] || FACE.default;
       const eyesCount = cfg.eyes || 0;
-      const mouthName = cfg.mouth || 'none';
+      const mouthName = effectiveMouthKind(c);
       const mouthKind = MOUTH_KIND_FLOAT[mouthName] || 0;
       if (eyesCount === 0 && mouthKind === 0) continue;
-      let lookX = c.vx, lookY = c.vy;
-      if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
-        lookX = c.alarmTarget.x - c.x;
-        lookY = c.alarmTarget.y - c.y;
-      }
-      const lm = Math.hypot(lookX, lookY) || 1;
-      lookX /= lm; lookY /= lm;
+      // Smoothed look-at unit vector — see sim.update lerp.
+      const lm = Math.hypot(c.lookX, c.lookY) || 1;
+      const lookX = c.lookX / lm, lookY = c.lookY / lm;
       if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
       const blink = ((c.nextBlink - now) < 120 && (c.nextBlink - now) > 0) ? 1 : 0;
       const mc = (CELL_TYPES[c.type] || CELL_TYPES.neutrophil).colors;
