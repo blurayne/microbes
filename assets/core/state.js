@@ -56,10 +56,12 @@ export const DEFAULTS = {
   upscaleMode: 'blur',
   scanlines: false,
   useHighlight: true,                       // selection ring uses theme accent when on
-  // Audio (off by default — most users would rather opt in than be
-  // greeted by autoplay). Volumes are 0..1 floats; both sliders sit in
-  // the new "Audio" section of the settings panel.
-  musicEnabled: false,
+  // Audio. Music ON by default — user wants the game to greet the
+  // player with music. The first play() call is autoplay-blocked
+  // until the user has interacted; music.js retries on the very
+  // first pointerdown so the track starts the moment the player
+  // touches anything. Volumes are 0..1 floats.
+  musicEnabled: true,
   musicVolume: 0.5,
   sfxVolume: 0.7,
   renderer: 'webgpu',       // 'canvas2d' | 'webgl2' | 'webgpu'

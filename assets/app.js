@@ -10,7 +10,7 @@ import {
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { Sim } from './core/sim.js';
-import { getShapes } from './core/shape.js';
+import { getShapes, inView } from './core/shape.js';
 import { Canvas2DRenderer, renderCellPreview } from './render/canvas2d.js';
 import { WebGL2Renderer } from './render/webgl2.js';
 import { WebGPURenderer } from './render/webgpu.js';
@@ -514,26 +514,45 @@ bindCheckbox('cartoon', 'cartoon');
 bindCheckbox('compositionHud', 'compositionHud');
 
 // ----- Audio: music + SFX volume sliders, music on/off + next track -----
-import('./core/music.js').then(({ MusicPlayer }) => {
+// Volume scale applied to off-screen SFX events (e.g. an antibody
+// fire from a B-cell that's panned outside the viewport). 0.7 = 30 %
+// quieter, matching the spec.
+const SFX_OFFSCREEN_SCALE = 0.7;
+
+Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ MusicPlayer }, { SfxPlayer }]) => {
   const player = new MusicPlayer();
   player.setVolume(S.musicVolume);
   player.setEnabled(!!S.musicEnabled);
 
+  const sfx = new SfxPlayer();
+  sfx.setVolume(S.sfxVolume);
+
   // Browser autoplay policies: a play() before any user gesture
-  // gets rejected. Hook the very next pointerdown to retry.
+  // gets rejected. Hook the very next pointerdown to retry the
+  // music start. SFX cloning has the same restriction, but each
+  // clone is its own play() — they recover automatically once the
+  // user has clicked once.
   document.addEventListener('pointerdown', () => player.retryIfPending(), { once: false });
 
   bindCheckbox('musicEnabled', 'musicEnabled', (on) => player.setEnabled(on));
   bindRange('musicVolume', 'musicVolume', 'musicVolumeVal', v => Math.round(v * 100) + '%');
   bindRange('sfxVolume',   'sfxVolume',   'sfxVolumeVal',   v => Math.round(v * 100) + '%');
-  // setVolume reflects slider changes onto the player; bindRange already
-  // writes to S.musicVolume + saves, so we only need the live hookup.
   const musicVolEl = document.getElementById('musicVolume');
   if (musicVolEl) musicVolEl.addEventListener('input', () => player.setVolume(parseFloat(musicVolEl.value)));
+  const sfxVolEl = document.getElementById('sfxVolume');
+  if (sfxVolEl) sfxVolEl.addEventListener('input', () => sfx.setVolume(parseFloat(sfxVolEl.value)));
   const nextBtn = document.getElementById('musicNext');
   if (nextBtn) nextBtn.addEventListener('click', () => player.next());
+
+  // Antibody fire SFX. Random clip per shot; volume scaled to 70%
+  // when the firing B-cell is outside the visible viewport so off-
+  // screen events stay audible but don't drown the on-screen action.
+  sim.onAntibodyEmit = (owner /*, target */) => {
+    const visible = inView(owner.x, owner.y, owner.r, sim.camera, sim.W, sim.H);
+    sfx.play('antibody', { volumeScale: visible ? 1.0 : SFX_OFFSCREEN_SCALE });
+  };
 }).catch((err) => {
-  console.warn('Music module failed to load:', err);
+  console.warn('Audio modules failed to load:', err);
 });
 bindCheckbox('showFPS', 'showFPS', (on) => {
   const el = document.getElementById('fps');
