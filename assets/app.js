@@ -794,6 +794,16 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
   sim.onSplit = (e) => {
     sfx.play('split', { volumeScale: sfxSpatialScale(e.x, e.y) });
   };
+
+  // Per-type damage SFX. Currently: virus → virus-hit. Other types
+  // could be added by extending the switch below + dropping new
+  // clips into assets/audio/sfx/ and registering in sfx.js.
+  sim.onDamage = (e) => {
+    let name = null;
+    if (e.type === 'virus') name = 'virusHit';
+    if (!name) return;
+    sfx.play(name, { volumeScale: sfxSpatialScale(e.x, e.y) });
+  };
 }).catch((err) => {
   console.warn('Audio modules failed to load:', err);
 });

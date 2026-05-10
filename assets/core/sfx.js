@@ -24,6 +24,9 @@ const SFX_SOURCES = {
     'assets/audio/sfx/split-2.mp3',
     'assets/audio/sfx/split-3.mp3',
   ],
+  virusHit: [
+    'assets/audio/sfx/virus-hit-1.mp3',
+  ],
 };
 
 export class SfxPlayer {
