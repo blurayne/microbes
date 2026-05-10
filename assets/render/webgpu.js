@@ -1152,25 +1152,24 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   // with darker centre dot. Anchored in world space so they pan + zoom
   // with the camera (matches Canvas2D's drawBackground behaviour where
   // RBCs are drawn inside the camera transform).
-  // Bloodstream theme: directional plasma flow + bright streamer
-  // ribbons riding the same flow vector — reads as a stream of
-  // blood, not a still pool. Mirrors WebGL2 FRAG_BG.
+  // Bloodstream theme: directional plasma flow + horizontal ribbon
+  // bands scrolling downward. Mirrors WebGL2 FRAG_BG.
   if (rbcOn == 1) {
-    let flow = vec2<f32>(-1.0, 0.10);
+    let flow = vec2<f32>(0.10, 1.0);   // downward + slight rightward
     let plasmaP = worldPx * 0.0015 + flow * (time * 0.20);
     let plasma = bgFbm(plasmaP + vec2<f32>(bgFbm(plasmaP * 0.5)));
     let plasmaCol = mix(vec3<f32>(0.30, 0.05, 0.07),
                         vec3<f32>(0.62, 0.12, 0.16),
                         smoothstep(0.30, 0.85, plasma));
     col = mix(col, plasmaCol, 0.55);
-    var ribbon = sin(worldPx.y * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
+    var ribbon = sin(worldPx.x * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
                      + time * 0.6);
     ribbon = pow(max(0.0, ribbon), 6.0);
     col = mix(col, vec3<f32>(0.88, 0.22, 0.25), ribbon * 0.18);
   }
 
-  // Discrete RBC silhouettes on top of the plasma. World-tiled —
-  // 3x3 neighbour × 4 RBCs each = 36 ellipse tests per fragment.
+  // RBC donuts — biconcave-disc silhouettes flowing top → bottom
+  // with per-cell rotation. Mirror of WebGL2 FRAG_BG.
   if (rbcOn == 1) {
     let TS: f32 = 600.0;
     let tIdx = floor(worldPx / TS);
@@ -1182,16 +1181,26 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
           let kSeed = h0 * 6.28 + f32(k) * 1.31;
           let inTile = vec2<f32>(fract(kSeed * 1.7), fract(kSeed * 2.3)) * TS;
           let cWorld = cell * TS + inTile
-                     + vec2<f32>(40.0 * sin(time * 0.25 + kSeed),
-                                 40.0 * cos(time * 0.18 + kSeed))
-                     + vec2<f32>(-90.0, 9.0) * time;
-          let rWorld = 18.0 + 16.0 * fract(kSeed * 0.41);
-          let dEll = (worldPx - cWorld) / vec2<f32>(rWorld, rWorld * 0.78);
-          let ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
-          col = mix(col, vec3<f32>(1.0, 0.35, 0.35), ellA);
-          let dDot = length(worldPx - cWorld) / (rWorld * 0.32);
-          let dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
-          col = mix(col, vec3<f32>(0.47, 0.08, 0.08), dotA);
+                     + vec2<f32>(28.0 * sin(time * 0.30 + kSeed), 0.0)
+                     + vec2<f32>(9.0, 110.0) * time;
+          let rWorld = 24.0 + 18.0 * fract(kSeed * 0.41);
+
+          let spin = 0.6 + 0.7 * fract(kSeed * 0.71);
+          let ang  = kSeed + time * spin;
+          let ca   = cos(ang); let sa = sin(ang);
+          let dXY  = worldPx - cWorld;
+          let rd   = vec2<f32>(ca * dXY.x + sa * dXY.y, -sa * dXY.x + ca * dXY.y);
+          let dE   = rd / vec2<f32>(rWorld, rWorld * 0.92);
+          let L    = length(dE);
+
+          let bodyA = (1.0 - smoothstep(0.95, 1.05, L)) * 0.65;
+          let dimple = smoothstep(0.55, 0.0, L);
+          let rbcCol = mix(vec3<f32>(0.96, 0.32, 0.34),
+                           vec3<f32>(0.50, 0.10, 0.12),
+                           dimple);
+          col = mix(col, rbcCol, bodyA);
+          let rim = smoothstep(0.92, 0.99, L) * (1.0 - smoothstep(1.00, 1.04, L));
+          col = mix(col, vec3<f32>(0.22, 0.04, 0.06), rim * 0.45);
         }
       }
     }

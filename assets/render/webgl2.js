@@ -799,27 +799,30 @@ void main() {
   }
 
   // Bloodstream theme: directional plasma flow beneath the RBC
-  // silhouettes. The fbm is sheared along a leftward flow vector so
-  // the wash reads as "stream of blood" rather than a still pool;
-  // bright streamer ribbons (high-power sin) ride the same flow.
+  // silhouettes. Flow vector points downward (top → bottom) so the
+  // wash reads as a stream of blood draining vertically; streamer
+  // ribbons appear as horizontal bands sliding downward.
   if (u_rbc == 1) {
-    vec2 flow = vec2(-1.0, 0.10);    // mostly leftward, slight downflow
+    vec2 flow = vec2(0.10, 1.0);    // mostly downward, slight rightward
     vec2 plasmaP = worldPx * 0.0015 + flow * (u_time * 0.20);
     float plasma = bgFbm(plasmaP + bgFbm(plasmaP * 0.5));
     vec3 plasmaCol = mix(vec3(0.30, 0.05, 0.07), vec3(0.62, 0.12, 0.16),
                          smoothstep(0.30, 0.85, plasma));
     col = mix(col, plasmaCol, 0.55);
-    // Bright streamer ribbons — narrow horizontal bands of brighter
-    // tint that scroll with the same flow vector. Reads as currents.
-    float ribbon = sin(worldPx.y * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
+    // Streamer ribbons — narrow horizontal bands (perpendicular to
+    // the vertical flow) of brighter tint that scroll downward.
+    float ribbon = sin(worldPx.x * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
                        + u_time * 0.6);
     ribbon = pow(max(0.0, ribbon), 6.0);
     col = mix(col, vec3(0.88, 0.22, 0.25), ribbon * 0.18);
   }
 
-  // Drifting RBC silhouettes — discrete cell shapes on top of the
-  // plasma wash. World-tiled so density stays camera-independent:
-  // 3x3 neighbourhood of 600x600 tiles, 4 RBCs per tile.
+  // RBC donuts — biconcave-disc silhouettes flowing top → bottom
+  // with per-cell rotation. World-tiled (3×3 × 4 cells per tile) so
+  // density stays camera-independent. Each donut renders as a soft
+  // pink rim with a darker red dimple in the centre (the biconcave
+  // depression seen face-on); a slight aspect ratio (0.92) makes the
+  // per-cell spin visually readable.
   if (u_rbc == 1) {
     const float TS = 600.0;            // world px per tile
     vec2 tIdx = floor(worldPx / TS);
@@ -829,22 +832,34 @@ void main() {
         float h0 = bgHash(cell);
         for (int k = 0; k < 4; k++) {
           float kSeed = h0 * 6.28 + float(k) * 1.31;
-          // Stable in-tile centre + slow per-cell drift in world px.
           vec2 inTile = vec2(fract(kSeed * 1.7), fract(kSeed * 2.3)) * TS;
-          // Per-cell wobble overlaid on a directional flow drift —
-          // the bloodstream now reads as a current of cells rather
-          // than a static field of jitter.
+          // Top-bottom flow + small per-cell wobble on the side axis.
           vec2 cWorld = cell * TS + inTile
-                      + vec2(40.0 * sin(u_time * 0.25 + kSeed),
-                             40.0 * cos(u_time * 0.18 + kSeed))
-                      + vec2(-90.0, 9.0) * u_time;
-          float rWorld = 18.0 + 16.0 * fract(kSeed * 0.41);
-          vec2 dEll = (worldPx - cWorld) / vec2(rWorld, rWorld * 0.78);
-          float ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
-          col = mix(col, vec3(1.0, 0.35, 0.35), ellA);
-          float dDot = length(worldPx - cWorld) / (rWorld * 0.32);
-          float dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
-          col = mix(col, vec3(0.47, 0.08, 0.08), dotA);
+                      + vec2(28.0 * sin(u_time * 0.30 + kSeed), 0.0)
+                      + vec2(9.0, 110.0) * u_time;
+          float rWorld = 24.0 + 18.0 * fract(kSeed * 0.41);
+
+          // Per-cell rotation: angle = seed phase + slow spin rate.
+          float spin = 0.6 + 0.7 * fract(kSeed * 0.71);   // 0.6..1.3 rad/s
+          float ang  = kSeed + u_time * spin;
+          float ca   = cos(ang), sa = sin(ang);
+          vec2  d    = worldPx - cWorld;
+          vec2  rd   = vec2(ca * d.x + sa * d.y, -sa * d.x + ca * d.y);
+          // Slight oblate so rotation is visible on the round shape.
+          vec2  dE   = rd / vec2(rWorld, rWorld * 0.92);
+          float L    = length(dE);
+
+          // Disc body — soft AA edge at L = 1.
+          float bodyA = (1.0 - smoothstep(0.95, 1.05, L)) * 0.65;
+          // Biconcave depression: rim stays bright, centre darkens.
+          float dimple = smoothstep(0.55, 0.0, L);
+          vec3 rbcCol = mix(vec3(0.96, 0.32, 0.34),    // rim pink
+                            vec3(0.50, 0.10, 0.12),    // central dimple
+                            dimple);
+          col = mix(col, rbcCol, bodyA);
+          // Thin dark outline at the membrane edge.
+          float rim = smoothstep(0.92, 0.99, L) * (1.0 - smoothstep(1.00, 1.04, L));
+          col = mix(col, vec3(0.22, 0.04, 0.06), rim * 0.45);
         }
       }
     }
