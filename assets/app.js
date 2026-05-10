@@ -623,6 +623,31 @@ bindCheckbox('compositionHud', 'compositionHud');
 // hook needed; the next render frame picks up the new value.
 bindCheckbox('virusShader3D', 'virusShader3D');
 
+// Fullscreen toggle. Browsers REQUIRE a user gesture to enter
+// fullscreen, so this can't be a saved-and-restored S.* setting —
+// we only react to the user's click. The checkbox state is kept
+// in sync with the actual fullscreen status via the
+// `fullscreenchange` event so e.g. ESC-out updates the box.
+{
+  const fsBox = document.getElementById('fullscreenToggle');
+  if (fsBox) {
+    const target = document.documentElement;
+    const isOn  = () => !!(document.fullscreenElement || document.webkitFullscreenElement);
+    const enter = () => target.requestFullscreen?.() || target.webkitRequestFullscreen?.();
+    const exit  = () => document.exitFullscreen?.() || document.webkitExitFullscreen?.();
+    fsBox.checked = isOn();
+    fsBox.addEventListener('change', () => {
+      const want = fsBox.checked;
+      const p = want ? enter() : exit();
+      // If the request rejects (e.g. browser blocks), revert the
+      // checkbox to the actual state on the next tick.
+      Promise.resolve(p).catch(() => { fsBox.checked = isOn(); });
+    });
+    document.addEventListener('fullscreenchange',       () => { fsBox.checked = isOn(); });
+    document.addEventListener('webkitfullscreenchange', () => { fsBox.checked = isOn(); });
+  }
+}
+
 // ----- Audio: music + SFX volume sliders, music on/off + next track -----
 // Volume scale applied to off-screen SFX events (e.g. an antibody
 // fire from a B-cell that's panned outside the viewport). 0.7 = 30 %
