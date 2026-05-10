@@ -46,10 +46,15 @@
 
   .layout {
     display: grid;
-    grid-template-columns: 1fr 460px;
+    grid-template-columns: 1fr var(--aside-w, 460px);
     grid-template-rows: 64px 1fr;
     height: 100%;
   }
+  /* When the source aside is collapsed, the column shrinks to fit
+     the tab bar so the canvas reclaims the freed space. The aside
+     keeps min-width:0 so it can shrink below its content width. */
+  .layout.src-collapsed { --aside-w: max-content; }
+  aside.collapsed { min-width: 0; }
 
   header {
     grid-column: 1 / -1;
@@ -472,6 +477,55 @@
   aside.collapsed .code-pane,
   aside.collapsed .wgsl-status { display: none; }
 
+  /* Console pane: a scroll buffer for window.console.* output that's
+     mirrored into a tab next to JS. Each line is a single entry
+     formatted as "[HH:MM:SS] level: message". */
+  #pane-console { padding: 0; display: flex; flex-direction: column; }
+  #pane-console.active { display: flex; }
+  .console-bar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 22px;
+    border-bottom: 1px solid var(--line);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--dim);
+  }
+  .console-clear {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--dim);
+    padding: 4px 10px;
+    border-radius: 3px;
+    font: inherit;
+    cursor: pointer;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .console-clear:hover { color: var(--accent); border-color: var(--accent); }
+  #src-console {
+    flex: 1;
+    margin: 0;
+    padding: 12px 22px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+  .con-time  { color: var(--dim); }
+  .con-log   { color: var(--ink); }
+  .con-info  { color: var(--accent-2); }
+  .con-warn  { color: #ffc66c; }
+  .con-error { color: #ff6b9a; }
+
   /* simple shader syntax tinting */
   .tk-kw    { color: #ff7bd6; }
   .tk-type  { color: #6cf2ff; }
@@ -626,6 +680,7 @@
       <button class="tab active" data-pane="wgsl">WGSL <span class="lang">webgpu</span></button>
       <button class="tab" data-pane="glsl">GLSL <span class="lang">webgl2</span></button>
       <button class="tab" data-pane="js">JS <span class="lang">host</span></button>
+      <button class="tab" data-pane="console">Console <span class="lang" id="console-count">0</span></button>
       <button class="copy-btn" id="copy-src" title="copy source to clipboard" aria-label="copy source">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
           <rect x="9" y="9" width="11" height="11" rx="1.5"/>
@@ -642,6 +697,13 @@
     <div class="code-pane pane active" id="pane-wgsl"><pre id="src-wgsl" contenteditable="plaintext-only" spellcheck="false" autocorrect="off" autocapitalize="off"></pre></div>
     <div class="code-pane pane" id="pane-glsl"><pre id="src-glsl"></pre></div>
     <div class="code-pane pane" id="pane-js"><pre id="src-js"></pre></div>
+    <div class="code-pane pane" id="pane-console">
+      <div class="console-bar">
+        <span id="console-summary">0 entries</span>
+        <button class="console-clear" id="console-clear" title="clear console">clear</button>
+      </div>
+      <pre id="src-console"></pre>
+    </div>
     <div class="wgsl-status" id="wgsl-status">ready</div>
   </aside>
 
@@ -1156,7 +1218,11 @@ fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
   let uvCell = (uv - vec2<f32>(U.cellOffsetX, U.cellOffsetY)) / max(U.cellRadius, 0.01);
 
   // ── extracellular medium ──
-  var bg: vec3<f32>;
+  // Initialise to zero up front. Both branches below assign, but
+  // some drivers / WGSL validators treat the read as undefined
+  // unless the var is initialised at declaration — manifests as
+  // a black-bg field on certain hardware.
+  var bg: vec3<f32> = vec3<f32>(0.0);
   if (U.caustics > 0.5) {
     let cx = computeCaustics((uv + vec2<f32>(0.5)) * 1.0, t);
     bg = envBackground(uv + cx.offset, bgKind, theme, t) * cx.tint;
@@ -1853,8 +1919,8 @@ void main() {
   // Cell-local UV — drag offset + pinch radius. See WGSL comment.
   vec2 uvCell = (uv - vec2(u_cellOffsetX, u_cellOffsetY)) / max(u_cellRadius, 0.01);
 
-  // extracellular medium
-  vec3 bg;
+  // extracellular medium — see WGSL comment about defensive init.
+  vec3 bg = vec3(0.0);
   if (u_caustics > 0.5) {
     vec2 cx_off;
     vec3 cx_tint = computeCaustics((uv + vec2(0.5)) * 1.0, t, cx_off);
@@ -2118,6 +2184,73 @@ void main() {
 const $ = id => document.getElementById(id);
 const canvas = $('stage');
 
+// ─── console mirror ─────────────────────────────────────────────────────
+// Wraps window.console so every log/info/warn/error/debug call also
+// shows up inside the "Console" tab. The original console is still
+// called, so devtools behave identically. Capacity-bounded at 500
+// entries to keep memory + DOM cost low; oldest get dropped first.
+const __consoleBuf = (() => {
+  const MAX = 500;
+  const entries = [];
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const fmtTime = () => {
+    const d = new Date();
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  };
+  const fmtArg = (a) => {
+    if (a instanceof Error) return a.stack || `${a.name}: ${a.message}`;
+    if (typeof a === 'string') return a;
+    try { return JSON.stringify(a, null, 2); } catch (_) { return String(a); }
+  };
+  const escapeHTML = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  function render() {
+    const out = $('src-console');
+    if (!out) return;
+    const html = entries.map(e =>
+      `<span class="con-time">[${e.time}]</span> <span class="con-${e.level}">${e.level}: ${escapeHTML(e.text)}</span>`
+    ).join('\n');
+    out.innerHTML = html;
+    // Auto-scroll to bottom on new entries.
+    out.scrollTop = out.scrollHeight;
+    const cnt = $('console-count');
+    const sum = $('console-summary');
+    if (cnt) cnt.textContent = entries.length;
+    if (sum) {
+      const errs = entries.filter(e => e.level === 'error').length;
+      const warns = entries.filter(e => e.level === 'warn').length;
+      sum.textContent = `${entries.length} entries · ${errs} error${errs === 1 ? '' : 's'} · ${warns} warning${warns === 1 ? '' : 's'}`;
+    }
+  }
+  function push(level, args) {
+    if (entries.length >= MAX) entries.shift();
+    entries.push({ level, time: fmtTime(), text: args.map(fmtArg).join(' ') });
+    render();
+  }
+  function clear() { entries.length = 0; render(); }
+  return { push, clear, render };
+})();
+{
+  const orig = {
+    log:   console.log.bind(console),
+    info:  console.info.bind(console),
+    warn:  console.warn.bind(console),
+    error: console.error.bind(console),
+    debug: console.debug ? console.debug.bind(console) : console.log.bind(console),
+  };
+  console.log   = (...a) => { __consoleBuf.push('log',   a); orig.log(...a);   };
+  console.info  = (...a) => { __consoleBuf.push('info',  a); orig.info(...a);  };
+  console.warn  = (...a) => { __consoleBuf.push('warn',  a); orig.warn(...a);  };
+  console.error = (...a) => { __consoleBuf.push('error', a); orig.error(...a); };
+  console.debug = (...a) => { __consoleBuf.push('log',   a); orig.debug(...a); };
+  // Capture uncaught errors + promise rejections.
+  window.addEventListener('error', (e) => {
+    __consoleBuf.push('error', [e.message, `at ${e.filename}:${e.lineno}:${e.colno}`]);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    __consoleBuf.push('error', ['unhandled rejection:', e.reason]);
+  });
+}
+
 const params = {
   zoom: 1.0,
   activity: 1.0,
@@ -2331,14 +2464,23 @@ document.querySelectorAll('.tab').forEach(btn => {
     if (aside.classList.contains('collapsed')) {
       setSrcCollapsed(false);
     }
+    // Re-render the console on tab activation so any entries
+    // logged before the DOM was wired up get a paint.
+    if (btn.dataset.pane === 'console') __consoleBuf.render();
   });
 });
+
+// Initial paint of the console once the DOM has the elements.
+__consoleBuf.render();
+$('console-clear')?.addEventListener('click', () => __consoleBuf.clear());
 
 // ─── source aside collapse ───────────────────────────────────────────────
 function setSrcCollapsed(collapsed) {
   const aside = $('src-aside');
   const toggle = $('src-toggle');
+  const layout = document.querySelector('.layout');
   aside.classList.toggle('collapsed', collapsed);
+  layout.classList.toggle('src-collapsed', collapsed);
   toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
   try { localStorage.setItem('shaderTest.srcCollapsed', collapsed ? '1' : '0'); } catch (_) {}
 }
@@ -2472,11 +2614,14 @@ async function copyToClipboard(text) {
 copyBtn.addEventListener('click', async () => {
   const activeTab = document.querySelector('.tab.active');
   if (!activeTab) return;
-  // For WGSL, prefer the live editor text (which may differ from
-  // the original cached source after live edits). For other panes,
+  // For WGSL, prefer the live editor text. For console, copy the
+  // current buffer (textContent of the rendered list). Other panes
   // fall back to the cached raw source.
   const pane = activeTab.dataset.pane;
-  const src = pane === 'wgsl' ? ($('src-wgsl').textContent || rawSources.wgsl) : rawSources[pane];
+  let src;
+  if      (pane === 'wgsl')    src = $('src-wgsl').textContent || rawSources.wgsl;
+  else if (pane === 'console') src = $('src-console').textContent || '';
+  else                         src = rawSources[pane];
   const ok = await copyToClipboard(src);
   copyLabel.textContent = ok ? 'copied' : 'failed';
   copyBtn.classList.toggle('copied', ok);
