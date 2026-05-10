@@ -194,7 +194,9 @@
     background: rgba(11, 7, 18, 0.55);
     border: 1px solid var(--line);
     backdrop-filter: blur(6px);
+    user-select: none;
   }
+  .controls.dragging { opacity: 0.85; }
   .controls h3 {
     margin: 0 0 4px 0;
     font-family: "IBM Plex Mono", monospace;
@@ -209,8 +211,11 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
+    cursor: move;
+    touch-action: none;
   }
   .controls-head h3 { margin: 0; }
+  .ctrl input, .ctrl select, .ctrl button { cursor: auto; }
   .ctrl-x {
     background: none;
     border: 1px solid var(--line);
@@ -407,6 +412,66 @@
   .code-pane::-webkit-scrollbar-track { background: transparent; }
   .code-pane::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
 
+  /* Editable WGSL pane: same look as the read-only <pre>, just with
+     a caret. Drops syntax highlighting on the active editor pane
+     (typing into highlighted spans destroys the markup); the GLSL
+     and JS panes keep their highlighting since they stay read-only. */
+  .code-pane pre[contenteditable="plaintext-only"] {
+    outline: none;
+    caret-color: var(--accent);
+    min-height: 100%;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .code-pane pre[contenteditable="plaintext-only"]:focus {
+    background: rgba(108, 242, 255, 0.03);
+  }
+  /* Tiny status strip below the active pane — shows compile state
+     of the WGSL editor. Hidden by default; populated by JS. */
+  .wgsl-status {
+    flex: 0 0 auto;
+    padding: 6px 22px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--dim);
+    border-top: 1px solid var(--line);
+    background: rgba(0, 0, 0, 0.18);
+    white-space: pre-wrap;
+    overflow: auto;
+    max-height: 25%;
+  }
+  .wgsl-status.ok    { color: var(--accent-2); }
+  .wgsl-status.error { color: #ff6b9a; text-transform: none; letter-spacing: 0; }
+
+  /* Source-section collapse: when aside has .collapsed, drop the
+     code-info + code-pane bodies + status, leaving only the tab
+     bar (with chevron) visible. The grid-template column for the
+     aside shrinks to fit the tabs. */
+  .src-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    background: none;
+    border: none;
+    border-right: 1px solid var(--line);
+    color: var(--dim);
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s, transform 0.2s;
+  }
+  .src-toggle:hover { color: var(--accent); background: rgba(108, 242, 255, 0.05); }
+  .src-toggle svg { display: block; }
+  /* Chevron points right when collapsed, down when expanded. */
+  aside.collapsed .src-toggle svg { transform: rotate(0deg); }
+  aside:not(.collapsed) .src-toggle svg { transform: rotate(90deg); }
+  aside.collapsed .code-info,
+  aside.collapsed .code-pane,
+  aside.collapsed .wgsl-status { display: none; }
+
   /* simple shader syntax tinting */
   .tk-kw    { color: #ff7bd6; }
   .tk-type  { color: #6cf2ff; }
@@ -553,8 +618,11 @@
     </button>
   </main>
 
-  <aside>
+  <aside id="src-aside" class="collapsed">
     <div class="tabs">
+      <button class="src-toggle" id="src-toggle" title="show / hide source" aria-label="toggle source panel" aria-expanded="false">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 2.5l4 3.5-4 3.5"/></svg>
+      </button>
       <button class="tab active" data-pane="wgsl">WGSL <span class="lang">webgpu</span></button>
       <button class="tab" data-pane="glsl">GLSL <span class="lang">webgl2</span></button>
       <button class="tab" data-pane="js">JS <span class="lang">host</span></button>
@@ -568,11 +636,13 @@
     </div>
     <div class="code-info">
       one shader · two targets · <strong>identical math</strong><br/>
-      runtime selects wgsl when <strong>navigator.gpu</strong> exists, else falls back to glsl es 3.00
+      runtime selects wgsl when <strong>navigator.gpu</strong> exists, else falls back to glsl es 3.00 ·
+      <strong>edit the wgsl pane to live-recompile</strong>
     </div>
-    <div class="code-pane pane active" id="pane-wgsl"><pre id="src-wgsl"></pre></div>
+    <div class="code-pane pane active" id="pane-wgsl"><pre id="src-wgsl" contenteditable="plaintext-only" spellcheck="false" autocorrect="off" autocapitalize="off"></pre></div>
     <div class="code-pane pane" id="pane-glsl"><pre id="src-glsl"></pre></div>
     <div class="code-pane pane" id="pane-js"><pre id="src-js"></pre></div>
+    <div class="wgsl-status" id="wgsl-status">ready</div>
   </aside>
 
 </div>
@@ -2241,7 +2311,10 @@ function highlight(src, lang) {
   return s;
 }
 
-$('src-wgsl').innerHTML = highlight(wgslSrc, 'wgsl');
+// WGSL pane is contenteditable for live recompile — populate via
+// textContent so the user edits plain text. The GLSL + JS panes
+// stay HTML-highlighted (read-only).
+$('src-wgsl').textContent = wgslSrc;
 $('src-glsl').innerHTML = highlight(rawSources.glsl, 'glsl');
 $('src-js').innerHTML   = highlight(hostSrc, 'glsl');
 
@@ -2252,8 +2325,126 @@ document.querySelectorAll('.tab').forEach(btn => {
     document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
     btn.classList.add('active');
     $('pane-' + btn.dataset.pane).classList.add('active');
+    // Auto-expand the source aside if the user clicks a tab while
+    // collapsed (otherwise the click is mostly invisible).
+    const aside = $('src-aside');
+    if (aside.classList.contains('collapsed')) {
+      setSrcCollapsed(false);
+    }
   });
 });
+
+// ─── source aside collapse ───────────────────────────────────────────────
+function setSrcCollapsed(collapsed) {
+  const aside = $('src-aside');
+  const toggle = $('src-toggle');
+  aside.classList.toggle('collapsed', collapsed);
+  toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  try { localStorage.setItem('shaderTest.srcCollapsed', collapsed ? '1' : '0'); } catch (_) {}
+}
+{
+  const stored = (() => { try { return localStorage.getItem('shaderTest.srcCollapsed'); } catch (_) { return null; } })();
+  // default: collapsed (matches user spec).
+  setSrcCollapsed(stored === null ? true : stored === '1');
+  $('src-toggle').addEventListener('click', () => {
+    const aside = $('src-aside');
+    setSrcCollapsed(!aside.classList.contains('collapsed'));
+  });
+}
+
+// ─── controls panel drag ─────────────────────────────────────────────────
+{
+  const panel = $('controls');
+  const head = panel.querySelector('.controls-head');
+  // Restore stored position if present.
+  try {
+    const saved = JSON.parse(localStorage.getItem('shaderTest.ctrlPos') || 'null');
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+      panel.style.left = saved.x + 'px';
+      panel.style.top  = saved.y + 'px';
+    }
+  } catch (_) {}
+  let drag = null;
+  const onDown = (e) => {
+    // Ignore drag if the user clicked the close button or anything
+    // interactive inside the head — only drag from blank head area.
+    if (e.target.closest('.ctrl-x')) return;
+    const evt = e.touches ? e.touches[0] : e;
+    const rect = panel.getBoundingClientRect();
+    drag = { dx: evt.clientX - rect.left, dy: evt.clientY - rect.top };
+    panel.classList.add('dragging');
+    e.preventDefault();
+  };
+  const onMove = (e) => {
+    if (!drag) return;
+    const evt = e.touches ? e.touches[0] : e;
+    const x = Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  evt.clientX - drag.dx));
+    const y = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, evt.clientY - drag.dy));
+    panel.style.left = x + 'px';
+    panel.style.top  = y + 'px';
+  };
+  const onUp = () => {
+    if (!drag) return;
+    drag = null;
+    panel.classList.remove('dragging');
+    try {
+      const x = parseFloat(panel.style.left) || 0;
+      const y = parseFloat(panel.style.top)  || 0;
+      localStorage.setItem('shaderTest.ctrlPos', JSON.stringify({ x, y }));
+    } catch (_) {}
+  };
+  head.addEventListener('mousedown',  onDown);
+  head.addEventListener('touchstart', onDown, { passive: false });
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('mouseup',   onUp);
+  window.addEventListener('touchend',  onUp);
+}
+
+// ─── live WGSL editor (WebGPU only) ──────────────────────────────────────
+// On every keystroke (debounced ~600 ms) the WGSL pane's text gets
+// re-fed to the renderer's setWgslSource(). On success the running
+// pipeline atom-swaps to the new shader; on failure the old one
+// keeps running and the error is shown in the status strip below.
+{
+  const pre = $('src-wgsl');
+  const status = $('wgsl-status');
+  let timer = null;
+  const setStatus = (cls, msg) => {
+    status.classList.remove('ok', 'error');
+    if (cls) status.classList.add(cls);
+    status.textContent = msg;
+  };
+  const recompile = async () => {
+    if (!renderer || typeof renderer.setWgslSource !== 'function') {
+      setStatus('error', 'webgl2 fallback active — wgsl edits ignored');
+      return;
+    }
+    const src = pre.textContent || '';
+    setStatus('', 'compiling…');
+    const r = await renderer.setWgslSource(src);
+    if (r.ok) setStatus('ok', 'compiled · running new pipeline');
+    else      setStatus('error', r.error || 'compile failed');
+  };
+  pre.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(recompile, 600);
+  });
+  // Disable editing on the WGSL pane when the WebGPU path didn't
+  // boot (WebGL2 fallback can't recompile WGSL anyway). Wait one
+  // tick so renderer is assigned in the boot promise.
+  queueMicrotask(() => {
+    setTimeout(() => {
+      if (!renderer || typeof renderer.setWgslSource !== 'function') {
+        pre.removeAttribute('contenteditable');
+        pre.style.cursor = 'default';
+        setStatus('', 'read-only · webgl2 fallback');
+      } else {
+        setStatus('', 'editable · live recompile');
+      }
+    }, 200);
+  });
+}
 
 // copy active source -------------------------------------------------------
 const copyBtn = $('copy-src');
@@ -2281,7 +2472,11 @@ async function copyToClipboard(text) {
 copyBtn.addEventListener('click', async () => {
   const activeTab = document.querySelector('.tab.active');
   if (!activeTab) return;
-  const src = rawSources[activeTab.dataset.pane];
+  // For WGSL, prefer the live editor text (which may differ from
+  // the original cached source after live edits). For other panes,
+  // fall back to the cached raw source.
+  const pane = activeTab.dataset.pane;
+  const src = pane === 'wgsl' ? ($('src-wgsl').textContent || rawSources.wgsl) : rawSources[pane];
   const ok = await copyToClipboard(src);
   copyLabel.textContent = ok ? 'copied' : 'failed';
   copyBtn.classList.toggle('copied', ok);
@@ -2330,9 +2525,9 @@ async function initWebGPU() {
     const format = navigator.gpu.getPreferredCanvasFormat();
     ctx.configure({ device, format, alphaMode: 'opaque' });
 
-    const module = device.createShaderModule({ code: wgslSrc });
+    let module = device.createShaderModule({ code: wgslSrc });
 
-    const pipeline = device.createRenderPipeline({
+    let pipeline = device.createRenderPipeline({
       layout: 'auto',
       vertex:   { module, entryPoint: 'vs_main' },
       fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
@@ -2345,7 +2540,7 @@ async function initWebGPU() {
       size: uboSize,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    const bindGroup = device.createBindGroup({
+    let bindGroup = device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [{ binding: 0, resource: { buffer: ubo } }],
     });
@@ -2393,7 +2588,41 @@ async function initWebGPU() {
       device.queue.submit([enc.finish()]);
     }
 
-    return { name: 'webgpu · wgsl', frame };
+    // Live-recompile path: rebuild shader module + pipeline + bind
+    // group from a fresh WGSL source string. Returns either { ok }
+    // or { ok: false, error }. Errors come from the GPUShaderModule
+    // compilation info or from createRenderPipeline throwing.
+    async function setWgslSource(newCode) {
+      try {
+        const m = device.createShaderModule({ code: newCode });
+        const info = await m.getCompilationInfo?.();
+        const errs = (info?.messages || []).filter(x => x.type === 'error');
+        if (errs.length) {
+          return { ok: false, error: errs.map(e => `L${e.lineNum}: ${e.message}`).join('\n') };
+        }
+        const p = device.createRenderPipeline({
+          layout: 'auto',
+          vertex:   { module: m, entryPoint: 'vs_main' },
+          fragment: { module: m, entryPoint: 'fs_main', targets: [{ format }] },
+          primitive: { topology: 'triangle-list' },
+        });
+        const bg = device.createBindGroup({
+          layout: p.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: { buffer: ubo } }],
+        });
+        // Atomic swap — only after every step succeeded. The frame
+        // closure reads `pipeline` and `bindGroup` directly each
+        // tick, so reassigning them is enough.
+        module = m;
+        pipeline = p;
+        bindGroup = bg;
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e?.message || e) };
+      }
+    }
+
+    return { name: 'webgpu · wgsl', frame, setWgslSource };
   } catch (e) {
     console.warn('webgpu init failed:', e);
     return null;
