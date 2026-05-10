@@ -23,8 +23,24 @@ export class MusicPlayer {
     this._enabled = false;
     this._volume = 0.5;
     this._pendingPlay = false;
+    // Caller can subscribe to track changes (e.g. settings panel
+    // "Now playing" line). Fires after next() finishes loading the
+    // new src AND on the first setEnabled(true).
+    this.onTrackChange = null;
     // Defer the HTMLAudioElement until enabled — no point spinning up
     // a media element if music never gets switched on this session.
+  }
+
+  // Currently selected track label, regardless of play state.
+  getCurrentLabel() {
+    const t = TRACKS[this._idx];
+    return t ? t.label : '';
+  }
+
+  _emitTrackChange() {
+    if (typeof this.onTrackChange === 'function') {
+      try { this.onTrackChange(this.getCurrentLabel()); } catch {}
+    }
   }
 
   _ensureAudio() {
@@ -60,27 +76,43 @@ export class MusicPlayer {
   }
 
   setEnabled(on) {
+    const wasEnabled = this._enabled;
     this._enabled = !!on;
     if (this._enabled) {
       this._ensureAudio();
       this._attemptPlay();
+      if (!wasEnabled) this._emitTrackChange();
     } else if (this._audio) {
       this._audio.pause();
       this._pendingPlay = false;
     }
   }
 
+  // Volume = 0 silently stops playback (user spec: muting via the
+  // slider should pause music, not just lower the audio output).
+  // Setting a non-zero value while previously muted resumes play.
   setVolume(v) {
     this._volume = Math.max(0, Math.min(1, +v || 0));
     if (this._audio) this._audio.volume = this._volume;
+    if (this._volume <= 0) {
+      if (this._audio) this._audio.pause();
+      this._pendingPlay = false;
+    } else if (this._enabled) {
+      // Coming back from muted — kick playback if the audio was paused.
+      this._attemptPlay();
+    }
   }
 
   next() {
     this._idx = (this._idx + 1) % TRACKS.length;
-    if (!this._audio) return;
+    if (!this._audio) {
+      this._emitTrackChange();
+      return;
+    }
     const wasPlaying = !this._audio.paused;
     this._loadCurrent();
     if (wasPlaying || this._enabled) this._attemptPlay();
+    this._emitTrackChange();
   }
 
   // Called from a user-gesture listener so an autoplay-blocked play()

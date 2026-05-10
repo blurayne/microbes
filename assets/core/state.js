@@ -76,6 +76,9 @@ export const DEFAULTS = {
   // until the user has interacted; music.js retries on the very
   // first pointerdown so the track starts the moment the player
   // touches anything. Volumes are 0..1 floats.
+  // The dedicated music on/off toggle was removed — volume = 0 is the
+  // mute control now. musicEnabled stays in DEFAULTS as a no-op so
+  // loadSettings doesn't see an unknown saved field and reset others.
   musicEnabled: true,
   musicVolume: 0.5,
   sfxVolume: 0.7,
@@ -287,6 +290,7 @@ export const LOCALES = {
     no_pathogens: 'No pathogens',
     audio: 'Audio',
     music_enabled: 'Music',
+    now_playing: 'Now playing:',
     music_volume: 'Music volume',
     sfx_volume: 'Sound effects volume',
     next_track: 'Next track',
@@ -420,6 +424,7 @@ export const LOCALES = {
     no_pathogens: 'Keine Erreger',
     audio: 'Audio',
     music_enabled: 'Musik',
+    now_playing: 'Läuft gerade:',
     music_volume: 'Musiklautstärke',
     sfx_volume: 'Effektlautstärke',
     next_track: 'Nächster Titel',
