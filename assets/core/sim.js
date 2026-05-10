@@ -329,6 +329,9 @@ export class Sim {
         maxLife: 2.0,
       });
     }
+    // Event hook for app.js — emits {x, y, type} so the audio layer
+    // can play a death SFX with distance-based volume and stereo pan.
+    if (this.onKill) this.onKill({ x: c.x, y: c.y, type: c.type });
     this.cells.splice(idx, 1);
     this.selectedCells.delete(c);
   }
