@@ -63,7 +63,7 @@ export const DEFAULTS = {
   background: 'solid',
   renderScale: 1.0,
   upscaleMode: 'blur',
-  scanlines: false,
+  scanlinesAlpha: 0,        // 0..1 strength of the CRT scanlines overlay; 0 = off (replaces the old scanlines: bool toggle)
   useHighlight: true,                       // selection ring uses theme accent when on
   // Audio. Music ON by default — user wants the game to greet the
   // player with music. The first play() call is autoplay-blocked
@@ -136,6 +136,17 @@ export function loadSettings() {
     }
     // Removed in late 2026 along with the cell-blending UI.
     delete parsed.blendMode;
+    // 2026: scanlines bool toggle → scanlinesAlpha slider (0..1).
+    // Legacy true → 0.32 (the old hardcoded alpha); false → 0.
+    if (typeof parsed.scanlines === 'boolean') {
+      if (typeof parsed.scanlinesAlpha !== 'number') {
+        parsed.scanlinesAlpha = parsed.scanlines ? 0.32 : 0;
+      }
+      delete parsed.scanlines;
+    }
+    if (typeof parsed.scanlinesAlpha === 'number') {
+      parsed.scanlinesAlpha = Math.max(0, Math.min(1, parsed.scanlinesAlpha));
+    }
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
     const validRenderers = ['canvas2d', 'webgl2', 'webgpu'];
     // Migrate legacy renderer values (pixi / pixi-webgpu / pixi-webgl2) to
