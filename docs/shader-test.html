@@ -1,0 +1,1532 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Cytologica · live cell shader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: #0b0712;
+    --bg-1: #14102a;
+    --bg-2: #1a1538;
+    --ink: #ece6d6;
+    --dim: #8a83a0;
+    --accent: #6cf2ff;
+    --accent-2: #ff7bd6;
+    --warn: #ffd479;
+    --line: rgba(236, 230, 214, 0.08);
+    --line-2: rgba(108, 242, 255, 0.25);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg-0); color: var(--ink); }
+  body {
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-weight: 300;
+    overflow: hidden;
+    background:
+      radial-gradient(1200px 800px at 70% 20%, #1a1138 0%, #0b0712 60%),
+      radial-gradient(900px 600px at 10% 90%, #2a0f3a 0%, transparent 60%),
+      var(--bg-0);
+  }
+
+  /* Subtle film-grain overlay */
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.85  0 0 0 0 0.7  0 0 0 0.06 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    opacity: 0.5;
+    mix-blend-mode: overlay;
+    z-index: 999;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 460px;
+    grid-template-rows: 64px 1fr;
+    height: 100%;
+  }
+
+  header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 28px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(20,16,42,0.7), rgba(20,16,42,0.2));
+    backdrop-filter: blur(8px);
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .brand .mark {
+    font-family: "Fraunces", serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+  .brand .mark em {
+    color: var(--accent-2);
+    font-style: italic;
+  }
+  .brand .sub {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--dim);
+  }
+
+  .meta {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    color: var(--accent);
+  }
+  .badge .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .badge.fallback { color: var(--warn); border-color: rgba(255,212,121,0.35); }
+  .badge.fallback .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  /* ----------- viewport ----------- */
+  .viewport {
+    position: relative;
+    border-right: 1px solid var(--line);
+    overflow: hidden;
+  }
+  canvas#stage {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+  .crosshair {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(70vh, 70vw); height: min(70vh, 70vw);
+    border: 1px solid rgba(108, 242, 255, 0.12);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .crosshair::before, .crosshair::after {
+    content: "";
+    position: absolute;
+    background: rgba(108, 242, 255, 0.18);
+  }
+  .crosshair::before {
+    left: 0; right: 0; top: 50%;
+    height: 1px;
+  }
+  .crosshair::after {
+    top: 0; bottom: 0; left: 50%;
+    width: 1px;
+  }
+  .scalebar {
+    position: absolute;
+    left: 28px; bottom: 24px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+  .scalebar .bar {
+    width: 90px; height: 2px;
+    background: var(--accent);
+    margin-bottom: 6px;
+    box-shadow: 0 0 6px rgba(108,242,255,0.5);
+  }
+  .annot {
+    position: absolute;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--dim);
+    pointer-events: none;
+  }
+  .annot.top-right { right: 28px; top: 24px; text-align: right; }
+  .annot.bottom-right { right: 28px; bottom: 24px; text-align: right; }
+  .annot strong { color: var(--ink); font-weight: 500; }
+
+  /* ----------- controls ----------- */
+  .controls {
+    position: absolute;
+    left: 28px; top: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 220px;
+    padding: 16px 18px;
+    background: rgba(11, 7, 18, 0.55);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(6px);
+  }
+  .controls h3 {
+    margin: 0 0 4px 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--dim);
+    font-weight: 500;
+  }
+  .controls-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .controls-head h3 { margin: 0; }
+  .ctrl-x {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--dim);
+    width: 22px; height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    padding: 0;
+  }
+  .ctrl-x:hover {
+    color: var(--accent);
+    border-color: var(--line-2);
+    background: rgba(108, 242, 255, 0.06);
+  }
+
+  .ctrl-show {
+    position: absolute;
+    left: 28px; top: 24px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: rgba(11, 7, 18, 0.65);
+    border: 1px solid var(--line-2);
+    color: var(--accent);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+    transition: background 0.15s;
+  }
+  .ctrl-show:hover { background: rgba(108, 242, 255, 0.1); }
+  .ctrl-show .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+  }
+  .ctrl-show[hidden] { display: none; }
+  .controls[hidden] { display: none; }
+  .ctrl {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .ctrl label {
+    display: flex;
+    justify-content: space-between;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--ink);
+  }
+  .ctrl label span:last-child {
+    color: var(--accent);
+  }
+  .ctrl input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%; height: 2px;
+    background: var(--line);
+    outline: none;
+    margin: 4px 0;
+  }
+  .ctrl input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(108,242,255,0.6);
+  }
+  .ctrl input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 8px rgba(108,242,255,0.6);
+  }
+  .ctrl select {
+    width: 100%;
+    margin-top: 4px;
+    padding: 6px 8px;
+    background: rgba(11, 7, 18, 0.7);
+    color: var(--ink);
+    border: 1px solid var(--line-2);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    cursor: pointer;
+    outline: none;
+  }
+  .ctrl select:focus { border-color: var(--accent); }
+
+  /* ----------- code panel ----------- */
+  aside {
+    background: var(--bg-1);
+    border-left: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .tabs {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--line);
+    background: rgba(0,0,0,0.25);
+  }
+  .copy-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    background: none;
+    border: none;
+    border-left: 1px solid var(--line);
+    color: var(--dim);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+  }
+  .copy-btn:hover {
+    color: var(--accent);
+    background: rgba(108, 242, 255, 0.05);
+  }
+  .copy-btn.copied {
+    color: var(--accent-2);
+  }
+  .copy-btn svg { display: block; }
+  .tab {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 14px 16px;
+    color: var(--dim);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .tab .lang {
+    color: var(--dim);
+    font-size: 9px;
+    margin-left: 6px;
+  }
+
+  .code-info {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    color: var(--dim);
+    line-height: 1.6;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .code-info strong {
+    color: var(--accent-2);
+    font-weight: 400;
+  }
+
+  .code-pane {
+    flex: 1;
+    overflow: auto;
+    padding: 18px 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .code-pane pre {
+    margin: 0;
+    padding: 0 22px;
+    white-space: pre;
+    color: var(--ink);
+  }
+  .code-pane::-webkit-scrollbar { width: 8px; }
+  .code-pane::-webkit-scrollbar-track { background: transparent; }
+  .code-pane::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+  /* simple shader syntax tinting */
+  .tk-kw    { color: #ff7bd6; }
+  .tk-type  { color: #6cf2ff; }
+  .tk-fn    { color: #ffd479; }
+  .tk-num   { color: #c2b3ff; }
+  .tk-str   { color: #a8e9a0; }
+  .tk-cmt   { color: #5a5470; font-style: italic; }
+  .tk-attr  { color: #88e0c0; }
+  .tk-op    { color: #d8d2c2; }
+
+  .pane {
+    display: none;
+  }
+  .pane.active { display: block; }
+
+  footer {
+    grid-column: 1 / -1;
+    display: none;
+  }
+
+  /* ----------- responsive ----------- */
+  @media (max-width: 880px) {
+    .layout {
+      grid-template-columns: 1fr;
+      grid-template-rows: 64px 50vh 1fr;
+    }
+    aside { border-left: none; border-top: 1px solid var(--line); }
+    .controls { width: 180px; padding: 12px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <header>
+    <div class="brand">
+      <div class="mark">cyto<em>logica</em></div>
+      <div class="sub">live cell · shader specimen 04</div>
+    </div>
+    <div class="meta">
+      <span id="fps">— fps</span>
+      <span class="badge" id="renderer-badge">
+        <span class="dot"></span><span id="renderer-name">initialising</span>
+      </span>
+    </div>
+  </header>
+
+  <main class="viewport">
+    <canvas id="stage"></canvas>
+    <div class="crosshair"></div>
+
+    <div class="annot top-right">
+      objective <strong>×400</strong><br/>
+      stain · h&amp;e (stylised)<br/>
+      illum · brightfield
+    </div>
+    <div class="annot bottom-right">
+      <strong>spec.04</strong> eukaryote<br/>
+      cyto­plasmic survey<br/>
+      live · realtime
+    </div>
+
+    <div class="scalebar">
+      <div class="bar"></div>
+      10 µm
+    </div>
+
+    <div class="controls" id="controls">
+      <div class="controls-head">
+        <h3>specimen controls</h3>
+        <button class="ctrl-x" id="ctrl-close" title="hide controls (h)" aria-label="hide controls">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+        </button>
+      </div>
+      <div class="ctrl">
+        <label><span>specimen</span></label>
+        <select id="celltype">
+          <option value="0">eukaryote · generic</option>
+          <option value="1">macrophage · immune</option>
+          <option value="2">neutrophil · immune</option>
+          <option value="3">nk-cell · immune</option>
+          <option value="4">b-cell · immune</option>
+          <option value="5">virus · pathogen</option>
+          <option value="6">bacterium · pathogen</option>
+          <option value="7">amoeba · pathogen</option>
+          <option value="8">spore · pathogen</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label><span>zoom</span><span id="zoom-val">1.00</span></label>
+        <input id="zoom" type="range" min="0.5" max="2.5" step="0.01" value="1.0"/>
+      </div>
+      <div class="ctrl">
+        <label><span>activity</span><span id="speed-val">1.00</span></label>
+        <input id="speed" type="range" min="0" max="3" step="0.01" value="1.0"/>
+      </div>
+      <div class="ctrl">
+        <label><span>organelles</span><span id="org-val">8</span></label>
+        <input id="organelles" type="range" min="0" max="16" step="1" value="8"/>
+      </div>
+    </div>
+
+    <button class="ctrl-show" id="ctrl-show" hidden title="show controls (h)" aria-label="show controls">
+      <span class="dot"></span> controls
+    </button>
+  </main>
+
+  <aside>
+    <div class="tabs">
+      <button class="tab active" data-pane="wgsl">WGSL <span class="lang">webgpu</span></button>
+      <button class="tab" data-pane="glsl">GLSL <span class="lang">webgl2</span></button>
+      <button class="tab" data-pane="js">JS <span class="lang">host</span></button>
+      <button class="copy-btn" id="copy-src" title="copy source to clipboard" aria-label="copy source">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="11" height="11" rx="1.5"/>
+          <path d="M5 15V5.5A1.5 1.5 0 0 1 6.5 4H15"/>
+        </svg>
+        <span id="copy-label">copy</span>
+      </button>
+    </div>
+    <div class="code-info">
+      one shader · two targets · <strong>identical math</strong><br/>
+      runtime selects wgsl when <strong>navigator.gpu</strong> exists, else falls back to glsl es 3.00
+    </div>
+    <div class="code-pane pane active" id="pane-wgsl"><pre id="src-wgsl"></pre></div>
+    <div class="code-pane pane" id="pane-glsl"><pre id="src-glsl"></pre></div>
+    <div class="code-pane pane" id="pane-js"><pre id="src-js"></pre></div>
+  </aside>
+
+</div>
+
+<!--
+  ============================================================
+  SHADER SOURCES (hosted as text/plain so we can show them
+  in the right-hand pane verbatim AND compile them at runtime)
+  ============================================================
+-->
+
+<script id="shader-wgsl" type="text/plain">
+// ────────────────────────────────────────────────────────────
+//  cytologica · WGSL fragment shader
+//  stylised cell · brightfield + H&E look
+//
+//  cellType selector (0..8):
+//    0 eukaryote   1 macrophage  2 neutrophil
+//    3 nk-cell     4 b-cell      5 virus
+//    6 bacterium   7 amoeba      8 spore
+// ────────────────────────────────────────────────────────────
+
+struct Uniforms {
+  resolution : vec2<f32>,
+  time       : f32,
+  zoom       : f32,
+  activity   : f32,
+  organelles : f32,
+  cellType   : f32,
+};
+@group(0) @binding(0) var<uniform> U : Uniforms;
+
+// ── hash / noise ────────────────────────────────────────────
+fn hash(p: vec2<f32>) -> f32 {
+  let h = dot(p, vec2<f32>(127.1, 311.7));
+  return fract(sin(h) * 43758.5453);
+}
+
+fn noise(p: vec2<f32>) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  let a = hash(i);
+  let b = hash(i + vec2<f32>(1.0, 0.0));
+  let c = hash(i + vec2<f32>(0.0, 1.0));
+  let d = hash(i + vec2<f32>(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+fn fbm(pIn: vec2<f32>) -> f32 {
+  var p = pIn;
+  var v: f32 = 0.0;
+  var a: f32 = 0.5;
+  for (var i: i32 = 0; i < 5; i = i + 1) {
+    v = v + a * noise(p);
+    p = p * 2.03;
+    a = a * 0.5;
+  }
+  return v;
+}
+
+// rotated capsule — used for mitochondria + bacterium body SDF
+fn capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+  let pa = p - a;
+  let ba = b - a;
+  let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
+
+// ── vertex (fullscreen triangle) ────────────────────────────
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+  var p = array<vec2<f32>, 3>(
+    vec2<f32>(-1.0, -1.0),
+    vec2<f32>( 3.0, -1.0),
+    vec2<f32>(-1.0,  3.0),
+  );
+  return vec4<f32>(p[vi], 0.0, 1.0);
+}
+
+// per-type membrane SDF. Most types are blob variants on
+// cellMembrane; bacterium is a capsule (rod), virus is a hex
+// capsid with spike modulation, amoeba/spore add longer
+// pseudopod modes. Returns a signed distance.
+fn membraneFor(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
+  if (kind == 6) {
+    // bacterium — rod (capsule) along the X axis with a soft
+    // wobble on the radius so it breathes.
+    let breathe = 0.018 * sin(t * 0.6);
+    return capsule(uv, vec2<f32>(-0.32, 0.0), vec2<f32>(0.32, 0.0), 0.20 + breathe);
+  }
+  if (kind == 5) {
+    // virus — hex capsid (~6-fold symmetry) with rim spikes.
+    let ang = atan2(uv.y, uv.x);
+    let hex = 0.04 * cos(ang * 6.0 + t * 0.3);
+    let spikes = 0.05 * pow(0.5 + 0.5 * cos(ang * 12.0 - t * 0.2), 6.0);
+    return length(uv) - (0.42 + hex + spikes);
+  }
+  if (kind == 7) {
+    // amoeba — large, very irregular blob with longer-period
+    // pseudopod extensions.
+    let ang = atan2(uv.y, uv.x);
+    let pseudo = 0.10 * sin(ang * 3.0 + t * 0.4)
+               + 0.06 * sin(ang * 7.0 - t * 0.25);
+    let breathe = 0.02 * sin(t * 0.7);
+    return length(uv) - (0.60 + pseudo + breathe);
+  }
+  if (kind == 8) {
+    // spore — small with thick double-wall (rendered via an inner
+    // ring in the colour pass); the SDF itself is a hard small disc.
+    return length(uv) - (0.36 + 0.012 * sin(t * 0.4));
+  }
+  // shared blob variants: amplitude scales by type so macrophage
+  // wobbles harder than a tight neutrophil/nk.
+  var amp: f32 = 1.0;
+  var rad: f32 = 0.62;
+  if (kind == 1) { amp = 1.6; rad = 0.66; }   // macrophage
+  if (kind == 2) { amp = 0.5; rad = 0.55; }   // neutrophil
+  if (kind == 3) { amp = 0.4; rad = 0.46; }   // nk
+  if (kind == 4) { amp = 0.6; rad = 0.50; }   // b-cell
+  let ang = atan2(uv.y, uv.x);
+  let wob = amp * (0.045 * sin(ang * 5.0 + t * 0.6)
+                 + 0.025 * sin(ang * 9.0 - t * 0.4)
+                 + 0.015 * sin(ang * 17.0 + t * 1.1));
+  return length(uv) - (rad + wob);
+}
+
+// per-type cytoplasm base colour
+fn cytoColor(kind: i32) -> vec3<f32> {
+  if (kind == 1) { return vec3<f32>(0.74, 0.50, 0.55); }   // macrophage tan-pink
+  if (kind == 2) { return vec3<f32>(0.86, 0.70, 0.74); }   // neutrophil pale
+  if (kind == 3) { return vec3<f32>(0.55, 0.50, 0.72); }   // nk blue-violet
+  if (kind == 4) { return vec3<f32>(0.70, 0.45, 0.55); }   // b-cell deep pink
+  if (kind == 5) { return vec3<f32>(0.30, 0.25, 0.42); }   // virus indigo core
+  if (kind == 6) { return vec3<f32>(0.55, 0.70, 0.40); }   // bacterium green
+  if (kind == 7) { return vec3<f32>(0.55, 0.55, 0.40); }   // amoeba olive
+  if (kind == 8) { return vec3<f32>(0.78, 0.66, 0.40); }   // spore amber
+  return vec3<f32>(0.78, 0.55, 0.66);                       // eukaryote
+}
+
+// nucleus SDF for the types that have one. Returns 1e9 (no
+// nucleus) for prokaryotes / virus / spore.
+fn nucleusSdf(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
+  let nucOff = vec2<f32>(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
+  let p = uv - nucOff;
+  if (kind == 5 || kind == 6 || kind == 8) { return 1e9; }
+  if (kind == 1) {
+    // kidney-shaped nucleus: big lobe minus a smaller indent.
+    let r1 = length(p - vec2<f32>(-0.04, 0.0)) - 0.22;
+    let r2 = length(p - vec2<f32>(0.10, 0.0)) - 0.14;
+    return max(r1, -r2);
+  }
+  if (kind == 2) {
+    // neutrophil — three connected lobes (signature multi-lobe).
+    let a = length(p - vec2<f32>(-0.12, -0.04)) - 0.10;
+    let b = length(p - vec2<f32>( 0.12, -0.04)) - 0.10;
+    let c = length(p - vec2<f32>( 0.00,  0.13)) - 0.10;
+    return min(min(a, b), c);
+  }
+  if (kind == 3) { return length(p) - 0.30; }   // nk — dominant
+  if (kind == 4) { return length(p) - 0.26; }   // b-cell — round
+  if (kind == 7) { return length(p - vec2<f32>(0.18, -0.08)) - 0.18; }  // amoeba eccentric
+  return length(p) - 0.22;                       // eukaryote default
+}
+
+// ── fragment ────────────────────────────────────────────────
+@fragment
+fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+  let res = U.resolution;
+  let t = U.time * U.activity;
+  let kind = i32(round(U.cellType));
+
+  // centre + aspect-correct
+  var uv = (frag.xy - 0.5 * res) / min(res.x, res.y);
+  uv.y = -uv.y;
+  uv = uv * U.zoom;
+
+  // ── extracellular medium ──
+  var bg = vec3<f32>(0.04, 0.03, 0.07);
+  let bgN = fbm(uv * 4.0 + vec2<f32>(t * 0.05, t * 0.03));
+  bg = bg + vec3<f32>(0.10, 0.05, 0.15) * bgN * 0.4;
+
+  // soft drifting light fibres outside the cell
+  let fibre = fbm(uv * 12.0 + vec2<f32>(0.0, t * 0.1));
+  bg = bg + vec3<f32>(0.05, 0.03, 0.08) * smoothstep(0.55, 0.85, fibre);
+
+  // ── cell body ──
+  let mem = membraneFor(uv, kind, t);
+  let inside = smoothstep(0.004, -0.004, mem);
+  let edge = smoothstep(0.022, 0.0, abs(mem));
+
+  // cytoplasm — type-specific stain with subtle structure
+  var cyto = cytoColor(kind);
+  let granular = fbm(uv * 22.0 + vec2<f32>(t * 0.02, 0.0));
+  cyto = cyto - vec3<f32>(0.10, 0.07, 0.08) * granular;
+  let sheets = fbm(uv * 6.0 - vec2<f32>(t * 0.03, t * 0.02));
+  cyto = cyto + vec3<f32>(0.08, 0.04, 0.05) * (sheets - 0.5);
+
+  // b-cell rough-ER stripes — diagonal sinusoid in the cytoplasm
+  if (kind == 4) {
+    let er = sin(uv.x * 14.0 + uv.y * 6.0 + t * 0.4) * 0.5 + 0.5;
+    cyto = cyto + vec3<f32>(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
+  }
+
+  // ── nucleus ──
+  let nucD = nucleusSdf(uv, kind, t);
+  let nucMask = smoothstep(0.006, -0.006, nucD);
+  let nucEdge = smoothstep(0.020, 0.0, abs(nucD));
+  let nucOff = vec2<f32>(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
+  let nucP = uv - nucOff;
+  var nucCol = vec3<f32>(0.30, 0.14, 0.42);
+  if (kind == 3) { nucCol = vec3<f32>(0.20, 0.12, 0.46); }
+  if (kind == 4) { nucCol = vec3<f32>(0.36, 0.12, 0.40); }
+  let chromatin = fbm(nucP * 28.0 + vec2<f32>(t * 0.05, 0.0));
+  nucCol = nucCol + vec3<f32>(0.18, 0.08, 0.22) * chromatin;
+  // nucleolus (only types with a single round nucleus)
+  if (kind == 0 || kind == 3 || kind == 4 || kind == 7) {
+    let nlD = length(nucP - vec2<f32>(0.05, 0.04)) - 0.045;
+    let nlMask = smoothstep(0.004, -0.004, nlD);
+    nucCol = mix(nucCol, vec3<f32>(0.55, 0.20, 0.50), nlMask);
+  }
+
+  // ── mitochondria (capsules) ── absent for virus / spore
+  var mito: f32 = 1e9;
+  var nMito = i32(round(U.organelles));
+  if (kind == 5 || kind == 8) { nMito = 0; }
+  if (kind == 6) { nMito = 0; }   // bacterium has no organelles
+  for (var i: i32 = 0; i < 16; i = i + 1) {
+    if (i >= nMito) { break; }
+    let fi = f32(i);
+    let baseA = fi * 0.7853 + t * 0.08;
+    let rad = 0.40 + 0.05 * sin(fi * 1.7);
+    let centre = vec2<f32>(cos(baseA), sin(baseA)) * rad
+               + vec2<f32>(0.015 * sin(t * 1.3 + fi),
+                           0.015 * cos(t * 1.1 + fi * 2.0));
+    let dir = vec2<f32>(cos(baseA + 1.5708), sin(baseA + 1.5708));
+    let len = 0.045;
+    let a = centre - dir * len;
+    let b = centre + dir * len;
+    let d = capsule(uv, a, b, 0.018);
+    mito = min(mito, d);
+  }
+  let mitoMask = smoothstep(0.004, -0.004, mito);
+  let mitoEdge = smoothstep(0.012, 0.0, abs(mito));
+  let mitoCol = vec3<f32>(0.95, 0.55, 0.30);
+
+  // ── vesicles / granules ── count + colour vary by type
+  var vesCount: i32 = 14;
+  if (kind == 1) { vesCount = 22; }   // macrophage lysosomes
+  if (kind == 2) { vesCount = 30; }   // neutrophil fine granules
+  if (kind == 3) { vesCount = 6;  }   // nk cytotoxic granules
+  if (kind == 4) { vesCount = 8;  }   // b-cell
+  if (kind == 6) { vesCount = 18; }   // bacterium ribosomes
+  if (kind == 7) { vesCount = 10; }   // amoeba food vacuoles
+  if (kind == 5) { vesCount = 0;  }   // virus
+  if (kind == 8) { vesCount = 4;  }   // spore
+  var vesRadius = 0.012;
+  if (kind == 2) { vesRadius = 0.008; }
+  if (kind == 3) { vesRadius = 0.020; }
+  if (kind == 7) { vesRadius = 0.022; }
+  var vesCol = vec3<f32>(1.0, 0.92, 0.65);
+  if (kind == 3) { vesCol = vec3<f32>(0.75, 0.85, 1.00); }
+  if (kind == 6) { vesCol = vec3<f32>(0.80, 0.90, 0.55); }
+  if (kind == 7) { vesCol = vec3<f32>(0.55, 0.45, 0.30); }
+  var ves: f32 = 1e9;
+  for (var j: i32 = 0; j < 32; j = j + 1) {
+    if (j >= vesCount) { break; }
+    let fj = f32(j);
+    let pos = vec2<f32>(
+      0.42 * sin(fj * 1.91 + t * (0.18 + 0.03 * fj)),
+      0.42 * cos(fj * 2.37 + t * (0.21 + 0.02 * fj))
+    );
+    let jit = vec2<f32>(0.008 * sin(t * 3.0 + fj * 7.0),
+                        0.008 * cos(t * 2.6 + fj * 5.0));
+    ves = min(ves, length(uv - pos - jit) - vesRadius);
+  }
+  let vesMask = smoothstep(0.003, -0.003, ves);
+
+  // virus capsid hex pattern overlay — bright lattice on the body
+  var capsid: f32 = 0.0;
+  if (kind == 5) {
+    let h = 0.5 + 0.5 * cos(uv.x * 28.0) * cos(uv.y * 28.0);
+    capsid = pow(h, 6.0);
+  }
+
+  // bacterium flagellum — a wiggling tail extending right
+  var flag: f32 = 1e9;
+  if (kind == 6) {
+    let xf = uv.x - 0.32;
+    if (xf > 0.0 && xf < 0.45) {
+      let yf = uv.y - 0.04 * sin(xf * 26.0 - t * 8.0);
+      flag = abs(yf) - 0.006;
+    }
+  }
+  let flagMask = smoothstep(0.003, -0.003, flag);
+
+  // spore double-wall — inner ring inside the outer membrane
+  var wall: f32 = 1e9;
+  if (kind == 8) {
+    wall = abs(length(uv) - 0.30) - 0.014;
+  }
+  let wallMask = smoothstep(0.003, -0.003, wall);
+
+  // ── compose ──
+  var col = bg;
+  col = mix(col, cyto, inside);
+  col = mix(col, mitoCol, mitoMask * inside);
+  col = mix(col, vec3<f32>(0.45, 0.20, 0.10), mitoEdge * inside * 0.6);
+  col = mix(col, vesCol, vesMask * inside);
+  col = mix(col, nucCol, nucMask);
+  col = mix(col, vec3<f32>(0.18, 0.08, 0.25), nucEdge * (1.0 - nucMask) * 0.7);
+
+  // virus capsid lattice tinting
+  col = col + vec3<f32>(0.30, 0.20, 0.45) * capsid * inside;
+
+  // bacterium flagellum (rendered outside the body)
+  col = mix(col, vec3<f32>(0.40, 0.55, 0.30), flagMask);
+
+  // spore double-wall ring
+  col = mix(col, vec3<f32>(0.45, 0.30, 0.10), wallMask);
+
+  // bold cel-shaded membrane outline
+  col = mix(col, vec3<f32>(0.16, 0.06, 0.18), edge * 0.85);
+
+  // ── floating brownian particles ──
+  for (var k: i32 = 0; k < 18; k = k + 1) {
+    let fk = f32(k);
+    let speedK = 0.3 + 0.5 * hash(vec2<f32>(fk, 1.0));
+    let p = vec2<f32>(
+      0.55 * sin(fk * 3.71 + t * speedK),
+      0.55 * cos(fk * 5.19 + t * speedK * 1.13)
+    );
+    let d = length(uv - p);
+    col = col + vec3<f32>(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, d) * inside;
+  }
+
+  // ── microscope optics: cool chromatic limb ──
+  let r = length(uv);
+
+  // cool blue limb (microscope optics aberration)
+  col = col + vec3<f32>(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, r), 2.0) * 0.6;
+
+  // film grain
+  let g = hash(frag.xy + vec2<f32>(t * 31.7, t * 17.3)) - 0.5;
+  col = col + vec3<f32>(g) * 0.025;
+
+  return vec4<f32>(col, 1.0);
+}
+</script>
+
+<script id="shader-glsl-vs" type="text/plain">#version 300 es
+precision highp float;
+out vec2 v_uv;
+void main() {
+  // fullscreen triangle
+  vec2 p = vec2(
+    float((gl_VertexID & 1) << 2) - 1.0,
+    float((gl_VertexID & 2) << 1) - 1.0
+  );
+  v_uv = p;
+  gl_Position = vec4(p, 0.0, 1.0);
+}
+</script>
+
+<script id="shader-glsl-fs" type="text/plain">#version 300 es
+// ────────────────────────────────────────────────────────────
+//  cytologica · GLSL ES 3.00 fragment shader
+//  identical math to the WGSL version, retargeted for WebGL2
+//
+//  cellType selector (0..8):
+//    0 eukaryote   1 macrophage  2 neutrophil
+//    3 nk-cell     4 b-cell      5 virus
+//    6 bacterium   7 amoeba      8 spore
+// ────────────────────────────────────────────────────────────
+precision highp float;
+
+uniform vec2  u_resolution;
+uniform float u_time;
+uniform float u_zoom;
+uniform float u_activity;
+uniform float u_organelles;
+uniform float u_cellType;
+
+out vec4 outColor;
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash(i);
+  float b = hash(i + vec2(1.0, 0.0));
+  float c = hash(i + vec2(0.0, 1.0));
+  float d = hash(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 5; i++) {
+    v += a * noise(p);
+    p *= 2.03;
+    a *= 0.5;
+  }
+  return v;
+}
+
+float capsule(vec2 p, vec2 a, vec2 b, float r) {
+  vec2 pa = p - a;
+  vec2 ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
+
+float membraneFor(vec2 uv, int kind, float t) {
+  if (kind == 6) {
+    float breathe = 0.018 * sin(t * 0.6);
+    return capsule(uv, vec2(-0.32, 0.0), vec2(0.32, 0.0), 0.20 + breathe);
+  }
+  if (kind == 5) {
+    float ang = atan(uv.y, uv.x);
+    float hex = 0.04 * cos(ang * 6.0 + t * 0.3);
+    float spikes = 0.05 * pow(0.5 + 0.5 * cos(ang * 12.0 - t * 0.2), 6.0);
+    return length(uv) - (0.42 + hex + spikes);
+  }
+  if (kind == 7) {
+    float ang = atan(uv.y, uv.x);
+    float pseudo = 0.10 * sin(ang * 3.0 + t * 0.4)
+                 + 0.06 * sin(ang * 7.0 - t * 0.25);
+    float breathe = 0.02 * sin(t * 0.7);
+    return length(uv) - (0.60 + pseudo + breathe);
+  }
+  if (kind == 8) {
+    return length(uv) - (0.36 + 0.012 * sin(t * 0.4));
+  }
+  float amp = 1.0;
+  float rad = 0.62;
+  if (kind == 1) { amp = 1.6; rad = 0.66; }
+  if (kind == 2) { amp = 0.5; rad = 0.55; }
+  if (kind == 3) { amp = 0.4; rad = 0.46; }
+  if (kind == 4) { amp = 0.6; rad = 0.50; }
+  float ang = atan(uv.y, uv.x);
+  float wob = amp * (0.045 * sin(ang * 5.0  + t * 0.6)
+                   + 0.025 * sin(ang * 9.0  - t * 0.4)
+                   + 0.015 * sin(ang * 17.0 + t * 1.1));
+  return length(uv) - (rad + wob);
+}
+
+vec3 cytoColor(int kind) {
+  if (kind == 1) return vec3(0.74, 0.50, 0.55);
+  if (kind == 2) return vec3(0.86, 0.70, 0.74);
+  if (kind == 3) return vec3(0.55, 0.50, 0.72);
+  if (kind == 4) return vec3(0.70, 0.45, 0.55);
+  if (kind == 5) return vec3(0.30, 0.25, 0.42);
+  if (kind == 6) return vec3(0.55, 0.70, 0.40);
+  if (kind == 7) return vec3(0.55, 0.55, 0.40);
+  if (kind == 8) return vec3(0.78, 0.66, 0.40);
+  return vec3(0.78, 0.55, 0.66);
+}
+
+float nucleusSdf(vec2 uv, int kind, float t) {
+  vec2 nucOff = vec2(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
+  vec2 p = uv - nucOff;
+  if (kind == 5 || kind == 6 || kind == 8) return 1e9;
+  if (kind == 1) {
+    float r1 = length(p - vec2(-0.04, 0.0)) - 0.22;
+    float r2 = length(p - vec2( 0.10, 0.0)) - 0.14;
+    return max(r1, -r2);
+  }
+  if (kind == 2) {
+    float a = length(p - vec2(-0.12, -0.04)) - 0.10;
+    float b = length(p - vec2( 0.12, -0.04)) - 0.10;
+    float c = length(p - vec2( 0.00,  0.13)) - 0.10;
+    return min(min(a, b), c);
+  }
+  if (kind == 3) return length(p) - 0.30;
+  if (kind == 4) return length(p) - 0.26;
+  if (kind == 7) return length(p - vec2(0.18, -0.08)) - 0.18;
+  return length(p) - 0.22;
+}
+
+void main() {
+  vec2 res = u_resolution;
+  float t = u_time * u_activity;
+  int kind = int(floor(u_cellType + 0.5));
+
+  vec2 uv = (gl_FragCoord.xy - 0.5 * res) / min(res.x, res.y);
+  uv *= u_zoom;
+
+  // extracellular medium
+  vec3 bg = vec3(0.04, 0.03, 0.07);
+  bg += vec3(0.10, 0.05, 0.15) * fbm(uv * 4.0 + vec2(t * 0.05, t * 0.03)) * 0.4;
+  bg += vec3(0.05, 0.03, 0.08)
+      * smoothstep(0.55, 0.85, fbm(uv * 12.0 + vec2(0.0, t * 0.1)));
+
+  // membrane
+  float mem = membraneFor(uv, kind, t);
+  float inside = smoothstep(0.004, -0.004, mem);
+  float edge   = smoothstep(0.022, 0.0, abs(mem));
+
+  // cytoplasm
+  vec3 cyto = cytoColor(kind);
+  cyto -= vec3(0.10, 0.07, 0.08) * fbm(uv * 22.0 + vec2(t * 0.02, 0.0));
+  cyto += vec3(0.08, 0.04, 0.05) * (fbm(uv * 6.0 - vec2(t * 0.03, t * 0.02)) - 0.5);
+  if (kind == 4) {
+    float er = sin(uv.x * 14.0 + uv.y * 6.0 + t * 0.4) * 0.5 + 0.5;
+    cyto += vec3(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
+  }
+
+  // nucleus
+  float nucD = nucleusSdf(uv, kind, t);
+  float nucMask = smoothstep(0.006, -0.006, nucD);
+  float nucEdge = smoothstep(0.020, 0.0, abs(nucD));
+  vec2 nucOff = vec2(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
+  vec2 nucP = uv - nucOff;
+  vec3 nucCol = vec3(0.30, 0.14, 0.42);
+  if (kind == 3) nucCol = vec3(0.20, 0.12, 0.46);
+  if (kind == 4) nucCol = vec3(0.36, 0.12, 0.40);
+  nucCol += vec3(0.18, 0.08, 0.22) * fbm(nucP * 28.0 + vec2(t * 0.05, 0.0));
+  if (kind == 0 || kind == 3 || kind == 4 || kind == 7) {
+    float nlD = length(nucP - vec2(0.05, 0.04)) - 0.045;
+    float nlMask = smoothstep(0.004, -0.004, nlD);
+    nucCol = mix(nucCol, vec3(0.55, 0.20, 0.50), nlMask);
+  }
+
+  // mitochondria — eukaryote / macrophage / neutrophil / nk / b-cell / amoeba
+  float mito = 1e9;
+  int nMito = int(floor(u_organelles + 0.5));
+  if (kind == 5 || kind == 6 || kind == 8) nMito = 0;
+  for (int i = 0; i < 16; i++) {
+    if (i >= nMito) break;
+    float fi = float(i);
+    float baseA = fi * 0.7853 + t * 0.08;
+    float rad = 0.40 + 0.05 * sin(fi * 1.7);
+    vec2 centre = vec2(cos(baseA), sin(baseA)) * rad
+                + vec2(0.015 * sin(t * 1.3 + fi),
+                       0.015 * cos(t * 1.1 + fi * 2.0));
+    vec2 dir = vec2(cos(baseA + 1.5708), sin(baseA + 1.5708));
+    float len = 0.045;
+    vec2 a = centre - dir * len;
+    vec2 b = centre + dir * len;
+    mito = min(mito, capsule(uv, a, b, 0.018));
+  }
+  float mitoMask = smoothstep(0.004, -0.004, mito);
+  float mitoEdge = smoothstep(0.012, 0.0, abs(mito));
+  vec3 mitoCol = vec3(0.95, 0.55, 0.30);
+
+  // vesicles / granules
+  int vesCount = 14;
+  if (kind == 1) vesCount = 22;
+  if (kind == 2) vesCount = 30;
+  if (kind == 3) vesCount = 6;
+  if (kind == 4) vesCount = 8;
+  if (kind == 5) vesCount = 0;
+  if (kind == 6) vesCount = 18;
+  if (kind == 7) vesCount = 10;
+  if (kind == 8) vesCount = 4;
+  float vesRadius = 0.012;
+  if (kind == 2) vesRadius = 0.008;
+  if (kind == 3) vesRadius = 0.020;
+  if (kind == 7) vesRadius = 0.022;
+  vec3 vesCol = vec3(1.0, 0.92, 0.65);
+  if (kind == 3) vesCol = vec3(0.75, 0.85, 1.00);
+  if (kind == 6) vesCol = vec3(0.80, 0.90, 0.55);
+  if (kind == 7) vesCol = vec3(0.55, 0.45, 0.30);
+  float ves = 1e9;
+  for (int j = 0; j < 32; j++) {
+    if (j >= vesCount) break;
+    float fj = float(j);
+    vec2 pos = vec2(
+      0.42 * sin(fj * 1.91 + t * (0.18 + 0.03 * fj)),
+      0.42 * cos(fj * 2.37 + t * (0.21 + 0.02 * fj))
+    );
+    vec2 jit = vec2(0.008 * sin(t * 3.0 + fj * 7.0),
+                    0.008 * cos(t * 2.6 + fj * 5.0));
+    ves = min(ves, length(uv - pos - jit) - vesRadius);
+  }
+  float vesMask = smoothstep(0.003, -0.003, ves);
+
+  // virus capsid lattice overlay
+  float capsid = 0.0;
+  if (kind == 5) {
+    float h = 0.5 + 0.5 * cos(uv.x * 28.0) * cos(uv.y * 28.0);
+    capsid = pow(h, 6.0);
+  }
+
+  // bacterium flagellum
+  float flag = 1e9;
+  if (kind == 6) {
+    float xf = uv.x - 0.32;
+    if (xf > 0.0 && xf < 0.45) {
+      float yf = uv.y - 0.04 * sin(xf * 26.0 - t * 8.0);
+      flag = abs(yf) - 0.006;
+    }
+  }
+  float flagMask = smoothstep(0.003, -0.003, flag);
+
+  // spore double-wall ring
+  float wall = 1e9;
+  if (kind == 8) {
+    wall = abs(length(uv) - 0.30) - 0.014;
+  }
+  float wallMask = smoothstep(0.003, -0.003, wall);
+
+  // compose
+  vec3 col = bg;
+  col = mix(col, cyto, inside);
+  col = mix(col, mitoCol, mitoMask * inside);
+  col = mix(col, vec3(0.45, 0.20, 0.10), mitoEdge * inside * 0.6);
+  col = mix(col, vesCol, vesMask * inside);
+  col = mix(col, nucCol, nucMask);
+  col = mix(col, vec3(0.18, 0.08, 0.25), nucEdge * (1.0 - nucMask) * 0.7);
+  col += vec3(0.30, 0.20, 0.45) * capsid * inside;
+  col = mix(col, vec3(0.40, 0.55, 0.30), flagMask);
+  col = mix(col, vec3(0.45, 0.30, 0.10), wallMask);
+  col = mix(col, vec3(0.16, 0.06, 0.18), edge * 0.85);
+
+  // brownian particles
+  for (int k = 0; k < 18; k++) {
+    float fk = float(k);
+    float speedK = 0.3 + 0.5 * hash(vec2(fk, 1.0));
+    vec2 p = vec2(
+      0.55 * sin(fk * 3.71 + t * speedK),
+      0.55 * cos(fk * 5.19 + t * speedK * 1.13)
+    );
+    col += vec3(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, length(uv - p)) * inside;
+  }
+
+  // optics
+  float r = length(uv);
+  col += vec3(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, r), 2.0) * 0.6;
+
+  // grain
+  float g = hash(gl_FragCoord.xy + vec2(t * 31.7, t * 17.3)) - 0.5;
+  col += vec3(g) * 0.025;
+
+  outColor = vec4(col, 1.0);
+}
+</script>
+
+<script>
+/* ------------------------------------------------------------
+   cytologica · runtime
+   selects WebGPU when available, falls back to WebGL2.
+   ------------------------------------------------------------ */
+
+const $ = id => document.getElementById(id);
+const canvas = $('stage');
+
+const params = {
+  zoom: 1.0,
+  activity: 1.0,
+  organelles: 8,
+  cellType: 0,
+};
+
+// hook up sliders ----------------------------------------------------------
+function bind(rangeId, valId, key, fmt) {
+  const r = $(rangeId), v = $(valId);
+  const apply = () => {
+    const x = parseFloat(r.value);
+    params[key] = x;
+    v.textContent = fmt(x);
+  };
+  r.addEventListener('input', apply);
+  apply();
+}
+bind('zoom', 'zoom-val', 'zoom', x => x.toFixed(2));
+bind('speed', 'speed-val', 'activity', x => x.toFixed(2));
+bind('organelles', 'org-val', 'organelles', x => Math.round(x).toString());
+
+// celltype dropdown
+const celltypeSel = $('celltype');
+celltypeSel.addEventListener('change', () => {
+  params.cellType = parseInt(celltypeSel.value, 10) || 0;
+});
+params.cellType = parseInt(celltypeSel.value, 10) || 0;
+
+// inject shader sources into the side panel --------------------------------
+const wgslSrc = $('shader-wgsl').textContent.trim();
+const glslVsSrc = $('shader-glsl-vs').textContent.trim();
+const glslFsSrc = $('shader-glsl-fs').textContent.trim();
+const hostSrc = `// renderer dispatcher
+async function boot() {
+  let r = await initWebGPU();         // 1. try WebGPU
+  if (!r) r = initWebGL2();           // 2. fall back to WebGL2
+  if (!r) return;                     // 3. give up
+
+  const start = performance.now();
+  function loop(now) {
+    const t = (now - start) / 1000;
+    r.frame(t);                       // both backends share this signature
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+// uniforms uploaded each frame:
+//   resolution (vec2)  time (f32)  zoom (f32)
+//   activity   (f32)   organelles (f32)`;
+
+// raw, unhighlighted source for each pane — used by the copy button
+const rawSources = {
+  wgsl: wgslSrc,
+  glsl: '// === vertex ===\n' + glslVsSrc + '\n\n// === fragment ===\n' + glslFsSrc,
+  js:   hostSrc,
+};
+
+function highlight(src, lang) {
+  // tiny syntax painter — purely cosmetic
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let s = esc(src);
+  // comments first (line)
+  s = s.replace(/(\/\/[^\n]*)/g, '<span class="tk-cmt">$1</span>');
+  // strings (rare in shaders)
+  s = s.replace(/("[^"]*")/g, '<span class="tk-str">$1</span>');
+  // numbers
+  s = s.replace(/\b(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?\b/g, '<span class="tk-num">$&</span>');
+  // attributes (wgsl)
+  s = s.replace(/(@[a-zA-Z_][a-zA-Z0-9_]*)/g, '<span class="tk-attr">$1</span>');
+  // keywords
+  const kws = lang === 'wgsl'
+    ? ['fn','let','var','return','if','else','for','while','break','continue','struct','true','false','const']
+    : ['void','if','else','for','while','return','break','continue','in','out','uniform','const','true','false','precision','highp','mediump','lowp','int','float','bool','vec2','vec3','vec4','mat2','mat3','mat4'];
+  for (const k of kws) {
+    s = s.replace(new RegExp('\\b'+k+'\\b','g'), '<span class="tk-kw">'+k+'</span>');
+  }
+  // types
+  const types = lang === 'wgsl'
+    ? ['f32','i32','u32','vec2<f32>','vec3<f32>','vec4<f32>','mat2x2','mat3x3','mat4x4']
+    : ['sampler2D'];
+  for (const k of types) {
+    s = s.replace(new RegExp(k.replace(/[<>]/g,c=>'\\'+c),'g'), '<span class="tk-type">'+k+'</span>');
+  }
+  // built-ins
+  const fns = ['sin','cos','tan','atan','atan2','floor','fract','mix','smoothstep','clamp','length','dot','min','max','abs','pow','sqrt','exp','log','round','step'];
+  for (const k of fns) {
+    s = s.replace(new RegExp('\\b'+k+'(?=\\()','g'), '<span class="tk-fn">'+k+'</span>');
+  }
+  return s;
+}
+
+$('src-wgsl').innerHTML = highlight(wgslSrc, 'wgsl');
+$('src-glsl').innerHTML = highlight(rawSources.glsl, 'glsl');
+$('src-js').innerHTML   = highlight(hostSrc, 'glsl');
+
+// tab switching ------------------------------------------------------------
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    $('pane-' + btn.dataset.pane).classList.add('active');
+  });
+});
+
+// copy active source -------------------------------------------------------
+const copyBtn = $('copy-src');
+const copyLabel = $('copy-label');
+let copyResetTimer = null;
+
+async function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch (_) { /* fall through */ }
+  }
+  // legacy fallback for non-secure contexts (e.g. file://)
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (_) {}
+  document.body.removeChild(ta);
+  return ok;
+}
+
+copyBtn.addEventListener('click', async () => {
+  const activeTab = document.querySelector('.tab.active');
+  if (!activeTab) return;
+  const src = rawSources[activeTab.dataset.pane];
+  const ok = await copyToClipboard(src);
+  copyLabel.textContent = ok ? 'copied' : 'failed';
+  copyBtn.classList.toggle('copied', ok);
+  clearTimeout(copyResetTimer);
+  copyResetTimer = setTimeout(() => {
+    copyLabel.textContent = 'copy';
+    copyBtn.classList.remove('copied');
+  }, 1400);
+});
+
+// hide / show controls panel ----------------------------------------------
+const controlsEl = $('controls');
+const showBtn = $('ctrl-show');
+function setControlsVisible(visible) {
+  controlsEl.hidden = !visible;
+  showBtn.hidden    = visible;
+}
+$('ctrl-close').addEventListener('click', () => setControlsVisible(false));
+showBtn.addEventListener('click',          () => setControlsVisible(true));
+window.addEventListener('keydown', e => {
+  // ignore when typing into inputs
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (e.key === 'h' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    setControlsVisible(controlsEl.hidden);
+  }
+});
+
+// ─── renderer selection ───────────────────────────────────────────────────
+let renderer = null;
+
+function setBadge(name, isFallback) {
+  $('renderer-name').textContent = name;
+  $('renderer-badge').classList.toggle('fallback', !!isFallback);
+}
+
+async function initWebGPU() {
+  if (!navigator.gpu) return null;
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) return null;
+    const device = await adapter.requestDevice();
+    const ctx = canvas.getContext('webgpu');
+    if (!ctx) return null;
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    ctx.configure({ device, format, alphaMode: 'opaque' });
+
+    const module = device.createShaderModule({ code: wgslSrc });
+
+    const pipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex:   { module, entryPoint: 'vs_main' },
+      fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
+      primitive: { topology: 'triangle-list' },
+    });
+
+    // 8 floats = 32 bytes (matches std140-ish padding in WGSL Uniforms)
+    const uboSize = 32;
+    const ubo = device.createBuffer({
+      size: uboSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    const bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: ubo } }],
+    });
+
+    const cpuBuf = new Float32Array(8);
+
+    function frame(time) {
+      // resize-safe
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const w = canvas.clientWidth  * dpr | 0;
+      const h = canvas.clientHeight * dpr | 0;
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w; canvas.height = h;
+      }
+
+      cpuBuf[0] = canvas.width;
+      cpuBuf[1] = canvas.height;
+      cpuBuf[2] = time;
+      cpuBuf[3] = params.zoom;
+      cpuBuf[4] = params.activity;
+      cpuBuf[5] = params.organelles;
+      cpuBuf[6] = params.cellType;
+      // [7] is alignment padding (struct rounded up to 32 bytes)
+      device.queue.writeBuffer(ubo, 0, cpuBuf);
+
+      const enc = device.createCommandEncoder();
+      const view = ctx.getCurrentTexture().createView();
+      const pass = enc.beginRenderPass({
+        colorAttachments: [{
+          view,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(3, 1, 0, 0);
+      pass.end();
+      device.queue.submit([enc.finish()]);
+    }
+
+    return { name: 'webgpu · wgsl', frame };
+  } catch (e) {
+    console.warn('webgpu init failed:', e);
+    return null;
+  }
+}
+
+function initWebGL2() {
+  const gl = canvas.getContext('webgl2', { antialias: true, premultipliedAlpha: false });
+  if (!gl) return null;
+
+  function compile(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      console.error(gl.getShaderInfoLog(sh));
+      throw new Error('shader compile failed');
+    }
+    return sh;
+  }
+  const vs = compile(gl.VERTEX_SHADER, glslVsSrc);
+  const fs = compile(gl.FRAGMENT_SHADER, glslFsSrc);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    console.error(gl.getProgramInfoLog(prog));
+    throw new Error('link failed');
+  }
+  gl.useProgram(prog);
+
+  const u_res  = gl.getUniformLocation(prog, 'u_resolution');
+  const u_time = gl.getUniformLocation(prog, 'u_time');
+  const u_zoom = gl.getUniformLocation(prog, 'u_zoom');
+  const u_act  = gl.getUniformLocation(prog, 'u_activity');
+  const u_org  = gl.getUniformLocation(prog, 'u_organelles');
+  const u_kind = gl.getUniformLocation(prog, 'u_cellType');
+
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+
+  function frame(time) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.clientWidth  * dpr | 0;
+    const h = canvas.clientHeight * dpr | 0;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+    }
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform2f(u_res, canvas.width, canvas.height);
+    gl.uniform1f(u_time, time);
+    gl.uniform1f(u_zoom, params.zoom);
+    gl.uniform1f(u_act,  params.activity);
+    gl.uniform1f(u_org,  params.organelles);
+    gl.uniform1f(u_kind, params.cellType);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  return { name: 'webgl2 · glsl es 3.0', frame };
+}
+
+// fps meter ----------------------------------------------------------------
+let fpsAcc = 0, fpsFrames = 0, fpsLast = 0;
+function updateFps(now) {
+  fpsFrames++;
+  if (now - fpsLast > 500) {
+    const fps = (fpsFrames * 1000) / (now - fpsLast);
+    $('fps').textContent = fps.toFixed(0).padStart(2,'0') + ' fps';
+    fpsLast = now; fpsFrames = 0;
+  }
+}
+
+// boot ---------------------------------------------------------------------
+(async () => {
+  renderer = await initWebGPU();
+  if (renderer) {
+    setBadge(renderer.name, false);
+  } else {
+    renderer = initWebGL2();
+    if (!renderer) {
+      setBadge('no gpu support', true);
+      return;
+    }
+    setBadge(renderer.name, true);
+  }
+
+  // dump host code into JS pane (already done above; nothing more to do here)
+
+  fpsLast = performance.now();
+  const start = fpsLast;
+  function loop(now) {
+    const t = (now - start) / 1000;
+    renderer.frame(t);
+    updateFps(now);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+
+</body>
+</html>

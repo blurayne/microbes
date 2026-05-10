@@ -33,6 +33,14 @@
   </div>
 
   <div class="chapter-toc">
+    <h3>◆ Live-Demo</h3>
+    <p style="color: var(--ink-dim); font-size: 14px; margin-bottom: 8px;">Interaktiver Shader-Sandbox: ein WGSL-/GLSL-Shader, neun Zelltypen (Immun + Pathogene), umschaltbar per Dropdown.</p>
+    <ul class="chapter-toc-list">
+      <li><a href="shader-test.html"><span class="num">▶</span><span class="title">Shader-Test · Live-Zelle (WebGPU + WebGL2)</span></a></li>
+    </ul>
+  </div>
+
+  <div class="chapter-toc">
     <h3>◆ Inhaltsverzeichnis</h3>
     <ul class="chapter-toc-list">
       <li><a href="#ch01"><span class="num">01</span><span class="title">Die 12 Immunzellen + Filler</span></a></li>
