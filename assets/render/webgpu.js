@@ -23,6 +23,7 @@ import {
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
+import { testKindFor } from '../core/cell-kinds.js';
 import { RendererBase } from './renderer.js';
 
 // ---------- Layout constants (must match WGSL `VsIn` + JS pack loop) ----------
@@ -140,7 +141,8 @@ fn vs_main(in: VsIn) -> VsOut {
 fn bodyKind(k: f32) -> i32 { return i32((k + 0.5) % 16.0); }
 fn nucKind(k: f32)  -> i32 { return i32(((k + 0.5) / 16.0) % 16.0); }
 fn isSelected(k: f32) -> i32 { return i32(((k + 0.5) / 256.0) % 16.0); }
-fn isHollow(k: f32) -> i32 { return i32((k + 0.5) / 4096.0); }
+fn isHollow(k: f32) -> i32 { return i32(((k + 0.5) / 4096.0) % 2.0); }
+fn testKind(k: f32) -> i32 { return i32(((k + 0.5) / 8192.0) % 32.0); }
 
 fn bodyScale(uv: vec2<f32>, kindF: f32, ph: vec4<f32>, time: f32, wobbleAmp: f32) -> f32 {
   let kind = bodyKind(kindF);
@@ -182,6 +184,45 @@ fn bodyScale(uv: vec2<f32>, kindF: f32, ph: vec4<f32>, time: f32, wobbleAmp: f32
   return scale;
 }
 
+// Per-test-kind body silhouette ported from docs/shader-test.html.
+// Mirrors webgl2's testShape — see the GLSL comment for the rationale.
+fn testShape(uv: vec2<f32>, kindF: f32, time: f32) -> f32 {
+  let tk = testKind(kindF);
+  let ang = atan2(uv.y, uv.x);
+  if (tk == 5) {
+    return 1.0
+         + 0.10 * cos(ang * 6.0  + time * 0.30)
+         + 0.12 * pow(0.5 + 0.5 * cos(ang * 12.0 - time * 0.20), 6.0);
+  }
+  if (tk == 6) {
+    return 1.0 / sqrt(uv.x * uv.x * 0.42 + uv.y * uv.y * 1.55);
+  }
+  if (tk == 7) {
+    return 1.10
+         + 0.20 * sin(ang * 3.0 + time * 0.40)
+         + 0.10 * sin(ang * 7.0 - time * 0.25);
+  }
+  if (tk == 8)  { return 0.85 + 0.025 * sin(time * 0.4); }
+  if (tk == 9) {
+    return 1.15
+         + 0.06 * sin(ang * 11.0 + time * 0.50)
+         + 0.03 * sin(ang * 23.0 - time * 0.30);
+  }
+  if (tk == 10) { return 1.0 / sqrt(uv.x * uv.x * 0.72 + uv.y * uv.y * 1.21); }
+  if (tk == 11) { return 1.0 + 0.45 * pow(0.5 + 0.5 * cos(ang * 6.0 + time * 0.20), 14.0); }
+  if (tk == 13) { return 0.85 + 0.10 * cos(ang * 10.0); }
+  if (tk == 17) { return 0.95 + 0.16 * cos(ang * 3.0 + time * 0.40); }
+  if (tk == 18) {
+    return 1.10
+         + 0.18 * sin(ang * 4.0  + time * 0.30)
+         + 0.10 * sin(ang * 7.0  - time * 0.50)
+         + 0.08 * sin(ang * 11.0 + time * 0.80);
+  }
+  if (tk == 19) { return 1.05 + 0.13 * pow(0.5 + 0.5 * cos(ang * 4.0 + 0.5), 8.0); }
+  if (tk == 20) { return 0.95 + 0.30 * pow(0.5 + 0.5 * cos(ang * 10.0 + time * 0.30), 4.0); }
+  return 1.0;
+}
+
 @fragment
 fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let time = u.misc.y;
@@ -190,7 +231,20 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let highlight = u.highlight.xyz;
 
   let d = length(in.uv);
-  let bodyR = bodyScale(in.uv, in.kind, in.phase, time, wobbleAmp);
+  // Pick the per-cell silhouette: legacy bodyScale (today's 5-kind
+  // dispatch on bodyKind) or the per-test-kind testShape with a small
+  // wobble overlay so themed cells still breathe.
+  let theme = i32(round(u.cameraRot.y));
+  var bodyR: f32;
+  if (theme == 0) {
+    bodyR = bodyScale(in.uv, in.kind, in.phase, time, wobbleAmp);
+  } else {
+    let ang = atan2(in.uv.y, in.uv.x);
+    let w1 = sin(time * 0.55 * in.phase.z + ang * 3.0 + in.phase.y);
+    let w2 = sin(time * 0.85 * in.phase.z + ang * 5.0 + in.phase.y * 1.31 + in.phase.x);
+    let wob = wobbleAmp * in.phase.w * 0.40 * (w1 * 0.65 + w2 * 0.45);
+    bodyR = testShape(in.uv, in.kind, time) + wob;
+  }
   let sdf = d - bodyR;
   let sel = isSelected(in.kind);
 
@@ -284,6 +338,35 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let r2 = dot(in.uv, in.uv);
     let halo = pow(clamp(1.0 - r2, 0.0, 1.0), 1.5) * 0.45;
     col = col + in.cytoBot * halo;
+  }
+
+  // Per-test-kind compose overlays (mirror of webgl2 FRAG_DISK):
+  // rbc biconcave, virus capsid lattice, dendritic tendril glow,
+  // slime hyphae, toxin glow. Active only when u_theme != 0; each
+  // is gated on the matching test kind so per-cell cost stays flat
+  // for unrelated cells.
+  if (theme != 0 && d < bodyR) {
+    let tk = testKind(in.kind);
+    let insideMask = 1.0 - smoothstep(-0.005, 0.015, sdf);
+    if (tk == 16) {
+      let bicon = smoothstep(0.45, 0.10, d);
+      col = mix(col, col * 0.45, vec3<f32>(bicon * insideMask));
+    } else if (tk == 5) {
+      let h = 0.5 + 0.5 * cos(in.uv.x * 16.0) * cos(in.uv.y * 16.0);
+      col = col + vec3<f32>(0.30, 0.20, 0.45) * pow(h, 6.0) * insideMask;
+    } else if (tk == 11) {
+      let ang = atan2(in.uv.y, in.uv.x);
+      let t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + time * 0.20), 14.0);
+      col = col + in.cytoBot * t6 * 0.25 * insideMask;
+    } else if (tk == 18) {
+      let ang = atan2(in.uv.y, in.uv.x);
+      let lines = pow(abs(cos(ang * 1.5 + time * 0.10)), 50.0);
+      let ring  = smoothstep(1.05, 0.80, d) * smoothstep(0.45, 0.65, d);
+      col = mix(col, vec3<f32>(0.20, 0.30, 0.05), vec3<f32>(lines * ring * 0.7));
+    } else if (tk == 20) {
+      let glow = pow(smoothstep(1.05, 0.80, d), 2.0) * smoothstep(0.55, 0.85, d);
+      col = col + vec3<f32>(0.55, 0.30, 0.85) * glow;
+    }
   }
 
   // Tap flash — c.flash decays in Sim.update(); fade across 200 ms.
@@ -2509,7 +2592,10 @@ export class WebGPURenderer extends RendererBase {
         const nucK = NUC_KIND_FLOAT[(type.nucleus && type.nucleus.kind) || 'none'] || 0;
         const isSel = sel.has(c) ? 1 : 0;
         const hollow = type.bodyHollow ? 1 : 0;
-        const kind = bodyK + nucK * 16 + isSel * 256 + hollow * 4096;
+        // testKind (0..20) packed at bit 13 (multiplier 8192). Read in
+        // fs_main as testKind() and dispatched only when u_theme != 0.
+        const tk = testKindFor(c.type);
+        const kind = bodyK + nucK * 16 + isSel * 256 + hollow * 4096 + tk * 8192;
         const wobMul = (type.field && type.field.wobbleMul) || 1.0;
         const j = i * INSTANCE_FLOATS;
         data[j]      = s.x;

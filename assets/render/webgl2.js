@@ -16,6 +16,7 @@ import {
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
+import { testKindFor } from '../core/cell-kinds.js';
 import { RendererBase } from './renderer.js';
 
 // Each cell is one instanced quad. The fragment shader computes the
@@ -102,6 +103,10 @@ int nucKind()     { return int(mod((v_kind + 0.5) / 16.0, 16.0)); }
 int isSelected()  { return int(mod((v_kind + 0.5) / 256.0, 2.0)); }
 int isVirus3D()   { return int(mod((v_kind + 0.5) / 512.0, 2.0)); }
 int isHollow()    { return int(mod((v_kind + 0.5) / 4096.0, 2.0)); }
+// Per-cell-type test-kind (0..20), ported from docs/shader-test.html.
+// 0 = eukaryote/generic. Read only when u_theme != 0; legacy theme
+// (default) ignores this and uses the existing bodyKind dispatch.
+int testKind()    { return int(mod((v_kind + 0.5) / 8192.0, 32.0)); }
 
 // Classic 2D Perlin noise (cnoise) by Stefan Gustavson — verbatim from
 // the source webgl-shaders.com sphere shader (see
@@ -172,9 +177,95 @@ float bodyScale(vec2 uv) {
   return scale;
 }
 
+// Per-test-kind body silhouette, ported from docs/shader-test.html.
+// Returns the membrane radius in body-radius units (~1.0 = nominal).
+// Active only when u_theme != 0; legacy theme uses bodyScale() above.
+// Test-shader UV constants (radius ~0.5..0.66 in its own frame) are
+// rescaled by ~1.7 so the membrane sits at length(v_uv) ≈ 1.0 in the
+// game's frame, preserving each cell's existing in-game size (cell.r).
+float testShape(vec2 uv, float t) {
+  int tk = testKind();
+  float ang = atan(uv.y, uv.x);
+  if (tk == 5) {
+    // virus — hex capsid (6-fold symmetry) + sharp spike modulation
+    return 1.0
+         + 0.10 * cos(ang * 6.0  + t * 0.30)
+         + 0.12 * pow(0.5 + 0.5 * cos(ang * 12.0 - t * 0.20), 6.0);
+  }
+  if (tk == 6) {
+    // bacterium — capsule along x. Approximate as ellipse so we can
+    // keep the simple radial scale-factor contract.
+    return 1.0 / sqrt(uv.x * uv.x * 0.42 + uv.y * uv.y * 1.55);
+  }
+  if (tk == 7) {
+    // amoeba — large, irregular pseudopod blob
+    return 1.10
+         + 0.20 * sin(ang * 3.0 + t * 0.40)
+         + 0.10 * sin(ang * 7.0 - t * 0.25);
+  }
+  if (tk == 8) {
+    // spore — small disc with a thin breath
+    return 0.85 + 0.025 * sin(t * 0.4);
+  }
+  if (tk == 9) {
+    // monocyte — high-frequency surface ripple
+    return 1.15
+         + 0.06 * sin(ang * 11.0 + t * 0.50)
+         + 0.03 * sin(ang * 23.0 - t * 0.30);
+  }
+  if (tk == 10) {
+    // mast cell — slightly oblong (taller than wide)
+    return 1.0 / sqrt(uv.x * uv.x * 0.72 + uv.y * uv.y * 1.21);
+  }
+  if (tk == 11) {
+    // dendritic — round body + 6 long thin tendrils
+    return 1.0 + 0.45 * pow(0.5 + 0.5 * cos(ang * 6.0 + t * 0.20), 14.0);
+  }
+  if (tk == 13) {
+    // platelet — small 10-point star
+    return 0.85 + 0.10 * cos(ang * 10.0);
+  }
+  if (tk == 17) {
+    // germ — small 3-lobe blob
+    return 0.95 + 0.16 * cos(ang * 3.0 + t * 0.40);
+  }
+  if (tk == 18) {
+    // slime mold — irregular lobed (chaotic)
+    return 1.10
+         + 0.18 * sin(ang * 4.0  + t * 0.30)
+         + 0.10 * sin(ang * 7.0  - t * 0.50)
+         + 0.08 * sin(ang * 11.0 + t * 0.80);
+  }
+  if (tk == 19) {
+    // mite — round with 4 small leg bumps
+    return 1.05 + 0.13 * pow(0.5 + 0.5 * cos(ang * 4.0 + 0.5), 8.0);
+  }
+  if (tk == 20) {
+    // toxin — sharp 10-point spike star
+    return 0.95 + 0.30 * pow(0.5 + 0.5 * cos(ang * 10.0 + t * 0.30), 4.0);
+  }
+  // Fallback (eukaryote, macrophage, neutrophil, nk, b-cell, basophil,
+  // t-cell, eosinophil, rbc) — keep round; their identity comes from
+  // colour + nucleus + the shared sin-based wobble overlay below.
+  return 1.0;
+}
+
 void main() {
   float d = length(v_uv);
-  float bodyR = bodyScale(v_uv);
+  // Pick the per-cell silhouette: legacy bodyScale (today's 5-kind
+  // dispatch on bodyKind) or the per-test-kind testShape with a small
+  // wobble overlay so themed cells still breathe.
+  float bodyR;
+  if (u_theme == 0) {
+    bodyR = bodyScale(v_uv);
+  } else {
+    float ang = atan(v_uv.y, v_uv.x);
+    float wob = u_wobbleAmp * v_phase.w * 0.40 * (
+      sin(u_time * 0.55 * v_phase.z + ang * 3.0 + v_phase.y) * 0.65 +
+      sin(u_time * 0.85 * v_phase.z + ang * 5.0 + v_phase.y * 1.31 + v_phase.x) * 0.45
+    );
+    bodyR = testShape(v_uv, u_time) + wob;
+  }
   float sdf = d - bodyR;
   int sel = isSelected();
 
@@ -274,6 +365,40 @@ void main() {
     float r2 = dot(v_uv, v_uv);
     float halo = pow(clamp(1.0 - r2, 0.0, 1.0), 1.5) * 0.45;
     col += v_cytoBot * halo;
+  }
+
+  // Per-test-kind compose overlays. Active only for non-legacy themes;
+  // each is gated on the corresponding test kind so the cost stays
+  // constant for every other cell. Ported from docs/shader-test.html
+  // (rbc biconcave, virus capsid lattice, dendritic tendrils, slime
+  // hyphal threads, toxin glow). All work inside v_uv (cell-local).
+  if (u_theme != 0 && d < bodyR) {
+    int tk = testKind();
+    float insideMask = 1.0 - smoothstep(-0.005, 0.015, sdf);
+    if (tk == 16) {
+      // rbc — biconcave depression: darken disc centre.
+      float bicon = smoothstep(0.45, 0.10, d);
+      col = mix(col, col * 0.45, bicon * insideMask);
+    } else if (tk == 5) {
+      // virus — bright hex lattice tinted on the body.
+      float h = 0.5 + 0.5 * cos(v_uv.x * 16.0) * cos(v_uv.y * 16.0);
+      col += vec3(0.30, 0.20, 0.45) * pow(h, 6.0) * insideMask;
+    } else if (tk == 11) {
+      // dendritic — accentuate the tendril rim with a faint cyto glow.
+      float ang = atan(v_uv.y, v_uv.x);
+      float t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + u_time * 0.20), 14.0);
+      col += v_cytoBot * t6 * 0.25 * insideMask;
+    } else if (tk == 18) {
+      // slime — faint dark hyphal threads at the rim.
+      float ang = atan(v_uv.y, v_uv.x);
+      float lines = pow(abs(cos(ang * 1.5 + u_time * 0.10)), 50.0);
+      float ring  = smoothstep(1.05, 0.80, d) * smoothstep(0.45, 0.65, d);
+      col = mix(col, vec3(0.20, 0.30, 0.05), lines * ring * 0.7);
+    } else if (tk == 20) {
+      // toxin — bright violet glow inside the membrane.
+      float glow = pow(smoothstep(1.05, 0.80, d), 2.0) * smoothstep(0.55, 0.85, d);
+      col += vec3(0.55, 0.30, 0.85) * glow;
+    }
   }
 
   // Tap flash overlay — c.flash decays in Sim.update(); fade out across 200 ms.
@@ -2031,7 +2156,11 @@ export class WebGL2Renderer extends RendererBase {
         // the experimental S.virusShader3D toggle is on; 0 everywhere
         // else. Lives at bit 9 (value 512) of the kind packing.
         const virus3d = (c.type === 'virus' && S.virusShader3D) ? 1 : 0;
-        const kind = bodyK + nucK * 16 + sel * 256 + virus3d * 512 + hollow * 4096;
+        // Pack the docs/shader-test "test kind" (0..20) at bit 13
+        // (multiplier 8192). Read as testKind() in FRAG_DISK; consumed
+        // only when u_theme != 0 (Phase 2 per-type SDF dispatch).
+        const tk = testKindFor(c.type);
+        const kind = bodyK + nucK * 16 + sel * 256 + virus3d * 512 + hollow * 4096 + tk * 8192;
         const wobMul = (type.field && type.field.wobbleMul) || 1.0;
         const j = i * INSTANCE_FLOATS;
         data[j]     = s.x;
