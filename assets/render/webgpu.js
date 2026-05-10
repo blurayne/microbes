@@ -968,8 +968,20 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   // with darker centre dot. Anchored in world space so they pan + zoom
   // with the camera (matches Canvas2D's drawBackground behaviour where
   // RBCs are drawn inside the camera transform).
-  // World-tiled RBC silhouettes — see WebGL2 comment. 3x3 neighbour
-  // tiles × 4 RBCs each = 36 ellipse tests per fragment.
+  // Bloodstream plasma wash — seamless domain-warped fbm in worldPx
+  // (mirrors WebGL2). Fills the gaps between discrete RBCs so the
+  // field reads as "plasma with cells in it" at any zoom level.
+  if (rbcOn == 1) {
+    let plasmaP = worldPx * 0.0015 + vec2<f32>(0.0, time * 0.08);
+    let plasma = bgFbm(plasmaP + vec2<f32>(bgFbm(plasmaP * 0.5)));
+    let plasmaCol = mix(vec3<f32>(0.30, 0.05, 0.07),
+                        vec3<f32>(0.62, 0.12, 0.16),
+                        smoothstep(0.30, 0.85, plasma));
+    col = mix(col, plasmaCol, 0.55);
+  }
+
+  // Discrete RBC silhouettes on top of the plasma. World-tiled —
+  // 3x3 neighbour × 4 RBCs each = 36 ellipse tests per fragment.
   if (rbcOn == 1) {
     let TS: f32 = 600.0;
     let tIdx = floor(worldPx / TS);

@@ -648,14 +648,23 @@ void main() {
     col += u_spotCols[i] * a;
   }
 
-  // Drifting red-blood-cell silhouettes — bloodstream theme flair.
-  // World-tiled so the density stays constant as the camera zooms
-  // out instead of stretching ~22 silhouettes across the whole
-  // (now-larger) viewport. For the fragment's worldPx we sample a
-  // 3x3 neighbourhood of 600x600 tiles; each tile spawns 4 RBCs
-  // at hash-stable positions + a small per-cell drift so the
-  // field still looks alive. Total: 36 ellipse tests per fragment
-  // (was 22 — comparable cost) but density is camera-independent.
+  // Bloodstream theme: a seamless plasma wash beneath the discrete
+  // RBC silhouettes. The plasma is a continuous domain-warped fbm
+  // in worldPx (same pattern as lava) — it has no tile structure,
+  // so the field reads as "plasma with cells in it" instead of
+  // "scattered ellipses on a flat gradient". Fixes the visible
+  // gaps that appeared between RBCs when zoomed out.
+  if (u_rbc == 1) {
+    vec2 plasmaP = worldPx * 0.0015 + vec2(0.0, u_time * 0.08);
+    float plasma = bgFbm(plasmaP + bgFbm(plasmaP * 0.5));
+    vec3 plasmaCol = mix(vec3(0.30, 0.05, 0.07), vec3(0.62, 0.12, 0.16),
+                         smoothstep(0.30, 0.85, plasma));
+    col = mix(col, plasmaCol, 0.55);
+  }
+
+  // Drifting RBC silhouettes — discrete cell shapes on top of the
+  // plasma wash. World-tiled so density stays camera-independent:
+  // 3x3 neighbourhood of 600x600 tiles, 4 RBCs per tile.
   if (u_rbc == 1) {
     const float TS = 600.0;            // world px per tile
     vec2 tIdx = floor(worldPx / TS);
