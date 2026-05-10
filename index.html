@@ -247,18 +247,22 @@
             data-i18n-attr="aria-label=mode_target,title=mode_target_tip">🎯</button>
     <button id="modeSplit" type="button" class="mode-btn mode-split"
             aria-label="Split mode" title="Tap a cell to split it"
-            data-i18n-attr="aria-label=mode_split,title=mode_split_tip"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <!-- Two daughter cells (mitosis silhouette) -->
-        <circle cx="8" cy="8.5" r="4.6"/>
-        <circle cx="16" cy="15.5" r="4.6"/>
-        <!-- Chromosomes (paired strokes) inside each cell -->
-        <line x1="6" y1="6.6" x2="7.6" y2="10.4"/>
-        <line x1="9" y1="6.6" x2="7.4" y2="10.4"/>
-        <line x1="14" y1="13.6" x2="15.6" y2="17.4"/>
-        <line x1="17" y1="13.6" x2="15.4" y2="17.4"/>
-        <!-- Curved division arrow connecting the two -->
-        <path d="M 10.5 12 Q 13 12 13.5 14"/>
-        <polyline points="12.0,13.7 13.5,14 13.7,12.5"/>
+            data-i18n-attr="aria-label=mode_split,title=mode_split_tip"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <!-- Two daughter cells -->
+        <circle cx="6.5" cy="6.5" r="4.6"/>
+        <circle cx="17.5" cy="17.5" r="4.6"/>
+        <!-- Chromosome "X" inside cell A -->
+        <line x1="4.5" y1="4.5" x2="8.5" y2="8.5"/>
+        <line x1="8.5" y1="4.5" x2="4.5" y2="8.5"/>
+        <!-- Chromosome "X" inside cell B -->
+        <line x1="15.5" y1="15.5" x2="19.5" y2="19.5"/>
+        <line x1="19.5" y1="15.5" x2="15.5" y2="19.5"/>
+        <!-- Upper duplication arrow: cell A → cell B -->
+        <path d="M 11 4.5 Q 19.5 4.5 19.5 11"/>
+        <polyline points="17.5,10.5 19.5,11 20,9"/>
+        <!-- Lower duplication arrow: cell B → cell A (closes the loop) -->
+        <path d="M 13 19.5 Q 4.5 19.5 4.5 13"/>
+        <polyline points="6.5,13.5 4.5,13 4,15"/>
       </svg></button>
     <button id="modeKill" type="button" class="mode-btn"
             aria-label="Kill mode" title="Tap a cell to make it explode"
