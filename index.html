@@ -211,13 +211,25 @@
       <circle cx="12" cy="12" r="3"/>
     </svg>
   </button>
-  <button id="pause" class="fab" type="button" aria-label="Pause" title="Pause" aria-pressed="false" data-i18n-attr="aria-label=pause,title=pause">⏸</button>
+  <button id="pause" class="fab" type="button" aria-label="Pause" title="Pause" aria-pressed="false" data-i18n-attr="aria-label=pause,title=pause"><svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor" aria-hidden="true">
+    <rect x="6.5" y="5" width="4" height="14" rx="1"/>
+    <rect x="13.5" y="5" width="4" height="14" rx="1"/>
+  </svg></button>
   <button id="help" class="fab" type="button" aria-label="Help" title="Help" data-i18n-attr="aria-label=nav_help,title=nav_help">?</button>
   <!-- #paletteBad FAB removed (per user spec — pathogens spawn from
        the unified add-dialog opened by #palette). -->
   <button id="palette" class="fab" type="button" aria-label="Add" title="Add" data-i18n-attr="aria-label=nav_add_cell,title=nav_add_cell">+</button>
   <button id="reload" class="fab" type="button" aria-label="Reload" title="Hard reload" data-i18n-attr="aria-label=nav_reload,title=nav_reload">⟳</button>
-  <div id="pauseOverlay" class="pause-overlay" aria-hidden="true"><div class="pause-text" data-i18n="paused">PAUSE</div></div>
+  <!-- Pause: full-screen overlay with a backdrop-filter blur over the
+       whole bg, a PAUSED title + "tap space or screen to continue"
+       hint. The overlay itself catches any click and resumes (the
+       handler is wired in app.js). While shown, body.is-paused
+       disables every FAB / settings button (CSS pointer-events
+       :none) so the user can't accidentally fire other UI. -->
+  <div id="pauseOverlay" class="pause-overlay" aria-hidden="true">
+    <div class="pause-text" data-i18n="paused">PAUSED</div>
+    <div class="pause-hint" data-i18n="paused_hint">Tap space or anywhere to continue</div>
+  </div>
   <div id="cellTagLayer" class="cell-tag-layer" aria-hidden="true"></div>
   <!-- First-spawn banner overlay (PR-E phase 2). Pops a small
        panel showing the cell type's friends / prey / foes from

@@ -431,11 +431,36 @@ function setPaused(p) {
     pauseOverlay.classList.toggle('shown', _paused);
     pauseOverlay.setAttribute('aria-hidden', String(!_paused));
   }
+  // body.is-paused disables every FAB / dialog button via CSS so
+  // the user has to interact with the overlay to resume (no
+  // accidental side-clicks behind the blur).
+  document.body.classList.toggle('is-paused', _paused);
   if (_musicPlayer) _musicPlayer.setEnabled(_paused ? false : !!S.musicEnabled);
 }
 if (pauseBtn) {
-  pauseBtn.addEventListener('click', () => setPaused(!_paused));
+  pauseBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setPaused(!_paused);
+  });
 }
+// Resume on ANY tap / click on the overlay (covers the whole
+// viewport while shown). The overlay's pointer-events:auto only
+// applies when .shown is set, so this listener doesn't fire when
+// the sim is running.
+if (pauseOverlay) {
+  pauseOverlay.addEventListener('click', () => {
+    if (_paused) setPaused(false);
+  });
+}
+// Keyboard: Space resumes (also pauses if not already paused so
+// the key is symmetric). Ignored when typing in an input.
+window.addEventListener('keydown', (e) => {
+  if (e.code !== 'Space') return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  e.preventDefault();
+  setPaused(!_paused);
+});
 const allDialogs = [settingsEl, helpDialog, addDialog, aboutDialog].filter(Boolean);
 const aboutBtn = document.getElementById('aboutBtn');
 if (aboutBtn) aboutBtn.addEventListener('click', () => openOnly(aboutDialog));

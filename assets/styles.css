@@ -55,7 +55,8 @@ html, body {
 #reload     { bottom: 66px; }
 #palette    { bottom: 116px; font-size: 22px; }
 #help       { bottom: 166px; }
-#pause      { bottom: 216px; font-size: 22px; color: #000; }
+#pause      { bottom: 216px; padding: 0; }
+#pause svg  { width: 22px; height: 22px; display: block; }
 #eyeToggle  { bottom: 266px; }
 #pause[aria-pressed="true"] {
   background: #ffd166;
@@ -90,28 +91,63 @@ html, body {
 }
 
 /* Pause overlay — dims the play area + shows "PAUSE" centred. */
+/* Pause overlay: blurs the entire bg via backdrop-filter, shows a
+   PAUSED title + 'tap to continue' hint, intercepts ANY click /
+   keypress to resume. While paused, body.is-paused disables every
+   other interactive element so the user can't accidentally hit
+   them through the overlay backdrop (the overlay covers the
+   whole viewport at z-index 8). */
 .pause-overlay {
   position: fixed;
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(0, 0, 0, 0.55);
+  align-content: center;
+  gap: 18px;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   z-index: 8;
   pointer-events: none;
   opacity: 0;
   transition: opacity 180ms ease;
+  cursor: pointer;
 }
 .pause-overlay.shown {
   opacity: 1;
   pointer-events: auto;
 }
 .pause-overlay .pause-text {
-  font: 700 96px/1 system-ui, sans-serif;
+  font: 700 clamp(54px, 12vw, 110px)/1 system-ui, sans-serif;
   letter-spacing: 0.15em;
   color: #fff;
   text-shadow: 0 0 30px #000c, 0 0 6px #000;
   user-select: none;
   -webkit-user-select: none;
+}
+.pause-overlay .pause-hint {
+  font: 600 14px/1.2 system-ui, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 0 12px #000c;
+  user-select: none;
+  -webkit-user-select: none;
+  text-align: center;
+  padding: 0 24px;
+}
+/* While paused: disable every interactive element EXCEPT the
+   overlay (its own pointer-events:auto on .shown keeps it
+   click-receptive). The user has to tap/click to resume — no
+   button can be pressed in the meantime. */
+body.is-paused .fab,
+body.is-paused #gear,
+body.is-paused #settings,
+body.is-paused .mode-btn,
+body.is-paused #helpDialog,
+body.is-paused #addDialog,
+body.is-paused #aboutDialog {
+  pointer-events: none !important;
 }
 .cell-grid-section { margin-bottom: 14px; }
 .cell-grid-section > h3 {
