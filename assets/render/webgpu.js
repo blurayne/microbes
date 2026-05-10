@@ -239,10 +239,25 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   if (theme == 0) {
     bodyR = bodyScale(in.uv, in.kind, in.phase, time, wobbleAmp);
   } else {
+    // Non-legacy themes — match WebGL2 FRAG_DISK: per-blob-kind amp
+    // table + 3-term Fourier wobble, ported from shader-test's
+    // membraneFor.
     let ang = atan2(in.uv.y, in.uv.x);
-    let w1 = sin(time * 0.55 * in.phase.z + ang * 3.0 + in.phase.y);
-    let w2 = sin(time * 0.85 * in.phase.z + ang * 5.0 + in.phase.y * 1.31 + in.phase.x);
-    let wob = wobbleAmp * in.phase.w * 0.40 * (w1 * 0.65 + w2 * 0.45);
+    let tk = testKind(in.kind);
+    var kAmp: f32 = 1.0;
+    if      (tk == 1)  { kAmp = 1.60; }
+    else if (tk == 2)  { kAmp = 0.50; }
+    else if (tk == 3)  { kAmp = 0.40; }
+    else if (tk == 4)  { kAmp = 0.60; }
+    else if (tk == 12) { kAmp = 0.30; }
+    else if (tk == 14) { kAmp = 0.25; }
+    else if (tk == 15) { kAmp = 0.35; }
+    var wob = kAmp * (
+      0.045 * sin(ang * 5.0  + time * 0.60) +
+      0.025 * sin(ang * 9.0  - time * 0.40) +
+      0.015 * sin(ang * 17.0 + time * 1.10)
+    );
+    wob = wob * max(0.001, wobbleAmp * in.phase.w);
     bodyR = testShape(in.uv, in.kind, time) + wob;
   }
   let sdf = d - bodyR;
@@ -314,36 +329,16 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let nucGlint = max(0.0, 0.18 - distance(in.uv, vec2<f32>(-0.10, -0.13))) * 4.0;
   let nucColor = mix(in.nucleus, vec3<f32>(1.0), vec3<f32>(clamp(nucGlint, 0.0, 0.35)));
 
-  // Theme switch (Phase 1) — same shape as webgl2 FRAG_DISK. Legacy
-  // (0) keeps today's behaviour exactly. (theme is already declared
-  // earlier in fs_main where bodyR branches on the same value.)
+  // Non-legacy themes share the same shader-test-derived look —
+  // see WebGL2 FRAG_DISK comment.
   var themedCyto = cyto;
   var themedOutline = in.cytoBot * 0.55;
-  if (theme == 1) {
-    // microscope — H&E pink/violet wash on cyto + dark purple membrane
-    themedCyto = mix(cyto, vec3<f32>(0.95, 0.65, 0.85), vec3<f32>(0.30));
-    themedOutline = vec3<f32>(0.18, 0.06, 0.22);
-  } else if (theme == 2) {
-    themedCyto = clamp(cyto * 1.30, vec3<f32>(0.0), vec3<f32>(1.0));
-    themedOutline = vec3<f32>(0.0);
-  } else if (theme == 3) {
-    themedCyto = in.cytoBot;
-    themedOutline = vec3<f32>(0.88, 0.85, 0.78);
-  } else if (theme == 4) {
-    // classic — top-left highlight + dark rim, canvas2d-style gloss
-    let hl = smoothstep(0.55, 0.0, distance(in.uv, vec2<f32>(-0.30, 0.30)));
-    let lift = clamp(cyto * 1.55 + vec3<f32>(0.08), vec3<f32>(0.0), vec3<f32>(1.0));
-    themedCyto = mix(cyto, lift, vec3<f32>(hl));
-    themedOutline = vec3<f32>(0.04, 0.02, 0.08);
+  if (theme != 0) {
+    themedOutline = in.cytoBot * 0.40;
   }
   var col = themedCyto;
   col = mix(col, nucColor, vec3<f32>(nucleusMask));
   col = mix(col, themedOutline, vec3<f32>(clamp(outlineMask, 0.0, 1.0)));
-  if (theme == 3) {
-    let r2 = dot(in.uv, in.uv);
-    let halo = pow(clamp(1.0 - r2, 0.0, 1.0), 1.5) * 0.45;
-    col = col + in.cytoBot * halo;
-  }
 
   // Per-test-kind compose overlays (mirror of webgl2 FRAG_DISK):
   // rbc biconcave, virus capsid lattice, dendritic tendril glow,

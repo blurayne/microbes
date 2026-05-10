@@ -265,11 +265,28 @@ void main() {
   if (themeId == 0) {
     bodyR = bodyScale(v_uv);
   } else {
+    // Non-legacy themes: shader-test-style membrane. Per-blob-kind
+    // amplitude (matches the amp table in shader-test's
+    // membraneFor) + a 3-term Fourier wobble that the amp scales.
     float ang = atan(v_uv.y, v_uv.x);
-    float wob = u_wobbleAmp * v_phase.w * 0.40 * (
-      sin(u_time * 0.55 * v_phase.z + ang * 3.0 + v_phase.y) * 0.65 +
-      sin(u_time * 0.85 * v_phase.z + ang * 5.0 + v_phase.y * 1.31 + v_phase.x) * 0.45
+    int tk = testKind();
+    float kAmp = 1.0;                  // default eukaryote
+    if      (tk == 1)  kAmp = 1.60;    // macrophage
+    else if (tk == 2)  kAmp = 0.50;    // neutrophil
+    else if (tk == 3)  kAmp = 0.40;    // nk-cell
+    else if (tk == 4)  kAmp = 0.60;    // b-cell
+    else if (tk == 12) kAmp = 0.30;    // basophil
+    else if (tk == 14) kAmp = 0.25;    // t-cell
+    else if (tk == 15) kAmp = 0.35;    // eosinophil
+    float wob = kAmp * (
+      0.045 * sin(ang * 5.0  + u_time * 0.60) +
+      0.025 * sin(ang * 9.0  - u_time * 0.40) +
+      0.015 * sin(ang * 17.0 + u_time * 1.10)
     );
+    // Pull through u_wobbleAmp + per-cell wobbleMul so the user's
+    // settings slider + per-cell variation (Sim.makeCell) still
+    // dampen / amplify on top of the kind-specific amp.
+    wob *= max(0.001, u_wobbleAmp * v_phase.w);
     bodyR = testShape(v_uv, u_time) + wob;
   }
   float sdf = d - bodyR;
@@ -344,43 +361,24 @@ void main() {
   float nucGlint = max(0.0, 0.18 - distance(v_uv, vec2(-0.10, -0.13))) * 4.0;
   vec3 nucColor = mix(v_nucleus, vec3(1.0), clamp(nucGlint, 0.0, 0.35));
 
-  // Theme switch: per-theme body fill + outline colour overrides.
-  // Legacy (0) keeps today's look exactly. Each non-legacy branch
-  // now changes BOTH the body AND the outline so the difference is
-  // obvious (was outline-only for microscope/classic, which read as
-  // "no change" for many palettes).
+  // Non-legacy themes (microscope, cartoon, kurzgesagt, classic)
+  // all share the SAME shader-test-derived look — per-cell colour
+  // identity comes from v_cytoTop / v_cytoBot, not from theme. The
+  // theme dropdown will be reduced to {legacy, modern} in a future
+  // pass; for now all 4 non-legacy ids hit this one branch.
+  // Legacy keeps the original tint table (themeId == 0 falls
+  // through to themedOutline = v_cytoBot * 0.55).
   vec3 themedCyto = cyto;
-  vec3 themedOutline = v_cytoBot * 0.55;   // legacy default
-  if (themeId == 1) {
-    // microscope · H&E-stained look: pink/violet wash on the cyto +
-    // dark purple membrane.
-    themedCyto = mix(cyto, vec3(0.95, 0.65, 0.85), 0.30);
-    themedOutline = vec3(0.18, 0.06, 0.22);
-  } else if (themeId == 2) {
-    // cartoon · saturated body, thick black outline
-    themedCyto = clamp(cyto * 1.30, 0.0, 1.0);
-    themedOutline = vec3(0.0);
-  } else if (themeId == 3) {
-    // kurzgesagt · flat cyto (drop the gradient), thin pale outline
-    themedCyto = v_cytoBot;
-    themedOutline = vec3(0.88, 0.85, 0.78);
-  } else if (themeId == 4) {
-    // classic · canvas2d-style radial gradient highlight + dark rim.
-    // Strong top-left bright lift + tight inner highlight makes the
-    // cell read like a glossy game-disk.
-    float hl = smoothstep(0.55, 0.0, distance(v_uv, vec2(-0.30, 0.30)));
-    themedCyto = mix(cyto, clamp(cyto * 1.55 + vec3(0.08), 0.0, 1.0), hl);
-    themedOutline = vec3(0.04, 0.02, 0.08);
+  vec3 themedOutline = v_cytoBot * 0.55;
+  if (themeId != 0) {
+    // No theme-specific cyto/outline tweaks. Outline becomes a
+    // slightly deeper variant of cytoBot so the membrane band
+    // reads at any cell colour.
+    themedOutline = v_cytoBot * 0.40;
   }
   vec3 col = themedCyto;
   col = mix(col, nucColor, nucleusMask);
   col = mix(col, themedOutline, clamp(outlineMask, 0.0, 1.0));
-  // kurzgesagt — additive neon halo just inside the membrane.
-  if (themeId == 3) {
-    float r2 = dot(v_uv, v_uv);
-    float halo = pow(clamp(1.0 - r2, 0.0, 1.0), 1.5) * 0.45;
-    col += v_cytoBot * halo;
-  }
 
   // Per-test-kind compose overlays. Active only for non-legacy themes;
   // each is gated on the corresponding test kind so the cost stays
