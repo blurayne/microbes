@@ -1227,15 +1227,9 @@ function renderPaletteBadGrid() {
   }
 }
 
-document.body.classList.toggle('no-bad', !S.allowBadGuys);
-bindCheckbox('allowBadGuys', 'allowBadGuys', (on) => {
-  document.body.classList.toggle('no-bad', !on);
-  if (!on && paletteBadDialog && !paletteBadDialog.classList.contains('hidden')) {
-    closeAll();
-  }
-  renderHelpList();
-  renderPaletteBadGrid();
-});
+// Pathogens are always allowed — the "Allow pathogens" checkbox was
+// removed. S.allowBadGuys stays in DEFAULTS as a no-op so existing
+// `if (S.allowBadGuys)` guards keep evaluating truthy.
 
 // ---------- Build stamp ----------
 function renderBuildStamp() {
