@@ -493,10 +493,9 @@ body.is-paused #aboutDialog {
   padding: 3px 8px;
   border-radius: 6px;
   text-shadow: 0 1px 2px #000a;
-  display: none;
+  display: block;
 }
-#fps.on { display: block; }
-body.show-build #fps.on { top: 32px; }
+body.show-build #fps { top: 32px; }
 
 /* Render-scale upscaling: pixel mode shows crisp blocks instead of bilinear smoothing */
 #stage          { image-rendering: auto; }

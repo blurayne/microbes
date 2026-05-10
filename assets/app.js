@@ -40,8 +40,8 @@ function _formatArg(a) {
     return (s == null) ? String(a) : s;
   } catch { return String(a); }
 }
-['log', 'info', 'warn', 'error'].forEach((level) => {
-  const orig = console[level].bind(console);
+['log', 'info', 'warn', 'error', 'debug', 'trace'].forEach((level) => {
+  const orig = console[level] ? console[level].bind(console) : console.log.bind(console);
   console[level] = (...args) => {
     orig(...args);
     try {
@@ -50,6 +50,39 @@ function _formatArg(a) {
       _refreshDebugLog();
     } catch { /* never let logging break the app */ }
   };
+});
+// console.assert: only logs when the first arg is falsy. We mirror
+// the failure into the debug log the same way native consoles do.
+const _origAssert = console.assert ? console.assert.bind(console) : null;
+console.assert = (cond, ...args) => {
+  if (_origAssert) _origAssert(cond, ...args);
+  if (cond) return;
+  try {
+    const msg = ['Assertion failed:', ...args].map(_formatArg).join(' ');
+    _debugLog.push({ t: Date.now(), level: 'error', msg });
+    if (_debugLog.length > _DEBUG_LOG_MAX) _debugLog.shift();
+    _refreshDebugLog();
+  } catch { /* never let logging break the app */ }
+};
+// Uncaught errors + unhandled promise rejections — these bypass the
+// console wrappers above but are exactly the events the user wants
+// to see in the debug log.
+window.addEventListener('error', (e) => {
+  try {
+    const m = e && (e.error?.stack || e.message) || 'window error';
+    _debugLog.push({ t: Date.now(), level: 'error', msg: String(m) });
+    if (_debugLog.length > _DEBUG_LOG_MAX) _debugLog.shift();
+    _refreshDebugLog();
+  } catch {}
+});
+window.addEventListener('unhandledrejection', (e) => {
+  try {
+    const r = e && e.reason;
+    const m = (r && (r.stack || r.message)) || String(r);
+    _debugLog.push({ t: Date.now(), level: 'error', msg: 'Unhandled rejection: ' + m });
+    if (_debugLog.length > _DEBUG_LOG_MAX) _debugLog.shift();
+    _refreshDebugLog();
+  } catch {}
 });
 function _refreshDebugLog() {
   const el = document.getElementById('debugLogView');
@@ -853,10 +886,11 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
 }).catch((err) => {
   console.warn('Audio modules failed to load:', err);
 });
-bindCheckbox('showFPS', 'showFPS', (on) => {
-  const el = document.getElementById('fps');
-  if (el) el.classList.toggle('on', !!on);
-});
+// FPS toggle controls whether the fps number is rendered; the
+// renderer label is always shown alongside (or alone when fps is off).
+// The #fps overlay is now always visible — updateFPS() picks the
+// content per S.showFPS.
+bindCheckbox('showFPS', 'showFPS');
 function applyBuildInfoVis(on) {
   const el = document.getElementById('build');
   if (el) el.classList.toggle('on', !!on);
@@ -864,7 +898,6 @@ function applyBuildInfoVis(on) {
 }
 bindCheckbox('showBuildInfo', 'showBuildInfo', applyBuildInfoVis);
 applyBuildInfoVis(S.showBuildInfo);
-bindCheckbox('showRenderer', 'showRenderer');
 
 // splitMode radios removed from settings late 2026; field still
 // honoured by sim.js (default 'bondDrift' from DEFAULTS).
@@ -1224,19 +1257,23 @@ const fpsBuf = [];
 const fpsEl = document.getElementById('fps');
 
 function updateFPS(dt, ts) {
-  if (!S.showFPS || !fpsEl) return;
+  if (!fpsEl) return;
   fpsBuf.push(dt);
   if (fpsBuf.length > 60) fpsBuf.shift();
+  // Refresh at most ~4× per second so the text doesn't flicker.
   if (Math.floor(ts / 250) === Math.floor((ts - dt * 1000) / 250)) return;
+  const info = (renderer && typeof renderer.info === 'string') ? renderer.info : '';
+  if (!S.showFPS) {
+    // Renderer only — no parens, plain token (e.g. "webgpu").
+    fpsEl.textContent = info;
+    return;
+  }
   let sum = 0;
   for (const v of fpsBuf) sum += v;
   const avg = sum / fpsBuf.length;
   const fps = avg > 0 ? Math.round(1 / avg) : 0;
-  let line = T('fps_line', { fps, n: sim.cells.length });
-  if (S.showRenderer && renderer && typeof renderer.info === 'string') {
-    line += ` (${renderer.info})`;
-  }
-  fpsEl.textContent = line;
+  // Compact form per user spec: "15fps (webgpu)".
+  fpsEl.textContent = info ? `${fps}fps (${info})` : `${fps}fps`;
 }
 
 // Composition HUD — top-right widget. Hidden when S.compositionHud
