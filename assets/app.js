@@ -471,6 +471,22 @@ bindCheckbox('pinchRotation', 'pinchRotation', (on) => {
 });
 bindCheckbox('randomSplit', 'randomSplit');
 bindCheckbox('metaSplit', 'metaSplit');
+// Game mode. Today the simulator IS Free Game (docs/ch04-konzept.md
+// §4.3); 'campaign' and 'survival' are reserved for future modes and
+// the dropdown shows them as disabled "(soon)" entries. Selecting an
+// unknown / disabled value is a no-op — the schema is forward-only.
+const gameModeSel = document.getElementById('gameMode');
+if (gameModeSel) {
+  gameModeSel.value = S.gameMode || 'free';
+  gameModeSel.addEventListener('change', () => {
+    const v = gameModeSel.value;
+    if (v !== 'free') { gameModeSel.value = S.gameMode || 'free'; return; }
+    if (v === S.gameMode) return;
+    S.gameMode = v;
+    saveSettings();
+  });
+}
+
 const metaRtModeSel = document.getElementById('metaRtMode');
 if (metaRtModeSel) {
   metaRtModeSel.value = S.metaRtMode || 'bbox';
