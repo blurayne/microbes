@@ -1187,10 +1187,6 @@ bindCheckbox('allowBadGuys', 'allowBadGuys', (on) => {
   renderPaletteBadGrid();
 });
 
-// ---------- Reset ----------
-const resetBtn = document.getElementById('resetSim');
-if (resetBtn) resetBtn.addEventListener('click', () => sim.resetSim());
-
 // ---------- Build stamp ----------
 function renderBuildStamp() {
   const el = document.getElementById('build');
