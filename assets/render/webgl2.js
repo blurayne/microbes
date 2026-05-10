@@ -344,24 +344,33 @@ void main() {
   float nucGlint = max(0.0, 0.18 - distance(v_uv, vec2(-0.10, -0.13))) * 4.0;
   vec3 nucColor = mix(v_nucleus, vec3(1.0), clamp(nucGlint, 0.0, 0.35));
 
-  // Theme switch (Phase 1): saturate / flatten cyto + override
-  // outline colour per theme. Legacy (0) keeps today's look exactly.
+  // Theme switch: per-theme body fill + outline colour overrides.
+  // Legacy (0) keeps today's look exactly. Each non-legacy branch
+  // now changes BOTH the body AND the outline so the difference is
+  // obvious (was outline-only for microscope/classic, which read as
+  // "no change" for many palettes).
   vec3 themedCyto = cyto;
   vec3 themedOutline = v_cytoBot * 0.55;   // legacy default
-  if (themeId == 2) {
+  if (themeId == 1) {
+    // microscope · H&E-stained look: pink/violet wash on the cyto +
+    // dark purple membrane.
+    themedCyto = mix(cyto, vec3(0.95, 0.65, 0.85), 0.30);
+    themedOutline = vec3(0.18, 0.06, 0.22);
+  } else if (themeId == 2) {
     // cartoon · saturated body, thick black outline
-    themedCyto = clamp(cyto * 1.25, 0.0, 1.0);
+    themedCyto = clamp(cyto * 1.30, 0.0, 1.0);
     themedOutline = vec3(0.0);
   } else if (themeId == 3) {
     // kurzgesagt · flat cyto (drop the gradient), thin pale outline
     themedCyto = v_cytoBot;
     themedOutline = vec3(0.88, 0.85, 0.78);
   } else if (themeId == 4) {
-    // classic · existing radial gradient + dark game-style outline
+    // classic · canvas2d-style radial gradient highlight + dark rim.
+    // Strong top-left bright lift + tight inner highlight makes the
+    // cell read like a glossy game-disk.
+    float hl = smoothstep(0.55, 0.0, distance(v_uv, vec2(-0.30, 0.30)));
+    themedCyto = mix(cyto, clamp(cyto * 1.55 + vec3(0.08), 0.0, 1.0), hl);
     themedOutline = vec3(0.04, 0.02, 0.08);
-  } else if (themeId == 1) {
-    // microscope · keep cyto, dark purple H&E-style outline
-    themedOutline = vec3(0.10, 0.04, 0.12);
   }
   vec3 col = themedCyto;
   col = mix(col, nucColor, nucleusMask);
@@ -2197,13 +2206,7 @@ export class WebGL2Renderer extends RendererBase {
         (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
       gl.uniform1f(this._diskU.borderThickness,
         (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0);
-      const _tid = _themeId(S.theme);
-      if (_tid !== this._lastThemeId) {
-        this._lastThemeId = _tid;
-        console.info('[microbes] disk theme set: S.theme=' + S.theme +
-          ' id=' + _tid + ' uniform_loc=' + this._diskU.theme);
-      }
-      gl.uniform1f(this._diskU.theme, _tid);
+      gl.uniform1f(this._diskU.theme, _themeId(S.theme));
       gl.bindVertexArray(this._diskVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, singletons.length);
       gl.bindVertexArray(null);

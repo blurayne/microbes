@@ -52,14 +52,33 @@ html, body {
 #palette    { bottom: 116px; font-size: 22px; }
 #paletteBad { bottom: 166px; font-size: 22px; background: #c72020; color: #fff; }
 #help       { bottom: 216px; }
-#pause      { bottom: 266px; font-size: 22px; }
+#pause      { bottom: 266px; font-size: 22px; color: #000; }
 body.no-bad #paletteBad,
 body.no-bad #paletteBadDialog { display: none; }
 body.no-bad #help  { bottom: 166px; }
 body.no-bad #pause { bottom: 216px; }
 #pause[aria-pressed="true"] {
   background: #ffd166;
-  color: #1a0a00;
+  color: #000;
+}
+
+/* Settings gear: the inline SVG sits inside a grid-centred 44 px FAB.
+   Pin its size to 24 px so it doesn't get squeezed by font metrics
+   when descender lines push the row taller than 44 px on some
+   mobile browsers. */
+#gear svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+/* Split mode button — duplicate-style icon on a strict-black
+   background so it reads as "split / duplicate" rather than the
+   previous scissors glyph. */
+.mode-split {
+  background: #000 !important;
+  color: #fff !important;
+  font-size: 22px;
 }
 
 /* Pause overlay — dims the play area + shows "PAUSE" centred. */
