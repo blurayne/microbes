@@ -373,8 +373,12 @@ canvas.addEventListener('wheel', (ev) => {
 const settingsEl = document.getElementById('settings');
 const gearBtn = document.getElementById('gear');
 const helpDialog = document.getElementById('helpDialog');
-const paletteDialog = document.getElementById('paletteDialog');
-const paletteBadDialog = document.getElementById('paletteBadDialog');
+const addDialog = document.getElementById('addDialog');
+// Compatibility shims so the rest of the file's references to
+// `paletteDialog` / `paletteBadDialog` keep pointing somewhere
+// sensible — they're now both views into the same merged dialog.
+const paletteDialog = addDialog;
+const paletteBadDialog = addDialog;
 const helpBtn = document.getElementById('help');
 const paletteBtn = document.getElementById('palette');
 const paletteBadBtn = document.getElementById('paletteBad');
@@ -420,7 +424,7 @@ function setPaused(p) {
 if (pauseBtn) {
   pauseBtn.addEventListener('click', () => setPaused(!_paused));
 }
-const allDialogs = [settingsEl, helpDialog, paletteDialog, paletteBadDialog].filter(Boolean);
+const allDialogs = [settingsEl, helpDialog, addDialog].filter(Boolean);
 _hookDebugLogButtons();
 
 function openOnly(target) {
@@ -442,17 +446,59 @@ gearBtn.addEventListener('click', () => {
 if (helpBtn) helpBtn.addEventListener('click', () => {
   helpDialog.classList.contains('hidden') ? openOnly(helpDialog) : closeAll();
 });
+// Tab switcher for the merged add-dialog. Renders the appropriate
+// grid lazily on first activation; theme tab is static so no
+// render needed there.
+function setAddTab(name) {
+  for (const t of document.querySelectorAll('.add-tab')) {
+    const on = t.dataset.addTab === name;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', String(on));
+  }
+  for (const p of document.querySelectorAll('.add-pane')) {
+    const on = p.dataset.addPane === name;
+    p.hidden = !on;
+    p.classList.toggle('active', on);
+  }
+  // Title reflects the active tab; falls back to a generic "Add"
+  // for the theme tab where neither cell nor pathogen applies.
+  const title = document.getElementById('addDialogTitle');
+  if (title) {
+    if      (name === 'cells')     title.setAttribute('data-i18n', 'add_cell');
+    else if (name === 'pathogens') title.setAttribute('data-i18n', 'add_pathogen');
+    else                           title.setAttribute('data-i18n', 'theme');
+    applyI18n();
+  }
+  if      (name === 'cells')     renderPaletteGrid();
+  else if (name === 'pathogens') renderPaletteBadGrid();
+}
+document.querySelectorAll('.add-tab').forEach(t => {
+  t.addEventListener('click', () => {
+    if (t.dataset.addTab === 'pathogens' && !S.allowBadGuys) return;
+    setAddTab(t.dataset.addTab);
+  });
+});
+// The pathogens tab is hidden when S.allowBadGuys is off — the
+// label gets disabled-style + click is a no-op above. Update on
+// every dialog open in case the setting flipped.
+function syncAddTabsForBadGuys() {
+  const pathTab = document.querySelector('.add-tab[data-add-tab="pathogens"]');
+  if (pathTab) pathTab.hidden = !S.allowBadGuys;
+}
+
 if (paletteBtn) paletteBtn.addEventListener('click', () => {
-  if (paletteDialog.classList.contains('hidden')) {
-    renderPaletteGrid();
-    openOnly(paletteDialog);
+  if (addDialog.classList.contains('hidden')) {
+    syncAddTabsForBadGuys();
+    setAddTab('cells');
+    openOnly(addDialog);
   } else closeAll();
 });
 if (paletteBadBtn) paletteBadBtn.addEventListener('click', () => {
   if (!S.allowBadGuys) return;
-  if (paletteBadDialog.classList.contains('hidden')) {
-    renderPaletteBadGrid();
-    openOnly(paletteBadDialog);
+  if (addDialog.classList.contains('hidden')) {
+    syncAddTabsForBadGuys();
+    setAddTab('pathogens');
+    openOnly(addDialog);
   } else closeAll();
 });
 
@@ -775,13 +821,26 @@ interfaceColorSelect.addEventListener('change', () => {
 // legacy / microscope / cartoon / kurzgesagt / classic. Per-frame
 // uniform read in webgl2.js + webgpu.js disk shaders; canvas2d
 // stays in legacy regardless of S.theme.
+// Two theme dropdowns now exist: the original in the settings
+// panel (themeSelect) and a copy inside the merged add-dialog
+// (themeSelectInline). Both write to S.theme and mirror each
+// other via change events so picking from one updates both.
 const themeSelect = document.getElementById('themeSelect');
+const themeSelectInline = document.getElementById('themeSelectInline');
+const themeOpts = ['legacy','microscope','cartoon','kurzgesagt','classic'];
+function setTheme(v) {
+  S.theme = themeOpts.includes(v) ? v : 'legacy';
+  if (themeSelect)       themeSelect.value       = S.theme;
+  if (themeSelectInline) themeSelectInline.value = S.theme;
+  saveSettings();
+}
 if (themeSelect) {
-  themeSelect.value = ['legacy','microscope','cartoon','kurzgesagt','classic'].includes(S.theme) ? S.theme : 'legacy';
-  themeSelect.addEventListener('change', () => {
-    S.theme = themeSelect.value;
-    saveSettings();
-  });
+  themeSelect.value = themeOpts.includes(S.theme) ? S.theme : 'legacy';
+  themeSelect.addEventListener('change', () => setTheme(themeSelect.value));
+}
+if (themeSelectInline) {
+  themeSelectInline.value = themeOpts.includes(S.theme) ? S.theme : 'legacy';
+  themeSelectInline.addEventListener('change', () => setTheme(themeSelectInline.value));
 }
 
 function bgAccent(b) {
@@ -789,8 +848,12 @@ function bgAccent(b) {
   return b.spotColor || b.botColor || b.topColor || b.base || '';
 }
 
+// Two background dropdowns: the original in settings + a copy in
+// the merged add-dialog. Same mirror pattern as the theme select.
 const bgSelect = document.getElementById('bgSelect');
-if (bgSelect) {
+const bgSelectInline = document.getElementById('bgSelectInline');
+function populateBgSelect(el) {
+  if (!el) return;
   for (const [key, b] of Object.entries(BACKGROUNDS)) {
     const opt = document.createElement('option');
     opt.value = key;
@@ -798,16 +861,21 @@ if (bgSelect) {
     const accent = bgAccent(b);
     const name = accent ? colorNameFor(accent) : '';
     opt.textContent = name ? `${lbl} (${name})` : lbl;
-    bgSelect.appendChild(opt);
+    el.appendChild(opt);
   }
-  bgSelect.value = (S.background in BACKGROUNDS) ? S.background : (S.interfaceColor in BACKGROUNDS ? S.interfaceColor : 'solid');
-  bgSelect.addEventListener('change', () => {
-    if (BACKGROUNDS[bgSelect.value]) {
-      S.background = bgSelect.value;
-      saveSettings();
-    }
-  });
+  el.value = (S.background in BACKGROUNDS) ? S.background : (S.interfaceColor in BACKGROUNDS ? S.interfaceColor : 'solid');
 }
+populateBgSelect(bgSelect);
+populateBgSelect(bgSelectInline);
+function setBackground(v) {
+  if (!BACKGROUNDS[v]) return;
+  S.background = v;
+  if (bgSelect)       bgSelect.value       = v;
+  if (bgSelectInline) bgSelectInline.value = v;
+  saveSettings();
+}
+if (bgSelect)       bgSelect.addEventListener('change',       () => setBackground(bgSelect.value));
+if (bgSelectInline) bgSelectInline.addEventListener('change', () => setBackground(bgSelectInline.value));
 
 function applyUpscaleMode() {
   canvas.classList.toggle('pixel', S.upscaleMode === 'pixel');

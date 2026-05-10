@@ -590,6 +590,44 @@ body.adding #stage    { cursor: crosshair; }
 }
 .dialog-panel .close:hover { background: #ffffff14; }
 
+/* Tabs inside the merged add-dialog (cells / pathogens / theme). */
+.add-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  margin: 0 -20px 14px;
+  padding: 0 20px;
+}
+.add-tab {
+  flex: 0 1 auto;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--ink-dim, var(--ink));
+  font: 600 12px/1 system-ui, sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 10px 14px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.add-tab:hover  { color: var(--ink); }
+.add-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.add-tab[hidden] { display: none; }
+.add-pane { display: none; }
+.add-pane.active { display: block; }
+.add-pane-theme h3 {
+  margin: 16px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+}
+.add-pane-theme h3:first-child { margin-top: 0; }
+
 .cell-list { list-style: none; padding: 0; margin: 0; }
 .cell-list li {
   padding: 10px 0;

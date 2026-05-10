@@ -227,27 +227,43 @@
     </aside>
   </div>
 
-  <div id="paletteDialog" class="dialog hidden" role="dialog" aria-label="Add cell">
+  <!-- Unified add-cells / add-pathogens / theme dialog. The two
+       legacy FABs (#palette and #paletteBad) both open this; they
+       just pre-select a different tab. The theme tab moves the
+       palette-relevant theme switcher out of the deep settings
+       panel, where users were missing it. -->
+  <div id="addDialog" class="dialog hidden" role="dialog" aria-label="Add">
     <div class="dialog-backdrop" data-close></div>
     <aside class="dialog-panel">
       <header>
-        <h2 data-i18n="add_cell">Add a cell</h2>
+        <h2><span id="addDialogTitle" data-i18n="add_title">Add</span></h2>
         <button type="button" class="close" data-close aria-label="Close">&times;</button>
       </header>
-      <div id="cellGrid"></div>
-      <p class="palette-footer"><a href="#" id="paletteToHelp" data-i18n="palette_to_help">Learn what each cell does →</a></p>
-    </aside>
-  </div>
-
-  <div id="paletteBadDialog" class="dialog hidden" role="dialog" aria-label="Add pathogen">
-    <div class="dialog-backdrop" data-close></div>
-    <aside class="dialog-panel">
-      <header>
-        <h2 data-i18n="add_pathogen">Add a pathogen</h2>
-        <button type="button" class="close" data-close aria-label="Close">&times;</button>
-      </header>
-      <div id="cellGridBad"></div>
-      <p class="palette-footer"><a href="#" id="paletteBadToHelp" data-i18n="palette_bad_to_help">Learn what each pathogen does →</a></p>
+      <div class="add-tabs" role="tablist">
+        <button class="add-tab active" data-add-tab="cells" role="tab" aria-selected="true" data-i18n="add_tab_cells">Cells</button>
+        <button class="add-tab" data-add-tab="pathogens" role="tab" aria-selected="false" data-i18n="add_tab_pathogens">Pathogens</button>
+        <button class="add-tab" data-add-tab="theme" role="tab" aria-selected="false" data-i18n="add_tab_theme">Theme</button>
+      </div>
+      <div class="add-pane add-pane-cells active" data-add-pane="cells">
+        <div id="cellGrid"></div>
+        <p class="palette-footer"><a href="#" id="paletteToHelp" data-i18n="palette_to_help">Learn what each cell does →</a></p>
+      </div>
+      <div class="add-pane add-pane-pathogens" data-add-pane="pathogens" hidden>
+        <div id="cellGridBad"></div>
+        <p class="palette-footer"><a href="#" id="paletteBadToHelp" data-i18n="palette_bad_to_help">Learn what each pathogen does →</a></p>
+      </div>
+      <div class="add-pane add-pane-theme" data-add-pane="theme" hidden>
+        <h3 data-i18n="theme">Theme</h3>
+        <select id="themeSelectInline">
+          <option value="legacy"     data-i18n="theme_legacy">Legacy (default)</option>
+          <option value="microscope" data-i18n="theme_microscope">Microscope</option>
+          <option value="cartoon"    data-i18n="theme_cartoon">Cartoon</option>
+          <option value="kurzgesagt" data-i18n="theme_kurzgesagt">Kurzgesagt</option>
+          <option value="classic"    data-i18n="theme_classic">Classic</option>
+        </select>
+        <h3 data-i18n="background">Background</h3>
+        <select id="bgSelectInline"></select>
+      </div>
     </aside>
   </div>
 
