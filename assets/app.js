@@ -29,24 +29,25 @@ async function tryWebGPU() {
 
 async function makeRenderer() {
   const k = S.renderer;
-  // Runtime-only fallback: if a renderer fails to initialise we drop
-  // back to Canvas2D for THIS load only — `S.renderer` is left as the
-  // user picked it so the dropdown keeps showing their choice and the
-  // next reload retries. Each path logs its outcome for DevTools.
+  // Runtime-only fallback: webgpu → webgl2 → canvas2d. If a renderer
+  // fails to initialise we cascade to the next-best one for THIS load
+  // only — `S.renderer` is left as the user picked it so the dropdown
+  // keeps showing their choice and the next reload retries. Each path
+  // logs its outcome for DevTools.
   if (k === 'webgpu') {
     try {
       const r = await tryWebGPU();
       console.info('[microbes] WebGPURenderer ready');
       return r;
     } catch (e) {
-      console.warn('[microbes] WebGPU unavailable, falling back to Canvas2D for this load:', e && e.message);
+      console.warn('[microbes] WebGPU unavailable, trying WebGL2:', e && e.message);
     }
   }
-  if (k === 'webgl2') {
+  if (k === 'webgl2' || k === 'webgpu') {
     try {
       const r = new WebGL2Renderer(canvas, sim);
       r.init();
-      console.info('[microbes] WebGL2Renderer ready');
+      console.info('[microbes] WebGL2Renderer ready' + (k === 'webgpu' ? ' (WebGPU fallback)' : ''));
       return r;
     } catch (e) {
       console.warn('[microbes] WebGL2 unavailable, falling back to Canvas2D for this load:', e && e.message);
