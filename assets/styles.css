@@ -53,12 +53,19 @@ html, body {
 #paletteBad { bottom: 166px; font-size: 22px; background: #c72020; color: #fff; }
 #help       { bottom: 216px; }
 #pause      { bottom: 266px; font-size: 22px; color: #000; }
+#eyeToggle  { bottom: 316px; }
 body.no-bad #paletteBad,
 body.no-bad #paletteBadDialog { display: none; }
-body.no-bad #help  { bottom: 166px; }
-body.no-bad #pause { bottom: 216px; }
+body.no-bad #help       { bottom: 166px; }
+body.no-bad #pause      { bottom: 216px; }
+body.no-bad #eyeToggle  { bottom: 266px; }
 #pause[aria-pressed="true"] {
   background: #ffd166;
+  color: #000;
+}
+#eyeToggle svg { width: 22px; height: 22px; display: block; }
+#eyeToggle[aria-pressed="true"] {
+  background: var(--accent-warm, #ffd166);
   color: #000;
 }
 
@@ -359,6 +366,53 @@ body.show-build #fps.on { top: 32px; }
    the document origin and translated into place via CSS transform
    from JS each frame (cheaper than top/left for high-frequency
    updates). pointer-events:none so the labels never block clicks. */
+/* Cell-type overlay (S.cellTypeOverlay / eye-toggle FAB). Each
+   .cell-tag pairs a colored ring sized to the cell's screen-space
+   radius with a small label below. Pool of <div>s reused across
+   frames; transforms drive position so we don't trigger layout. */
+.cell-tag-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  overflow: hidden;
+  contain: strict;
+}
+.cell-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.cell-tag-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width:  calc(var(--ring-r, 16px) * 2);
+  height: calc(var(--ring-r, 16px) * 2);
+  margin-left: calc(0px - var(--ring-r, 16px));
+  margin-top:  calc(0px - var(--ring-r, 16px));
+  border: 2px solid var(--ring-color, #fff);
+  border-radius: 50%;
+  opacity: 0.85;
+  box-shadow: 0 0 4px var(--ring-color, #fff);
+}
+.cell-tag-label {
+  position: absolute;
+  left: 0;
+  top: calc(var(--ring-r, 16px) + 6px);
+  transform: translateX(-50%);
+  font: 600 11px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0.04em;
+  color: var(--ring-color, #fff);
+  text-shadow: 0 0 4px #000c, 0 1px 2px #000;
+  white-space: nowrap;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 3px;
+}
+
 .floating-layer {
   position: fixed;
   inset: 0;
