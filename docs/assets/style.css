@@ -256,6 +256,26 @@
   }
   .cell-spec strong { color: var(--cell-color); }
 
+  /* Friends / Beute / Feinde — relationship lists per cell, derived
+     from the sim damage matrix (assets/core/sim-rules.js). The
+     data-friends / data-prey / data-foes attrs hold the canonical
+     cell-key lists so the future in-game start banner can read
+     them without re-parsing the visible text. */
+  .cell-relations, .pathogen-relations {
+    margin-top: 10px;
+    display: grid; gap: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-dim); line-height: 1.45;
+  }
+  .rel-row { display: grid; grid-template-columns: 64px 1fr; gap: 8px; }
+  .rel-label {
+    color: var(--cell-color, var(--accent));
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
+  .rel-list { color: var(--ink); }
+  .rel-empty { color: var(--ink-dim); font-style: italic; }
+
   /* BADGES */
   .badge {
     display: inline-block; padding: 3px 10px; border-radius: 12px;
