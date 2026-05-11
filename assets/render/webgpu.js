@@ -382,16 +382,41 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
   let nucGlint = max(0.0, 0.18 - distance(in.uv, vec2<f32>(-0.10, -0.13))) * 4.0;
   let nucColor = mix(in.nucleus, vec3<f32>(1.0), vec3<f32>(clamp(nucGlint, 0.0, 0.35)));
 
-  // Non-legacy themes share the same shader-test-derived look —
-  // see WebGL2 FRAG_DISK comment.
+  // Non-legacy themes — per-theme compose. Mirrors webgl2.js
+  // FRAG_DISK: distinct cyto/highlight/outline per theme, plus a
+  // kurzgesagt neon halo. Cell organelles (nucleus / mito /
+  // vesicles) stay visible in every theme — the in-game deviation
+  // from test-shader classic's "strip everything" approach.
   var themedCyto = cyto;
   var themedOutline = in.cytoBot * 0.55;
-  if (theme != 0) {
-    themedOutline = in.cytoBot * 0.40;
+  var outlineOp: f32 = 1.0;
+  var haloAdd: f32 = 0.0;
+  if (theme == 1) {
+    themedOutline = vec3<f32>(0.16, 0.06, 0.18);
+    outlineOp = 0.85;
+  } else if (theme == 2) {
+    themedCyto = clamp(cyto * 1.30, vec3<f32>(0.0), vec3<f32>(1.0));
+    let hi = smoothstep(0.16, 0.0, distance(in.uv, vec2<f32>(-0.30, -0.40)));
+    themedCyto = themedCyto + vec3<f32>(0.32, 0.30, 0.28) * hi;
+    themedOutline = vec3<f32>(0.0);
+    outlineOp = 1.0;
+  } else if (theme == 3) {
+    themedOutline = vec3<f32>(0.95, 0.92, 0.85);
+    outlineOp = 0.4;
+    haloAdd = pow(smoothstep(0.55, 0.42, length(in.uv)), 2.0);
+  } else if (theme == 4) {
+    themedCyto = clamp(cyto * 1.35 + vec3<f32>(0.05), vec3<f32>(0.0), vec3<f32>(1.0));
+    let hi = smoothstep(0.7, 0.0, distance(in.uv, vec2<f32>(-0.30, -0.40))) * 0.4;
+    themedCyto = mix(themedCyto, in.cytoTop, vec3<f32>(hi));
+    themedOutline = vec3<f32>(0.04, 0.02, 0.08);
+    outlineOp = 1.0;
   }
   var col = themedCyto;
   col = mix(col, nucColor, vec3<f32>(nucleusMask));
-  col = mix(col, themedOutline, vec3<f32>(clamp(outlineMask, 0.0, 1.0)));
+  col = mix(col, themedOutline, vec3<f32>(clamp(outlineMask * outlineOp, 0.0, 1.0)));
+  if (theme == 3 && d < bodyR) {
+    col = col + cyto * 1.6 * haloAdd;
+  }
 
   // Per-test-kind compose overlays (mirror of webgl2 FRAG_DISK):
   // rbc biconcave, virus capsid lattice, dendritic tendril glow,
@@ -528,6 +553,25 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
       }
       let vesMask = smoothstep(0.003, -0.003, ves);
       col = mix(col, vesCol, vec3<f32>(vesMask * 0.85));
+    }
+  }
+
+  // Microscope brownian dots — 18 tan specks drifting inside the
+  // cell. Per-cell seed (in.phase.y) shifts the constellation so
+  // siblings don't show identical dust. Mirror of WebGL2 FRAG_DISK.
+  if (theme == 1 && d < bodyR) {
+    let dustCol = vec3<f32>(0.18, 0.14, 0.10);
+    let dSeed = in.phase.y * 0.013;
+    for (var i: i32 = 0; i < 18; i = i + 1) {
+      let fi = f32(i);
+      let sx = fract(sin((fi + dSeed) * 12.9898) * 43758.5453);
+      let sy = fract(sin((fi + dSeed) * 78.2330) * 43758.5453);
+      let base = vec2<f32>(sx, sy) * 1.4 - vec2<f32>(0.7);
+      let drift = vec2<f32>(0.04 * sin(time * 0.6 + fi * 1.7),
+                            0.04 * cos(time * 0.5 + fi * 2.3));
+      let dst = length(in.uv - base - drift);
+      let dotA = (1.0 - smoothstep(0.012, 0.018, dst)) * 0.55;
+      col = mix(col, dustCol, vec3<f32>(dotA));
     }
   }
 

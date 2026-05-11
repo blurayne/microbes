@@ -392,24 +392,49 @@ void main() {
   float nucGlint = max(0.0, 0.18 - distance(v_uv, vec2(-0.10, -0.13))) * 4.0;
   vec3 nucColor = mix(v_nucleus, vec3(1.0), clamp(nucGlint, 0.0, 0.35));
 
-  // Non-legacy themes (microscope, cartoon, kurzgesagt, classic)
-  // all share the SAME shader-test-derived look — per-cell colour
-  // identity comes from v_cytoTop / v_cytoBot, not from theme. The
-  // theme dropdown will be reduced to {legacy, modern} in a future
-  // pass; for now all 4 non-legacy ids hit this one branch.
-  // Legacy keeps the original tint table (themeId == 0 falls
-  // through to themedOutline = v_cytoBot * 0.55).
+  // Non-legacy themes — per-theme compose. PR #117 collapsed all four
+  // non-legacy themes (microscope/cartoon/kurzgesagt/classic) into a
+  // single branch; this restores the test-shader's distinct per-theme
+  // treatments (cyto modulation, highlight, outline colour + opacity,
+  // kurzgesagt's neon halo). Cell organelles (nucleus / mito /
+  // vesicles) stay visible in EVERY theme so dense fights stay
+  // readable — that's the deviation from test-shader's classic, which
+  // strips them entirely.
   vec3 themedCyto = cyto;
   vec3 themedOutline = v_cytoBot * 0.55;
-  if (themeId != 0) {
-    // No theme-specific cyto/outline tweaks. Outline becomes a
-    // slightly deeper variant of cytoBot so the membrane band
-    // reads at any cell colour.
-    themedOutline = v_cytoBot * 0.40;
+  float outlineOp = 1.0;
+  float haloAdd = 0.0;
+  if (themeId == 1) {
+    // microscope — keep cyto unchanged; soft brown outline at 0.85
+    themedOutline = vec3(0.16, 0.06, 0.18);
+    outlineOp = 0.85;
+  } else if (themeId == 2) {
+    // cartoon — saturated cyto + soft top-left highlight + thick black outline
+    themedCyto = clamp(cyto * 1.30, 0.0, 1.0);
+    float hi = smoothstep(0.16, 0.0, distance(v_uv, vec2(-0.30, -0.40)));
+    themedCyto += vec3(0.32, 0.30, 0.28) * hi;
+    themedOutline = vec3(0.0);
+    outlineOp = 1.0;
+  } else if (themeId == 3) {
+    // kurzgesagt — flat cyto + thin pale outline + neon halo
+    themedOutline = vec3(0.95, 0.92, 0.85);
+    outlineOp = 0.4;
+    haloAdd = pow(smoothstep(0.55, 0.42, length(v_uv)), 2.0);
+  } else if (themeId == 4) {
+    // classic — lightened/saturated cyto + hard radial highlight + dark purple outline
+    themedCyto = clamp(cyto * 1.35 + vec3(0.05), 0.0, 1.0);
+    float hi = smoothstep(0.7, 0.0, distance(v_uv, vec2(-0.30, -0.40))) * 0.4;
+    themedCyto = mix(themedCyto, v_cytoTop, hi);
+    themedOutline = vec3(0.04, 0.02, 0.08);
+    outlineOp = 1.0;
   }
   vec3 col = themedCyto;
   col = mix(col, nucColor, nucleusMask);
-  col = mix(col, themedOutline, clamp(outlineMask, 0.0, 1.0));
+  col = mix(col, themedOutline, clamp(outlineMask * outlineOp, 0.0, 1.0));
+  // kurzgesagt neon halo — additive cyto wash inside the membrane.
+  if (themeId == 3 && d < bodyR) {
+    col += cyto * 1.6 * haloAdd;
+  }
 
   // Per-test-kind compose overlays. Active only for non-legacy themes;
   // each is gated on the corresponding test kind so the cost stays
@@ -559,6 +584,26 @@ void main() {
       }
       float vesMask = smoothstep(0.003, -0.003, ves);
       col = mix(col, vesCol, vesMask * 0.85);
+    }
+  }
+
+  // Microscope brownian dots — 18 tan specks drifting inside the cell.
+  // Per-cell seed (v_phase.y) shifts the constellation so siblings
+  // don't show identical dust. Mirrors the test-shader microscope
+  // post-effect; film grain + chromatic limb stay out of scope here.
+  if (themeId == 1 && d < bodyR) {
+    vec3 dustCol = vec3(0.18, 0.14, 0.10);
+    float dSeed = v_phase.y * 0.013;
+    for (int i = 0; i < 18; i++) {
+      float fi = float(i);
+      float sx = fract(sin((fi + dSeed) * 12.9898) * 43758.5453);
+      float sy = fract(sin((fi + dSeed) * 78.2330) * 43758.5453);
+      vec2 base = vec2(sx, sy) * 1.4 - 0.7;
+      vec2 drift = vec2(0.04 * sin(u_time * 0.6 + fi * 1.7),
+                        0.04 * cos(u_time * 0.5 + fi * 2.3));
+      float dst = length(v_uv - base - drift);
+      float dotA = (1.0 - smoothstep(0.012, 0.018, dst)) * 0.55;
+      col = mix(col, dustCol, dotA);
     }
   }
 
