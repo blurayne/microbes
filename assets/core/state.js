@@ -66,6 +66,14 @@ export const DEFAULTS = {
   vignetteIntensity: 0.6,
   vignetteBlend: 'additive',
   crosshair: false,              // small cyan + at viewport centre
+  // FX overlay draw order. The three fixed-function FX overlays
+  // chain via canvas blends — each samples what's already on the
+  // framebuffer, so order is user-visible (e.g., noise over
+  // crosshair vs crosshair over noise look different). User-
+  // reorderable via the sortable list in Settings → Overlays;
+  // renderers iterate this array each frame, so reorder takes
+  // effect on the next draw without any explicit pipeline reset.
+  fxOrder: ['noise', 'vignette', 'crosshair'],
   // Microscope distortion: scene-wide variable-radius blur. Sharp
   // center (focus zone) with progressively blurrier edges. Knobs:
   // focus = sharp-zone radius as fraction of min(W,H)/2; strength =
@@ -249,6 +257,15 @@ export function loadSettings() {
     const validBlendModes = ['normal', 'multiply', 'additive'];
     if (!validBlendModes.includes(parsed.staticNoiseBlend)) parsed.staticNoiseBlend = DEFAULTS.staticNoiseBlend;
     if (!validBlendModes.includes(parsed.vignetteBlend))    parsed.vignetteBlend    = DEFAULTS.vignetteBlend;
+    // fxOrder: must be a permutation of the three known FX overlay
+    // ids. Missing / wrong-shape / unknown entries → reset to default.
+    const FX_ORDER_KINDS = ['noise', 'vignette', 'crosshair'];
+    if (!Array.isArray(parsed.fxOrder)
+        || parsed.fxOrder.length !== FX_ORDER_KINDS.length
+        || parsed.fxOrder.some(k => !FX_ORDER_KINDS.includes(k))
+        || new Set(parsed.fxOrder).size !== FX_ORDER_KINDS.length) {
+      parsed.fxOrder = [...DEFAULTS.fxOrder];
+    }
     // Microscope post-FX sliders all live on [0, 1].
     const clamp01 = (v, fallback) => {
       const n = typeof v === 'number' && Number.isFinite(v) ? v : fallback;
@@ -414,6 +431,13 @@ export const LOCALES = {
     bg_layer_bot: 'Bottom color',
     bg_layer_spot_count: 'Spot count',
     bg_layer_vignette: 'Vignette',
+    fx_order_title: 'Overlay order',
+    fx_kind_noise: 'Static noise',
+    fx_kind_vignette: 'Vignette',
+    fx_kind_crosshair: 'Crosshair',
+    fx_move_up: 'Move up',
+    fx_move_down: 'Move down',
+    fx_drag_reorder: 'Drag to reorder',
     cell_type_overlay: 'Show cell types',
     counters_needed: 'Counters needed',
     counters_covered: 'Fully covered',
@@ -589,6 +613,13 @@ export const LOCALES = {
     bg_layer_bot: 'Untere Farbe',
     bg_layer_spot_count: 'Spot-Anzahl',
     bg_layer_vignette: 'Vignette',
+    fx_order_title: 'Overlay-Reihenfolge',
+    fx_kind_noise: 'Rauschen',
+    fx_kind_vignette: 'Vignette',
+    fx_kind_crosshair: 'Fadenkreuz',
+    fx_move_up: 'Nach oben',
+    fx_move_down: 'Nach unten',
+    fx_drag_reorder: 'Ziehen zum Sortieren',
     cell_type_overlay: 'Zelltypen anzeigen',
     counters_needed: 'Konter benötigt',
     counters_covered: 'Voll abgedeckt',
