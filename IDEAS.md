@@ -195,3 +195,81 @@ Toggle in settings, with off as the third state.
   there's a stable canvas to add the pulse to).
 - When we want a clearer "the body is alive" tell for the player
   and the existing tells (RBC drift, scanlines) feel too quiet.
+
+---
+
+## FX overlays: full Photoshop blend-mode list
+
+**Today.** The blend dropdown on `staticNoise` and `vignette` (and
+the per-layer `blend` field on bg-layers added in #143) ships only
+three modes: `normal`, `multiply`, `additive`. Each maps to a
+fixed-function GPU blend in WebGL2 (`gl.blendFunc`) and WebGPU
+(pipeline blend state).
+
+**User ask.** Expand to the full Photoshop / CSS list: `normal`,
+`multiply`, `screen`, `overlay`, `darken`, `lighten`,
+`color-dodge`, `color-burn`, `hard-light`, `soft-light`,
+`difference`, `exclusion`, `hue`, `saturation`, `color`,
+`luminosity` (~16 modes).
+
+**The pain.** Most of those modes are NOT expressible as
+fixed-function blends. `overlay` needs a per-pixel branch
+(`if (a < 0.5) 2*a*b else 1 - 2*(1-a)*(1-b)`); `hue` /
+`saturation` / `color` / `luminosity` need HSL round-trips per
+pixel. The math is shader-side, which means the source pixel and
+the destination pixel both have to be available to the fragment
+shader at the same time. Fixed-function blends compose them on
+the ROP — you never see the destination.
+
+**Architecture options.**
+
+1. **Sample the framebuffer per FX pass.** Render each FX overlay
+   into a temp RT, then a small "compositor" pass samples both
+   the underlying scene RT and the FX RT, computes the blend
+   mode, and writes the result. ~1 extra RT + 1 extra pass per
+   FX, but every blend mode becomes possible.
+2. **Reuse the scene-FX RT plumbing introduced in #147 + #148.**
+   `_sceneFxRt` is already a captured scene texture. Each FX
+   overlay's shader can sample `_sceneFxRt` for the destination
+   and compose in-shader. That avoids the per-FX temp RT but
+   couples the FX overlays to the scene-RT slot's mutual
+   exclusion with caustics / ripples-scene-wide.
+3. **Don't.** Stick to the 3 modes; document which Photoshop
+   modes are not supported.
+
+**Why not yet.**
+
+- Architectural change for what's effectively a polish feature.
+  Six new effect kinds, each shipping in both WebGL2 + WebGPU,
+  with renderer parity tests — adds up.
+- Mutual exclusion math gets fiddly: if FX overlays sample
+  `_sceneFxRt`, then they can't run when caustics is on (which
+  owns the RT). Today they CAN compose with caustics (the FX
+  overlay layers on top of the post-pass output via
+  fixed-function blend, no RT sample needed).
+- Most users won't notice the difference between `overlay` and
+  `multiply` for a vignette tint.
+
+**When to revisit.**
+
+- Bg-layers PR B (drag-drop layer-list UI) ships and surfaces
+  a per-layer blend dropdown — that's the right moment to invest
+  in real blend math, since users will be composing arbitrary bg
+  kinds with arbitrary blends.
+- We hit a specific scene where the missing modes matter
+  (e.g. a "color" blend mode for tinting noise to match the bg
+  theme).
+- Or: a 3rd-party shader library appears that ports
+  Photoshop-blend math to WGSL/GLSL cleanly and we can just vendor
+  it.
+
+**Scope guardrails when we do.**
+
+- Single compositor shader with a `mode` uniform branching on the
+  blend formula. One shader, sixteen branches.
+- Run it inside the existing `_sceneFxRt` pipeline so we don't
+  add a third scene-RT slot.
+- UI: same `<select>` dropdown wherever `staticNoiseBlend` /
+  `vignetteBlend` / per-bg-layer `blend` lives today. Two-line
+  change per call site.
+
