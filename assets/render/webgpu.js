@@ -1046,6 +1046,67 @@ struct RippleU {
 }
 `;
 
+// FX overlay shader (mirrors webgl2.js FRAG_FX_OVERLAY). One shader,
+// three effects, three blend modes — the pipeline cache below uses
+// pre-baked blend states per (mode) since WebGPU pipelines bake
+// blend state at creation time.
+const FX_OVERLAY_WGSL = /* wgsl */ `
+struct FxU {
+  // (resW, resH, time, intensity)
+  v0: vec4<f32>,
+  // (effect, mode, _, _)
+  v1: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> U : FxU;
+
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+  let x = f32((vi << 1u) & 2u) * 2.0 - 1.0;
+  let y = f32(vi & 2u) * 2.0 - 1.0;
+  return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+fn fxHash(p: vec2<f32>) -> f32 {
+  return fract(sin(dot(p, vec2<f32>(127.1, 311.7))) * 43758.5453);
+}
+
+@fragment fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+  let res = vec2<f32>(U.v0.x, U.v0.y);
+  let time = U.v0.z;
+  let intensity = U.v0.w;
+  let effect = i32(U.v1.x + 0.5);
+  let mode   = i32(U.v1.y + 0.5);
+  var effectCol = vec3<f32>(0.0);
+  var effectMask: f32 = 1.0;
+  if (effect == 1) {
+    let g = fxHash(frag.xy + vec2<f32>(time * 31.7, time * 17.3));
+    effectCol = vec3<f32>(g);
+  } else if (effect == 2) {
+    let uv = frag.xy / res;
+    let ndc = uv * 2.0 - vec2<f32>(1.0);
+    let r = length(ndc);
+    effectCol = vec3<f32>(0.05, 0.10, 0.20);
+    effectMask = pow(smoothstep(0.6, 1.0, r), 2.0);
+  } else {
+    // Crosshair — always normal blend.
+    let px = frag.xy - res * 0.5;
+    let armLen: f32 = 14.0;
+    let thick: f32  = 1.0;
+    let horiz = select(0.0, 1.0, abs(px.y) < thick && abs(px.x) < armLen);
+    let vert  = select(0.0, 1.0, abs(px.x) < thick && abs(px.y) < armLen);
+    let ring  = select(0.0, 0.6, abs(length(px) - 22.0) < thick);
+    let a = max(max(horiz, vert), ring);
+    return vec4<f32>(vec3<f32>(0.42, 0.95, 1.0), a * 0.6);
+  }
+  let s = intensity * effectMask;
+  if (mode == 1) {
+    return vec4<f32>(effectCol, s);
+  } else if (mode == 2) {
+    return vec4<f32>(vec3<f32>(1.0) - effectCol * s, 1.0);
+  }
+  return vec4<f32>(effectCol * s, 1.0);
+}
+`;
+
 const BG_WGSL = /* wgsl */ `
 struct BgU {
   // (kind, vignette, gridStep, time)
@@ -2670,6 +2731,85 @@ export class WebGPURenderer extends RendererBase {
     });
     this._rippleBgRt = { tex, view: tex.createView(), w, h };
   }
+  // FX overlay pipeline cache. WebGPU bakes blend state into the
+  // pipeline so we keep three pre-built pipelines (one per blend
+  // mode); the draw helper picks the right one per effect.
+  _fxOverlayEnsurePipelines() {
+    if (this._fxOverlayPipelines) return;
+    const device = this.device;
+    const mod = device.createShaderModule({ code: FX_OVERLAY_WGSL });
+    const blend = {
+      normal:   { color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+                  alpha: { srcFactor: 'one',       dstFactor: 'one-minus-src-alpha', operation: 'add' } },
+      multiply: { color: { srcFactor: 'dst',       dstFactor: 'zero',                operation: 'add' },
+                  alpha: { srcFactor: 'one',       dstFactor: 'zero',                operation: 'add' } },
+      additive: { color: { srcFactor: 'one',       dstFactor: 'one',                 operation: 'add' },
+                  alpha: { srcFactor: 'one',       dstFactor: 'one',                 operation: 'add' } },
+    };
+    const mk = (b) => device.createRenderPipeline({
+      layout: 'auto',
+      vertex:   { module: mod, entryPoint: 'vs_main' },
+      fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format, blend: b }] },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._fxOverlayPipelines = {
+      normal:   mk(blend.normal),
+      multiply: mk(blend.multiply),
+      additive: mk(blend.additive),
+    };
+    this._fxOverlayUbo = device.createBuffer({
+      size: 32,            // 2 × vec4 = 8 floats
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._fxOverlayUboData = new Float32Array(8);
+  }
+
+  _fxOverlayDraw(t) {
+    const noise = !!S.staticNoise;
+    const vign  = !!S.vignette;
+    const cross = !!S.crosshair;
+    if (!noise && !vign && !cross) return;
+    if (!this._frameEncoder || !this._frameView) return;
+    this._fxOverlayEnsurePipelines();
+    const device = this.device;
+    const u = this._fxOverlayUboData;
+    const drawOne = (effect, mode, intensity) => {
+      u[0] = this.canvas.width;
+      u[1] = this.canvas.height;
+      u[2] = t;
+      u[3] = intensity;
+      u[4] = effect;
+      u[5] = mode;
+      u[6] = 0;
+      u[7] = 0;
+      device.queue.writeBuffer(this._fxOverlayUbo, 0,
+                               u.buffer, u.byteOffset, u.byteLength);
+      const blendKey = (mode === 2) ? 'multiply'
+                    : (mode === 3) ? 'additive'
+                    : 'normal';
+      const pipeline = this._fxOverlayPipelines[blendKey];
+      const bg = device.createBindGroup({
+        layout: pipeline.getBindGroupLayout(0),
+        entries: [{ binding: 0, resource: { buffer: this._fxOverlayUbo } }],
+      });
+      const pass = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: this._frameView,
+          loadOp: 'load',
+          storeOp: 'store',
+        }],
+      });
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bg);
+      pass.draw(3, 1, 0, 0);
+      pass.end();
+    };
+    const MODES = { normal: 1, multiply: 2, additive: 3 };
+    if (noise) drawOne(1, MODES[S.staticNoiseBlend] || 3, S.staticNoiseIntensity ?? 0.4);
+    if (vign)  drawOne(2, MODES[S.vignetteBlend]    || 3, S.vignetteIntensity    ?? 0.6);
+    if (cross) drawOne(3, 1, 1.0);
+  }
+
   _rippleBgEnsurePipeline() {
     if (this._rippleBgPipeline) return;
     const device = this.device;
@@ -3821,6 +3961,11 @@ export class WebGPURenderer extends RendererBase {
       post.draw(3, 1, 0, 0);
       post.end();
     }
+    // FX overlays (noise / vignette / crosshair) layer on top of
+    // whatever the scene + post-pass produced. Each enabled effect
+    // is its own render pass with the appropriate pre-baked blend
+    // pipeline; runs even when no caustics/ripples is active.
+    this._fxOverlayDraw(this._lastFrameSec || 0);
     this.device.queue.submit([this._frameEncoder.finish()]);
     this._frameEncoder = null;
     this._frameView = null;

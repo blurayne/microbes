@@ -868,6 +868,45 @@ bindRange('rippleDensity',  'rippleDensity',  'rippleDensityVal',  v => v.toFixe
 bindRange('rippleReach',    'rippleReach',    'rippleReachVal',    v => v.toFixed(1) + '×');
 bindRange('rippleStrength', 'rippleStrength', 'rippleStrengthVal', v => v.toFixed(1) + '×');
 
+// Static-noise overlay. Renderer reads S.staticNoise* each frame
+// inside the post-pass, so the sliders + blend dropdown just
+// persist to settings — no per-change handler needed.
+const staticNoiseControlsEl = document.getElementById('staticNoiseControls');
+function applyStaticNoiseVis() {
+  if (staticNoiseControlsEl) staticNoiseControlsEl.hidden = !S.staticNoise;
+}
+bindCheckbox('staticNoiseToggle', 'staticNoise', applyStaticNoiseVis);
+applyStaticNoiseVis();
+bindRange('staticNoiseIntensity', 'staticNoiseIntensity', 'staticNoiseIntensityVal', v => v.toFixed(2));
+const staticNoiseBlendEl = document.getElementById('staticNoiseBlend');
+if (staticNoiseBlendEl) {
+  staticNoiseBlendEl.value = S.staticNoiseBlend || 'additive';
+  staticNoiseBlendEl.addEventListener('change', () => {
+    S.staticNoiseBlend = staticNoiseBlendEl.value;
+    saveSettings();
+  });
+}
+
+// Vignette overlay (microscope-style blue tint at corners).
+const vignetteControlsEl = document.getElementById('vignetteControls');
+function applyVignetteVis() {
+  if (vignetteControlsEl) vignetteControlsEl.hidden = !S.vignette;
+}
+bindCheckbox('vignetteToggle', 'vignette', applyVignetteVis);
+applyVignetteVis();
+bindRange('vignetteIntensity', 'vignetteIntensity', 'vignetteIntensityVal', v => v.toFixed(2));
+const vignetteBlendEl = document.getElementById('vignetteBlend');
+if (vignetteBlendEl) {
+  vignetteBlendEl.value = S.vignetteBlend || 'additive';
+  vignetteBlendEl.addEventListener('change', () => {
+    S.vignetteBlend = vignetteBlendEl.value;
+    saveSettings();
+  });
+}
+
+// Crosshair overlay — toggle-only (cyan + at viewport centre).
+bindCheckbox('crosshairToggle', 'crosshair');
+
 // Fullscreen toggle. Browsers REQUIRE a user gesture to enter
 // fullscreen, so this can't be a saved-and-restored S.* setting —
 // we only react to the user's click. The checkbox state is kept

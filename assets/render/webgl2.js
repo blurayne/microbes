@@ -1080,6 +1080,73 @@ void main() {
 }
 `;
 
+// Single fullscreen overlay shader for the three new post-effects.
+// Output formula chosen per blend mode so the same shader can be
+// composited via additive / multiply / normal GPU blendFunc.
+//
+//   normal   blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA) — outputs
+//            (effectCol, intensity*mask); dst becomes a mix of
+//            scene and effect color weighted by alpha.
+//   multiply blendFunc(DST_COLOR, ZERO) — outputs
+//            (1 - effectCol*intensity*mask, 1); dst becomes
+//            dst*out, i.e. darkens proportional to effect strength.
+//   additive blendFunc(ONE, ONE) — outputs (effectCol*intensity*mask,
+//            1); dst becomes dst + effect, brightening towards
+//            the effect colour.
+//
+// Crosshair ignores u_mode and always renders with normal alpha
+// blend so the line stays opaque against any background.
+const FRAG_FX_OVERLAY = `#version 300 es
+precision highp float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform int u_effect;     // 1 = static noise · 2 = vignette · 3 = crosshair
+uniform int u_mode;       // 1 = normal · 2 = multiply · 3 = additive
+uniform float u_intensity;
+out vec4 outColor;
+
+float fxHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void main() {
+  vec3 effectCol = vec3(0.0);
+  float effectMask = 1.0;
+  if (u_effect == 1) {
+    float g = fxHash(gl_FragCoord.xy + vec2(u_time * 31.7, u_time * 17.3));
+    effectCol  = vec3(g);
+    effectMask = 1.0;
+  } else if (u_effect == 2) {
+    vec2 uv  = gl_FragCoord.xy / u_resolution;
+    vec2 ndc = uv * 2.0 - 1.0;
+    float r  = length(ndc);
+    effectCol  = vec3(0.05, 0.10, 0.20);
+    effectMask = pow(smoothstep(0.6, 1.0, r), 2.0);
+  } else {
+    // Crosshair — cyan ring + cross. Pure normal-blend output;
+    // u_mode is ignored to keep the line legible against any scene.
+    vec2 px = gl_FragCoord.xy - u_resolution * 0.5;
+    float armLen   = 14.0;
+    float thick    = 1.0;
+    float horiz = (abs(px.y) < thick && abs(px.x) < armLen) ? 1.0 : 0.0;
+    float vert  = (abs(px.x) < thick && abs(px.y) < armLen) ? 1.0 : 0.0;
+    float ring  = (abs(length(px) - 22.0) < thick) ? 0.6 : 0.0;
+    float a = max(max(horiz, vert), ring);
+    outColor = vec4(vec3(0.42, 0.95, 1.0), a * 0.6);
+    return;
+  }
+
+  float s = u_intensity * effectMask;
+  if (u_mode == 1) {
+    outColor = vec4(effectCol, s);
+  } else if (u_mode == 2) {
+    outColor = vec4(vec3(1.0) - effectCol * s, 1.0);
+  } else {
+    outColor = vec4(effectCol * s, 1.0);
+  }
+}
+`;
+
 // Step shader runs N iterations per visible frame; seed shader writes
 // fresh B-discs every ~10 s so the pattern keeps regrowing.
 const FRAG_REACTOR_STEP = `#version 300 es
@@ -2516,6 +2583,81 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindTexture(gl.TEXTURE_2D, null);
     this._rippleRt = { fbo, tex, w, h };
   }
+  // FX overlay program (noise / vignette / crosshair). Single shader
+  // shared across all three effects; the JS driver sets `u_effect` +
+  // `u_mode` + `u_intensity` per draw and picks the GPU blendFunc to
+  // match the requested mode. Lazy-init: only built when the first
+  // FX overlay toggles on.
+  _fxOverlayEnsureProg() {
+    if (this._fxOverlayProg) return;
+    const gl = this.gl;
+    const prog = link(gl, VERT_FULLSCREEN, FRAG_FX_OVERLAY);
+    this._fxOverlayProg = prog;
+    this._fxOverlayU = {
+      res:       gl.getUniformLocation(prog, 'u_resolution'),
+      time:      gl.getUniformLocation(prog, 'u_time'),
+      effect:    gl.getUniformLocation(prog, 'u_effect'),
+      mode:      gl.getUniformLocation(prog, 'u_mode'),
+      intensity: gl.getUniformLocation(prog, 'u_intensity'),
+    };
+  }
+
+  // Apply the GPU blend func that matches a blend-mode setting.
+  // Crosshair always uses normal blending so it stays legible.
+  _fxOverlayBlend(mode) {
+    const gl = this.gl;
+    gl.enable(gl.BLEND);
+    if (mode === 'multiply') {
+      gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+    } else if (mode === 'additive') {
+      gl.blendFunc(gl.ONE, gl.ONE);
+    } else {
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
+  }
+
+  // Draw the enabled FX overlays in order: noise → vignette →
+  // crosshair. Each enabled effect picks up its own blend mode +
+  // intensity; the shader branches internally on `u_effect`.
+  _fxOverlayDraw(t) {
+    const noise = !!S.staticNoise;
+    const vign  = !!S.vignette;
+    const cross = !!S.crosshair;
+    if (!noise && !vign && !cross) return;
+    const gl = this.gl;
+    this._fxOverlayEnsureProg();
+    gl.useProgram(this._fxOverlayProg);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.bindVertexArray(this._bgVao);
+    gl.uniform2f(this._fxOverlayU.res, this.canvas.width, this.canvas.height);
+    gl.uniform1f(this._fxOverlayU.time, t);
+    const _MODES = { normal: 1, multiply: 2, additive: 3 };
+    if (noise) {
+      gl.uniform1i(this._fxOverlayU.effect, 1);
+      gl.uniform1i(this._fxOverlayU.mode, _MODES[S.staticNoiseBlend] || 3);
+      gl.uniform1f(this._fxOverlayU.intensity, S.staticNoiseIntensity ?? 0.4);
+      this._fxOverlayBlend(S.staticNoiseBlend);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    if (vign) {
+      gl.uniform1i(this._fxOverlayU.effect, 2);
+      gl.uniform1i(this._fxOverlayU.mode, _MODES[S.vignetteBlend] || 3);
+      gl.uniform1f(this._fxOverlayU.intensity, S.vignetteIntensity ?? 0.6);
+      this._fxOverlayBlend(S.vignetteBlend);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    if (cross) {
+      gl.uniform1i(this._fxOverlayU.effect, 3);
+      gl.uniform1i(this._fxOverlayU.mode, 1);
+      gl.uniform1f(this._fxOverlayU.intensity, 1.0);
+      this._fxOverlayBlend('normal');
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindVertexArray(null);
+  }
+
   _rippleEnsureProg() {
     if (this._rippleProg) return;
     const gl = this.gl;
@@ -3582,16 +3724,29 @@ export class WebGL2Renderer extends RendererBase {
   }
 
   endFrame() {
-    // Composite the scene RT to canvas through the active post-pass.
-    // When no post-process is on, _sceneFbo is null and everything
-    // already drew straight to canvas — nothing to do.
-    if (!this._sceneFbo || !this._scenePostProc) return;
-    const gl = this.gl;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    gl.disable(gl.BLEND);
-    gl.bindVertexArray(this._bgVao);
+    // Composite the scene RT to canvas through the active post-pass,
+    // then layer the FX overlays (noise / vignette / crosshair) on
+    // top. FX overlays run even when no scene-wide post-process is
+    // active — bg+cells already wrote to canvas in that case, so the
+    // overlay just composites against the existing pixels.
     const t = this._lastFrameSec || 0;
+    const gl = this.gl;
+    if (this._sceneFbo && this._scenePostProc) {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(this._bgVao);
+      this._endFrameScenePostPass(t);
+      gl.enable(gl.BLEND);
+      gl.bindVertexArray(null);
+      this._sceneFbo = null;
+      this._scenePostProc = null;
+    }
+    this._fxOverlayDraw(t);
+  }
+
+  _endFrameScenePostPass(t) {
+    const gl = this.gl;
     if (this._scenePostProc === 'ripples' && this._rippleProg) {
       const cellCount = this._rippleCollectCells();
       gl.useProgram(this._rippleProg);
@@ -3620,10 +3775,6 @@ export class WebGL2Renderer extends RendererBase {
                    S.causticTintB ?? 0.5);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
-    gl.enable(gl.BLEND);
-    gl.bindVertexArray(null);
-    this._sceneFbo = null;
-    this._scenePostProc = null;
   }
 
   /** Short identifier for the FPS overlay's renderer suffix. */
