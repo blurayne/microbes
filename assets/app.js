@@ -1377,9 +1377,78 @@ function renderBgLayerList() {
     });
 
     bgLayerListEl.appendChild(row);
+
+    // Per-kind config: surfaces the most-tweakable params for this
+    // layer kind (color pickers, vignette / spotCount sliders). Only
+    // appears for fields the kind actually uses — so a flat layer
+    // doesn't get a topColor picker, etc. Plan #10 PR C.
+    const configEl = renderBgLayerConfig(layer);
+    if (configEl) bgLayerListEl.appendChild(configEl);
   });
 }
 let _bgDragFromIndex = -1;
+
+function renderBgLayerConfig(layer) {
+  const wrap = document.createElement('div');
+  wrap.className = 'bg-layer-config';
+  let hasAnything = false;
+
+  const addColor = (key, labelKey, fallback) => {
+    if (typeof layer[key] !== 'string') return;
+    const v = String(layer[key]);
+    // Native color input only handles #rrggbb. If the value isn't
+    // 7-char hex (e.g. rgba(...) for spotColor), skip it — PR D will
+    // add proper rgba pickers.
+    if (!/^#[0-9a-fA-F]{6}$/.test(v)) return;
+    const row = document.createElement('label');
+    row.className = 'bg-config-row';
+    const span = document.createElement('span');
+    span.textContent = T(labelKey) || fallback || labelKey;
+    row.appendChild(span);
+    const input = document.createElement('input');
+    input.type = 'color';
+    input.value = v;
+    input.addEventListener('input', () => {
+      layer[key] = input.value;
+      saveSettings();
+    });
+    row.appendChild(input);
+    wrap.appendChild(row);
+    hasAnything = true;
+  };
+  const addRange = (key, labelKey, min, max, step, fallback) => {
+    if (typeof layer[key] !== 'number') return;
+    const row = document.createElement('label');
+    row.className = 'bg-config-row';
+    const span = document.createElement('span');
+    span.textContent = T(labelKey) || fallback || labelKey;
+    row.appendChild(span);
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(min); input.max = String(max); input.step = String(step);
+    input.value = String(layer[key]);
+    const val = document.createElement('span');
+    val.className = 'val';
+    val.textContent = Number(layer[key]).toFixed(step < 1 ? 2 : 0);
+    input.addEventListener('input', () => {
+      layer[key] = parseFloat(input.value);
+      val.textContent = layer[key].toFixed(step < 1 ? 2 : 0);
+      saveSettings();
+    });
+    row.appendChild(input);
+    row.appendChild(val);
+    wrap.appendChild(row);
+    hasAnything = true;
+  };
+
+  addColor('base',      'bg_layer_base',      'Base');
+  addColor('topColor',  'bg_layer_top',       'Top');
+  addColor('botColor',  'bg_layer_bot',       'Bottom');
+  addRange('spotCount', 'bg_layer_spot_count', 0, 16, 1, 'Spots');
+  addRange('vignette',  'bg_layer_vignette',   0, 1,  0.01, 'Vignette');
+
+  return hasAnything ? wrap : null;
+}
 
 function bgKindLabel(layer) {
   // Find the BACKGROUNDS entry whose kind matches; fall back to the

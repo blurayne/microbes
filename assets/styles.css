@@ -377,6 +377,27 @@ body.is-paused #aboutDialog {
   padding: 0; line-height: 1; font-size: 14px;
 }
 .bg-layer-card .delete-btn:hover { background: #f885; color: #fff; }
+
+/* Per-kind config sub-panel (PR C). Sibling of .bg-layer-card; one
+ * row per editable field. */
+.bg-layer-config {
+  display: flex; flex-direction: column; gap: 4px;
+  margin: -2px 0 4px 16px; padding: 6px 8px 6px 10px;
+  background: #00000022; border-left: 2px solid var(--line);
+  border-radius: 0 4px 4px 0;
+  font-size: 0.85em;
+}
+.bg-layer-config .bg-config-row {
+  display: grid;
+  grid-template-columns: 80px 1fr auto;
+  gap: 6px; align-items: center;
+}
+.bg-layer-config input[type=color] {
+  width: 36px; height: 22px; border: 1px solid var(--line);
+  background: transparent; padding: 0; cursor: pointer;
+}
+.bg-layer-config input[type=range] { width: 100%; }
+.bg-layer-config .val { font-family: monospace; opacity: 0.7; }
 .bg-add-layer-row { display: flex; gap: 6px; margin-top: 6px; }
 .bg-add-layer-row select { flex: 1 1 auto; }
 .bg-add-layer-row button {
