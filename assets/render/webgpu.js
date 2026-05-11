@@ -1359,13 +1359,17 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   }
 
   // ---- Bloodflow (kind 9): shader-test bloodflow default port. ----
+  // Colour ramp reads u.bot → u.top → 1.5×u.top so the in-app
+  // picker actually drives the look. Default state colours are
+  // calibrated to match the previous hard-coded ramp.
   if (kind == 9) {
     // 0.012 — bloodflow 0.1× (features 10× smaller than original).
     let bfP = worldPx * 0.012 + vec2<f32>(time * 0.04, time * 0.03);
     let bfN = bgFbm(bfP);
     let bfRbc = bgFbm(worldPx * 0.0030 + vec2<f32>(0.0, time * 0.15));
-    var bfBase = mix(vec3<f32>(0.18, 0.03, 0.05), vec3<f32>(0.42, 0.06, 0.08), vec3<f32>(bfN));
-    bfBase = mix(bfBase, vec3<f32>(0.62, 0.10, 0.14), vec3<f32>(smoothstep(0.55, 0.75, bfRbc) * 0.5));
+    let bfHi = clamp(u.top.rgb * 1.5, vec3<f32>(0.0), vec3<f32>(1.0));
+    var bfBase = mix(u.bot.rgb, u.top.rgb, vec3<f32>(bfN));
+    bfBase = mix(bfBase, bfHi, vec3<f32>(smoothstep(0.55, 0.75, bfRbc) * 0.5));
     col = mix(col, bfBase, vec3<f32>(0.85));
   }
   // ---- Cell shadow (kind 10): voronoi port. CC BY-NC-SA 3.0. ----

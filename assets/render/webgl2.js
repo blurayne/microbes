@@ -767,11 +767,15 @@ void main() {
     // 0.012 — user spec "scale bloodflow by 0.1x" (features 10x
     // smaller than original 0.0012; far denser pattern across the
     // viewport).
+    // Colour ramp reads u_bot → u_top → 1.5×u_top so the in-app
+    // picker actually drives the look. Default state colours are
+    // calibrated to match the previous hard-coded ramp.
     vec2 bf_p = worldPx * 0.012 + vec2(u_time * 0.04, u_time * 0.03);
     float bf_n = bgFbm(bf_p);
     float bf_rbc = bgFbm(worldPx * 0.0030 + vec2(0.0, u_time * 0.15));
-    vec3 bf_base = mix(vec3(0.18, 0.03, 0.05), vec3(0.42, 0.06, 0.08), bf_n);
-    bf_base = mix(bf_base, vec3(0.62, 0.10, 0.14), smoothstep(0.55, 0.75, bf_rbc) * 0.5);
+    vec3 bf_hi = clamp(u_top * 1.5, vec3(0.0), vec3(1.0));
+    vec3 bf_base = mix(u_bot, u_top, bf_n);
+    bf_base = mix(bf_base, bf_hi, smoothstep(0.55, 0.75, bf_rbc) * 0.5);
     col = mix(col, bf_base, 0.85);
   }
   // ---- Cell shadow (kind 10): port of shader-test's voronoi ---

@@ -400,16 +400,16 @@ body.is-paused #aboutDialog {
   position: relative;
   width: 100%; height: 16px;
   border-radius: 4px;
-  background: linear-gradient(to bottom,
+  background: linear-gradient(to right,
     #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
-  cursor: ns-resize;
+  cursor: ew-resize;
 }
 .cp-popover .cp-hue-thumb {
-  position: absolute; left: -2px; right: -2px;
-  height: 4px; top: 0;
+  position: absolute; top: -2px; bottom: -2px;
+  width: 4px; left: 0;
   border: 1px solid #fff; background: #0008; border-radius: 1px;
   pointer-events: none;
-  transform: translateY(-2px);
+  transform: translateX(-2px);
 }
 .cp-popover .cp-alpha {
   position: relative;

@@ -1421,7 +1421,10 @@ export const THEMES = {
   },
   bloodflow: {
     label: 'Bloodflow (vermilion)',
-    bg: { kind: 'bloodflow', topColor: '#3a0a12', botColor: '#0e0205', vignette: 0.30 },
+    // topColor/botColor match the previous hard-coded shader ramp
+    // (0.42,0.06,0.08) and (0.18,0.03,0.05) so the default look is
+    // preserved now that the bloodflow shader actually reads them.
+    bg: { kind: 'bloodflow', topColor: '#6b0f14', botColor: '#2e080d', vignette: 0.30 },
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#d63333' },
   },
