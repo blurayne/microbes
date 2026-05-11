@@ -951,9 +951,15 @@ void main() {
               hot, smoothstep(0.45, 0.92, bN));
   }
 
-  // Vignette: darken the corners.
+  // Vignette: darken the corners. Aspect-corrected so the falloff
+  // is a true 1:1 circle in screen pixels (matches the crosshair
+  // overlay circle) instead of stretching to an ellipse on
+  // widescreen.
   if (u_vignette > 0.0) {
-    float v = length(v_uv - 0.5) * 1.4;
+    vec2 d = v_uv - 0.5;
+    float aspect = u_viewport.x / max(1.0, u_viewport.y);
+    if (aspect > 1.0) d.x *= aspect; else d.y /= aspect;
+    float v = length(d) * 1.4;
     float vAmt = u_vignette * smoothstep(0.4, 1.0, v);
     col *= 1.0 - vAmt;
   }
@@ -1251,8 +1257,13 @@ void main() {
     effectCol  = vec3(g);
     effectMask = 1.0;
   } else if (u_effect == 2) {
+    // Aspect-corrected radial distance — true 1:1 circle, matches
+    // the crosshair overlay circle (PR #144). Without the
+    // correction the falloff was elliptical on widescreen.
     vec2 uv  = gl_FragCoord.xy / u_resolution;
     vec2 ndc = uv * 2.0 - 1.0;
+    float aspect = u_resolution.x / max(1.0, u_resolution.y);
+    if (aspect > 1.0) ndc.x *= aspect; else ndc.y /= aspect;
     float r  = length(ndc);
     effectCol  = vec3(0.05, 0.10, 0.20);
     effectMask = pow(smoothstep(0.6, 1.0, r), 2.0);

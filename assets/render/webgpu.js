@@ -1190,8 +1190,13 @@ fn fxHash(p: vec2<f32>) -> f32 {
     let g = fxHash(frag.xy + vec2<f32>(time * 31.7, time * 17.3));
     effectCol = vec3<f32>(g);
   } else if (effect == 2) {
+    // Aspect-corrected radial distance — true 1:1 circle, matches
+    // the crosshair overlay circle (PR #144). Without correction
+    // the falloff was elliptical on widescreen.
     let uv = frag.xy / res;
-    let ndc = uv * 2.0 - vec2<f32>(1.0);
+    var ndc = uv * 2.0 - vec2<f32>(1.0);
+    let aspectV = res.x / max(1.0, res.y);
+    if (aspectV > 1.0) { ndc.x = ndc.x * aspectV; } else { ndc.y = ndc.y / aspectV; }
     let r = length(ndc);
     effectCol = vec3<f32>(0.05, 0.10, 0.20);
     effectMask = pow(smoothstep(0.6, 1.0, r), 2.0);
@@ -1514,9 +1519,14 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
               hot, smoothstep(0.45, 0.92, bN));
   }
 
-  // Vignette: darken the corners.
+  // Vignette: darken the corners. Aspect-corrected so the falloff
+  // is a true 1:1 circle in screen pixels (matches the crosshair
+  // overlay circle) instead of an ellipse on widescreen.
   if (vignette > 0.0) {
-    let v = length(uv - vec2<f32>(0.5, 0.5)) * 1.4;
+    var d = uv - vec2<f32>(0.5, 0.5);
+    let aspectV = viewport.x / max(1.0, viewport.y);
+    if (aspectV > 1.0) { d.x = d.x * aspectV; } else { d.y = d.y / aspectV; }
+    let v = length(d) * 1.4;
     let vAmt = vignette * smoothstep(0.4, 1.0, v);
     col = col * (1.0 - vAmt);
   }
