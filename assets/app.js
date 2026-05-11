@@ -1439,6 +1439,10 @@ function renderBgConfig() {
   addRange('spotCount',  'bg_layer_spot_count', 0, 16,   1,    'Spots');
   addRange('gridStep',   'bg_layer_grid_step',  16, 200, 4,    'Grid step');
   addRange('vignette',   'bg_layer_vignette',   0, 1,    0.01, 'Vignette');
+  // Reactor-only — see assets/core/state.js (THEMES.reactor.bg).
+  addRange('seedCount',  'bg_layer_seed_count', 1, 8,    1,    'Random spots');
+  addRange('reseedSec',  'bg_layer_reseed_sec', 0.5, 30, 0.5,  'Randomisation (s)');
+  addRange('simSpeed',   'bg_layer_sim_speed',  0, 15,   1,    'Time (steps/frame)');
 }
 renderBgConfig();
 

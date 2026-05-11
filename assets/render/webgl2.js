@@ -2601,11 +2601,15 @@ export class WebGL2Renderer extends RendererBase {
 
   _reactorRt(idx) { return idx === 0 ? this._reactorRtA : this._reactorRtB; }
 
-  _reactorSeed() {
+  _reactorSeed(seedCount) {
     const gl = this.gl;
     const front = this._reactorRt(this._reactorFront);
     const back  = this._reactorRt(1 - this._reactorFront);
-    const count = 5 + Math.floor(Math.random() * 4);   // 5..8 discs
+    // Caller passes the desired count; fall back to a randomised 5..8
+    // when called without an argument (legacy path).
+    const count = (typeof seedCount === 'number' && seedCount > 0)
+      ? Math.max(1, Math.min(REACTOR_MAX_SEEDS, seedCount | 0))
+      : (5 + Math.floor(Math.random() * 4));
     for (let i = 0; i < count; i++) {
       this._reactorSeedBuf[i * 3]     = Math.random();
       this._reactorSeedBuf[i * 3 + 1] = Math.random();
@@ -2951,16 +2955,24 @@ export class WebGL2Renderer extends RendererBase {
     // Reactor (Gray-Scott) — run N step iterations + maybe seed before
     // the display pass(es), so the FRAG_BG kind=8 branch can sample the
     // up-to-date front RT. Update once per frame regardless of how many
-    // reactor layers reference it.
-    const hasReactor = layers.some(l => l.kind === 'reactor');
+    // reactor layers reference it. Per-layer fields (seedCount,
+    // reseedSec, simSpeed) come from the first reactor layer; the rest
+    // tag along since they sample the same RT.
+    const reactorLayer = layers.find(l => l.kind === 'reactor');
+    const hasReactor = !!reactorLayer;
     if (hasReactor) {
       this._reactorEnsureProgs();
       this._reactorEnsureRts();
-      if (timeMs - this._reactorLastSeedMs > 10000) {
-        this._reactorSeed();
+      const reseedSec = Math.max(0.1, +reactorLayer.reseedSec || 10);
+      if (timeMs - this._reactorLastSeedMs > reseedSec * 1000) {
+        const seedCount = Math.max(1, Math.min(REACTOR_MAX_SEEDS,
+          Math.round(+reactorLayer.seedCount || 6)));
+        this._reactorSeed(seedCount);
         this._reactorLastSeedMs = timeMs;
       }
-      this._reactorStep(5);
+      const simSpeed = Math.max(0, Math.min(15,
+        Math.round(+reactorLayer.simSpeed ?? 5)));
+      if (simSpeed > 0) this._reactorStep(simSpeed);
       // Restore the scene framebuffer + drawing-buffer viewport so
       // the bg display pass renders into the same target as cells.
       gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);

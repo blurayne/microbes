@@ -2740,11 +2740,15 @@ export class WebGPURenderer extends RendererBase {
 
   _reactorRt(idx) { return idx === 0 ? this._reactorRtA : this._reactorRtB; }
 
-  _reactorSeed() {
+  _reactorSeed(seedCount) {
     const device = this.device;
     const front = this._reactorRt(this._reactorFront);
     const back  = this._reactorRt(1 - this._reactorFront);
-    const count = 5 + Math.floor(Math.random() * 4);
+    // Caller passes the desired count; fall back to a randomised 5..8
+    // when called without an argument (legacy path).
+    const count = (typeof seedCount === 'number' && seedCount > 0)
+      ? Math.max(1, Math.min(REACTOR_MAX_SEEDS_WGPU, seedCount | 0))
+      : (5 + Math.floor(Math.random() * 4));
     const u = this._reactorSeedScratch;
     u[0] = this._reactorRtSize.w;
     u[1] = this._reactorRtSize.h;
@@ -3369,15 +3373,22 @@ export class WebGPURenderer extends RendererBase {
     // Reactor (Gray-Scott): run the simulation step once per frame if
     // ANY layer references kind='reactor'. Reactor layers all sample
     // the same RT, so a single step suffices regardless of how many
-    // reactor layers exist in the stack.
-    const hasReactor = layers.some(l => l.kind === 'reactor');
+    // reactor layers exist in the stack. Per-layer fields (seedCount,
+    // reseedSec, simSpeed) come from the first reactor layer.
+    const reactorLayer = layers.find(l => l.kind === 'reactor');
+    const hasReactor = !!reactorLayer;
     if (hasReactor) {
       this._reactorEnsureRts();
-      if (timeMs - this._reactorLastSeedMs > 10000) {
-        this._reactorSeed();
+      const reseedSec = Math.max(0.1, +reactorLayer.reseedSec || 10);
+      if (timeMs - this._reactorLastSeedMs > reseedSec * 1000) {
+        const seedCount = Math.max(1, Math.min(REACTOR_MAX_SEEDS_WGPU,
+          Math.round(+reactorLayer.seedCount || 6)));
+        this._reactorSeed(seedCount);
         this._reactorLastSeedMs = timeMs;
       }
-      this._reactorStep(5);
+      const simSpeed = Math.max(0, Math.min(15,
+        Math.round(+reactorLayer.simSpeed ?? 5)));
+      if (simSpeed > 0) this._reactorStep(simSpeed);
     } else if (this._reactorRtA) {
       // No layer references reactor — release RT GPU memory. Pipelines
       // + the sampler + dummy stay so a return to the theme is cheap.

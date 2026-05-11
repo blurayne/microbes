@@ -431,6 +431,9 @@ export const LOCALES = {
     bg_layer_grid_step: 'Grid step',
     bg_layer_spot_count: 'Spot count',
     bg_layer_vignette: 'Vignette',
+    bg_layer_seed_count: 'Random spots',
+    bg_layer_reseed_sec: 'Randomisation (s)',
+    bg_layer_sim_speed: 'Time (steps/frame)',
     fx_order_title: 'Overlay order',
     fx_kind_noise: 'Static noise',
     fx_kind_vignette: 'Vignette',
@@ -613,6 +616,9 @@ export const LOCALES = {
     bg_layer_grid_step: 'Gitter-Abstand',
     bg_layer_spot_count: 'Spot-Anzahl',
     bg_layer_vignette: 'Vignette',
+    bg_layer_seed_count: 'Zufalls-Spots',
+    bg_layer_reseed_sec: 'Randomisierung (s)',
+    bg_layer_sim_speed: 'Zeit (Schritte/Frame)',
     fx_order_title: 'Overlay-Reihenfolge',
     fx_kind_noise: 'Rauschen',
     fx_kind_vignette: 'Vignette',
@@ -1490,7 +1496,10 @@ export const THEMES = {
   // back to the base colour. See .claude/plan/04-reactor-bg.md.
   reactor: {
     label: 'Reactor (acid green)',
-    bg: { kind: 'reactor', base: '#02060a', spotCount: 0, vignette: 0.40 },
+    // seedCount  — random discs placed per reseed event (1..8).
+    // reseedSec  — seconds between random reseeds ("Randomisation").
+    // simSpeed   — Gray-Scott step iterations per frame ("Time"; 0 = paused).
+    bg: { kind: 'reactor', base: '#02060a', vignette: 0.40, seedCount: 6, reseedSec: 10, simSpeed: 5 },
     outline: { color: '#0a1816', defaultPx: 4 },
     ui: { panelAccent: '#7eff8a' },
   },
