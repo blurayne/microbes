@@ -8,6 +8,7 @@ import {
   INTERFACE_ACCENTS,
   T, cellLabel, cellDesc,
   currentTheme, currentBackground, currentInterfaceColor, colorNameFor,
+  bgLayerFromPreset, bgLayersFromPreset, makeBgLayerId,
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { Sim } from './core/sim.js';
@@ -1230,15 +1231,180 @@ function populateBgSelect(el) {
 }
 populateBgSelect(bgSelect);
 populateBgSelect(bgSelectInline);
+// Picking a preset REPLACES the layer stack with a single-layer
+// derivation of that preset. The legacy S.background string is kept
+// in sync because some code paths still read it (e.g., interface-
+// accent fallbacks, themes that reference bg.label) and the no-bgLayers
+// fallback in currentBgLayers().
 function setBackground(v) {
   if (!BACKGROUNDS[v]) return;
   S.background = v;
+  S.bgLayers = bgLayersFromPreset(v);
   if (bgSelect)       bgSelect.value       = v;
   if (bgSelectInline) bgSelectInline.value = v;
   saveSettings();
+  renderBgLayerList();
 }
 if (bgSelect)       bgSelect.addEventListener('change',       () => setBackground(bgSelect.value));
 if (bgSelectInline) bgSelectInline.addEventListener('change', () => setBackground(bgSelectInline.value));
+
+// ── Background layer list (plan #10 PR B) ──
+// Each S.bgLayers entry is one row: drag handle + enabled checkbox +
+// kind label + opacity slider + blend dropdown + delete button.
+// Reorder via HTML5 drag-and-drop; no library. Rebuilds the panel
+// from scratch on every change — simpler than diffing, and the list
+// rarely has more than a handful of rows so re-render cost is trivial.
+const bgLayerListEl = document.getElementById('bgLayerList');
+const bgAddLayerKindEl = document.getElementById('bgAddLayerKind');
+const bgAddLayerBtnEl = document.getElementById('bgAddLayerBtn');
+
+// Populate the "kind" picker for Add-layer with every BACKGROUNDS entry.
+if (bgAddLayerKindEl) {
+  for (const [key, b] of Object.entries(BACKGROUNDS)) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = T('bg_' + key) || b.label || key;
+    bgAddLayerKindEl.appendChild(opt);
+  }
+}
+
+function ensureBgLayersPopulated() {
+  if (!Array.isArray(S.bgLayers) || S.bgLayers.length === 0) {
+    S.bgLayers = bgLayersFromPreset(S.background || 'solid');
+    saveSettings();
+  }
+}
+
+function renderBgLayerList() {
+  if (!bgLayerListEl) return;
+  ensureBgLayersPopulated();
+  bgLayerListEl.innerHTML = '';
+  S.bgLayers.forEach((layer, index) => {
+    const row = document.createElement('div');
+    row.className = 'bg-layer-card';
+    row.draggable = true;
+    row.dataset.index = String(index);
+
+    const handle = document.createElement('span');
+    handle.className = 'drag-handle';
+    handle.textContent = '☰';
+    handle.title = T('bg_layer_drag');
+    row.appendChild(handle);
+
+    const enabled = document.createElement('input');
+    enabled.type = 'checkbox';
+    enabled.checked = layer.enabled !== false;
+    enabled.title = T('bg_layer_enabled');
+    enabled.addEventListener('change', () => {
+      layer.enabled = enabled.checked;
+      saveSettings();
+    });
+    row.appendChild(enabled);
+
+    const kindLabel = document.createElement('span');
+    kindLabel.className = 'kind-label';
+    kindLabel.textContent = bgKindLabel(layer);
+    row.appendChild(kindLabel);
+
+    const opacity = document.createElement('input');
+    opacity.type = 'range';
+    opacity.min = '0'; opacity.max = '1'; opacity.step = '0.01';
+    opacity.value = String(typeof layer.opacity === 'number' ? layer.opacity : 1);
+    opacity.title = T('bg_layer_opacity');
+    opacity.addEventListener('input', () => {
+      layer.opacity = parseFloat(opacity.value);
+      saveSettings();
+    });
+    row.appendChild(opacity);
+
+    const blend = document.createElement('select');
+    blend.title = T('bg_layer_blend');
+    for (const m of ['normal', 'multiply', 'additive']) {
+      const o = document.createElement('option');
+      o.value = m;
+      o.textContent = T('blend_' + m) || m;
+      blend.appendChild(o);
+    }
+    blend.value = layer.blend || 'normal';
+    blend.addEventListener('change', () => {
+      layer.blend = blend.value;
+      saveSettings();
+    });
+    row.appendChild(blend);
+
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'delete-btn';
+    del.textContent = '×';
+    del.title = T('bg_layer_delete');
+    del.addEventListener('click', () => {
+      S.bgLayers.splice(index, 1);
+      saveSettings();
+      renderBgLayerList();
+    });
+    row.appendChild(del);
+
+    // Drag-drop reorder. Use the row's dataset.index captured at
+    // render time as the source; the drop target reads its own
+    // dataset.index, so the swap is just array-shuffle.
+    row.addEventListener('dragstart', (e) => {
+      _bgDragFromIndex = index;
+      row.classList.add('dragging');
+      try { e.dataTransfer.setData('text/plain', String(index)); } catch {}
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      _bgDragFromIndex = -1;
+      document.querySelectorAll('.bg-layer-card.drag-over').forEach(el => el.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      const from = _bgDragFromIndex;
+      const to = index;
+      if (from < 0 || from === to) return;
+      const moved = S.bgLayers.splice(from, 1)[0];
+      S.bgLayers.splice(to, 0, moved);
+      saveSettings();
+      renderBgLayerList();
+    });
+
+    bgLayerListEl.appendChild(row);
+  });
+}
+let _bgDragFromIndex = -1;
+
+function bgKindLabel(layer) {
+  // Find the BACKGROUNDS entry whose kind matches; fall back to the
+  // raw kind string. Kind is renderer-facing ('gradient', 'agar', …)
+  // so the user-visible label is the localised preset name.
+  for (const [key, b] of Object.entries(BACKGROUNDS)) {
+    if (b.kind === layer.kind && (b.label === layer.label || !layer.label)) {
+      return T('bg_' + key) || b.label || layer.kind;
+    }
+  }
+  return layer.kind || '?';
+}
+
+if (bgAddLayerBtnEl && bgAddLayerKindEl) {
+  bgAddLayerBtnEl.addEventListener('click', () => {
+    const key = bgAddLayerKindEl.value;
+    if (!BACKGROUNDS[key]) return;
+    ensureBgLayersPopulated();
+    S.bgLayers.push(bgLayerFromPreset(key));
+    saveSettings();
+    renderBgLayerList();
+  });
+}
+
+renderBgLayerList();
 
 function applyUpscaleMode() {
   canvas.classList.toggle('pixel', S.upscaleMode === 'pixel');
