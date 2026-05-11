@@ -822,6 +822,13 @@ body.adding #stage    { cursor: crosshair; }
   filter: brightness(1.15);
   box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18), 0 2px 8px #0008;
 }
+/* `+` FAB is the fourth peer of target / split / kill — same
+   active-ring treatment so the four mode buttons all read the
+   same way. The deeper FAB drop shadow is preserved. */
+.fab.active {
+  filter: brightness(1.15);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18), 0 4px 12px #0008;
+}
 
 /* Generic dialog (help + palette) — same chrome as the settings dialog */
 .dialog {
