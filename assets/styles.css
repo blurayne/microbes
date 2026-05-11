@@ -347,6 +347,44 @@ body.is-paused #aboutDialog {
 }
 .settings-panel .sub-controls[hidden] { display: none; }
 
+/* Background-layer stack UI (see .claude/plan/10-bg-layer-stack.md PR B). */
+.bg-layer-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 6px; }
+.bg-layer-card {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  background: #00000033;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.bg-layer-card.dragging { opacity: 0.4; }
+.bg-layer-card.drag-over { border-color: var(--accent); }
+.bg-layer-card .drag-handle {
+  cursor: grab; padding: 2px 4px; user-select: none; opacity: 0.5;
+  font-family: monospace;
+}
+.bg-layer-card .drag-handle:active { cursor: grabbing; }
+.bg-layer-card .kind-label {
+  font-size: 0.85em; color: var(--ink-dim, var(--ink)); min-width: 80px;
+}
+.bg-layer-card input[type=range] { flex: 1 1 auto; min-width: 60px; }
+.bg-layer-card select { width: auto; padding: 4px 6px; font-size: 0.85em; }
+.bg-layer-card .delete-btn {
+  background: none; border: 1px solid var(--line); color: #f88;
+  width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
+  padding: 0; line-height: 1; font-size: 14px;
+}
+.bg-layer-card .delete-btn:hover { background: #f885; color: #fff; }
+.bg-add-layer-row { display: flex; gap: 6px; margin-top: 6px; }
+.bg-add-layer-row select { flex: 1 1 auto; }
+.bg-add-layer-row button {
+  background: #00000044; color: var(--ink); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 10px; cursor: pointer;
+}
+.bg-add-layer-row button:hover { border-color: var(--accent); }
+
 .settings-panel select {
   display: block;
   width: 100%;

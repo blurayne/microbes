@@ -394,6 +394,18 @@ export const LOCALES = {
     make_it_real_hue1: 'Shadow hue',
     make_it_real_hue2: 'Highlight hue',
     make_it_real_saturation: 'Saturation',
+    bg_load_preset: 'Load preset',
+    bg_layers: 'Layers',
+    bg_add_layer: '+ Add layer',
+    bg_layer_kind: 'Kind',
+    bg_layer_opacity: 'Opacity',
+    bg_layer_blend: 'Blend',
+    bg_layer_delete: 'Delete layer',
+    bg_layer_enabled: 'Enabled',
+    bg_layer_drag: 'Drag to reorder',
+    blend_normal: 'Normal',
+    blend_multiply: 'Multiply',
+    blend_additive: 'Additive',
     cell_type_overlay: 'Show cell types',
     counters_needed: 'Counters needed',
     counters_covered: 'Fully covered',
@@ -549,6 +561,18 @@ export const LOCALES = {
     make_it_real_hue1: 'Schatten-Farbton',
     make_it_real_hue2: 'Licht-Farbton',
     make_it_real_saturation: 'Sättigung',
+    bg_load_preset: 'Voreinstellung laden',
+    bg_layers: 'Ebenen',
+    bg_add_layer: '+ Ebene hinzufügen',
+    bg_layer_kind: 'Art',
+    bg_layer_opacity: 'Deckkraft',
+    bg_layer_blend: 'Mischmodus',
+    bg_layer_delete: 'Ebene löschen',
+    bg_layer_enabled: 'Aktiviert',
+    bg_layer_drag: 'Ziehen zum Sortieren',
+    blend_normal: 'Normal',
+    blend_multiply: 'Multiplizieren',
+    blend_additive: 'Addieren',
     cell_type_overlay: 'Zelltypen anzeigen',
     counters_needed: 'Konter benötigt',
     counters_covered: 'Voll abgedeckt',
@@ -1547,6 +1571,29 @@ export function currentBgLayers() {
   }
   const bg = currentBackground();
   return [{ ...bg, opacity: 1, blend: 'normal', enabled: true }];
+}
+
+// Synthesize a single-layer bgLayers array from a preset key. Used
+// by the bg-layer-list UI (PR B): picking a preset from the dropdown
+// REPLACES the user's layer stack with one fully-formed layer for
+// that preset. New layers added via the "+ Add layer" button also
+// route through here. See .claude/plan/10-bg-layer-stack.md PR B.
+let _bgLayerIdSeq = 1;
+export function makeBgLayerId() {
+  return 'l_' + Date.now().toString(36) + '_' + (_bgLayerIdSeq++);
+}
+export function bgLayerFromPreset(key) {
+  const bg = BACKGROUNDS[key] || BACKGROUNDS.solid;
+  return {
+    id: makeBgLayerId(),
+    ...bg,
+    opacity: 1,
+    blend: 'normal',
+    enabled: true,
+  };
+}
+export function bgLayersFromPreset(key) {
+  return [bgLayerFromPreset(key)];
 }
 
 // ---------- Cell types ----------
