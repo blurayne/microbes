@@ -19,7 +19,7 @@
 
 import {
   S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
-  currentBackground, currentTheme, currentHighlightColor, cellColors, frac,
+  currentBackground, currentBgLayers, currentTheme, currentHighlightColor, cellColors, frac,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
@@ -1087,13 +1087,16 @@ fn fxHash(p: vec2<f32>) -> f32 {
     effectCol = vec3<f32>(0.05, 0.10, 0.20);
     effectMask = pow(smoothstep(0.6, 1.0, r), 2.0);
   } else {
-    // Crosshair — always normal blend.
+    // Crosshair — always normal blend. Ring fits the shorter viewport
+    // axis with 5% padding (radius = min(W,H) * 0.475) so it scales
+    // with the canvas while staying circular at any aspect ratio.
     let px = frag.xy - res * 0.5;
     let armLen: f32 = 14.0;
     let thick: f32  = 1.0;
+    let ringR: f32  = min(res.x, res.y) * 0.475;
     let horiz = select(0.0, 1.0, abs(px.y) < thick && abs(px.x) < armLen);
     let vert  = select(0.0, 1.0, abs(px.x) < thick && abs(px.y) < armLen);
-    let ring  = select(0.0, 0.6, abs(length(px) - 22.0) < thick);
+    let ring  = select(0.0, 0.6, abs(length(px) - ringR) < thick);
     let a = max(max(horiz, vert), ring);
     return vec4<f32>(vec3<f32>(0.42, 0.95, 1.0), a * 0.6);
   }
@@ -1115,6 +1118,8 @@ struct BgU {
   cam: vec4<f32>,
   // (viewportW, viewportH, spotCount, rbcOn)
   vp: vec4<f32>,
+  // Per-layer extras: x=opacity (0..1), yzw reserved.
+  extra: vec4<f32>,
   base: vec4<f32>,
   top: vec4<f32>,
   bot: vec4<f32>,
@@ -1407,7 +1412,13 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     col = col * (1.0 - vAmt);
   }
 
-  return vec4<f32>(col, 1.0);
+  // Premultiplied output so the bg pass composites correctly under
+  // blendFunc(ONE, ONE_MINUS_SRC_ALPHA) when opacity < 1 (used by
+  // non-first layers in the bg stack). First layer is drawn with no
+  // blend, in which case opacity = 1 keeps behaviour identical to
+  // the legacy single-bg path.
+  let opacity = u.extra.x;
+  return vec4<f32>(col * opacity, opacity);
 }
 `;
 
@@ -2088,13 +2099,14 @@ export class WebGPURenderer extends RendererBase {
 
     // ---- Background pass (gradient + spots + drifting RBC silhouettes) ----
     // Single fullscreen triangle; shader reads everything from one
-    // uniform buffer. Uniform layout (96 floats / 384 bytes):
-    //   [0..3]    misc (kind, vignette, gridStep, time)
-    //   [4..7]    cam  (scale, tx, ty, _)
-    //   [8..11]   vp   (W, H, spotCount, rbcOn)
-    //   [12..31]  base, top, bot, ringColor, gridColor (5 × vec4)
-    //   [32..63]  spots[8] vec4 (cx, cy, r, _) screen 0..1
-    //   [64..95]  spotCols[8] vec4 (r, g, b, _) pre-multiplied
+    // uniform buffer. Uniform layout (100 floats / 400 bytes):
+    //   [0..3]    misc  (kind, vignette, gridStep, time)
+    //   [4..7]    cam   (scale, tx, ty, _)
+    //   [8..11]   vp    (W, H, spotCount, rbcOn)
+    //   [12..15]  extra (opacity, _, _, _)
+    //   [16..35]  base, top, bot, ringColor, gridColor (5 × vec4)
+    //   [36..67]  spots[8] vec4 (cx, cy, r, _) screen 0..1
+    //   [68..99]  spotCols[8] vec4 (r, g, b, _) pre-multiplied
     const bgModule = device.createShaderModule({ code: BG_WGSL });
     this._bgPipeline = device.createRenderPipeline({
       layout: 'auto',
@@ -2106,11 +2118,36 @@ export class WebGPURenderer extends RendererBase {
       },
       primitive: { topology: 'triangle-list' },
     });
+    // Blend-mode pipelines for non-first layers in the bg stack. Each
+    // pipeline shares the shader module with _bgPipeline but composites
+    // onto whatever the previous layers already wrote. Shader output is
+    // pre-multiplied, so 'normal' uses (one, one-minus-src-alpha).
+    const bgBlend = {
+      normal:   { color: { srcFactor: 'one',       dstFactor: 'one-minus-src-alpha', operation: 'add' },
+                  alpha: { srcFactor: 'one',       dstFactor: 'one-minus-src-alpha', operation: 'add' } },
+      multiply: { color: { srcFactor: 'dst',       dstFactor: 'zero',                operation: 'add' },
+                  alpha: { srcFactor: 'one',       dstFactor: 'zero',                operation: 'add' } },
+      additive: { color: { srcFactor: 'one',       dstFactor: 'one',                 operation: 'add' },
+                  alpha: { srcFactor: 'one',       dstFactor: 'one',                 operation: 'add' } },
+    };
+    const mkBgBlend = (b) => device.createRenderPipeline({
+      layout: 'auto',
+      vertex: { module: bgModule, entryPoint: 'vs_main' },
+      fragment: { module: bgModule, entryPoint: 'fs_main', targets: [{ format: fmt, blend: b }] },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._bgBlendPipelines = {
+      normal:   mkBgBlend(bgBlend.normal),
+      multiply: mkBgBlend(bgBlend.multiply),
+      additive: mkBgBlend(bgBlend.additive),
+    };
     this._bgUniformBuffer = device.createBuffer({
-      size: 96 * 4,                    // 384 bytes
+      // 100 floats × 4 = 400 bytes. Layout: misc + cam + vp + extra
+      // + base + top + bot + ringColor + gridColor + spots[8] + spotCols[8].
+      size: 100 * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     });
-    this._bgUniformData = new Float32Array(96);
+    this._bgUniformData = new Float32Array(100);
     // Bind group is rebuilt each frame in drawBackground because the
     // texture view at binding 2 changes between the dummy 1x1 (every
     // theme but reactor) and the active reactor RT view (which itself
@@ -3134,26 +3171,15 @@ export class WebGPURenderer extends RendererBase {
   drawBackground(timeMs) {
     if (!this._frameEncoder || !this._frameView) return;
     if (!this._bgPipeline) return;       // pipeline not yet created
-    const bg = currentBackground();
+    const layers = currentBgLayers();
     const t = (timeMs || 0) * 0.001 * (S.bgFlowSpeed || 1);
 
-    let kind = 0; // flat
-    if (bg.kind === 'gradient') kind = 1;
-    else if (bg.kind === 'agar') kind = 2;
-    else if (bg.kind === 'cybergrid') kind = 3;
-    else if (bg.kind === 'lung') kind = 4;
-    else if (bg.kind === 'aurora') kind = 5;
-    else if (bg.kind === 'underwater') kind = 6;
-    else if (bg.kind === 'lava') kind = 7;
-    else if (bg.kind === 'reactor') kind = 8;
-    else if (bg.kind === 'bloodflow') kind = 9;
-    else if (bg.kind === 'cell-shadow') kind = 10;
-
-    // Reactor (Gray-Scott): allocate RTs lazily, run N step iterations
-    // and refresh seeds, all encoded into the frame's command encoder
-    // BEFORE the bg display pass below. Mirrors the WebGL2 sequence in
-    // webgl2.js drawBackground.
-    if (kind === 8) {
+    // Reactor (Gray-Scott): run the simulation step once per frame if
+    // ANY layer references kind='reactor'. Reactor layers all sample
+    // the same RT, so a single step suffices regardless of how many
+    // reactor layers exist in the stack.
+    const hasReactor = layers.some(l => l.kind === 'reactor');
+    if (hasReactor) {
       this._reactorEnsureRts();
       if (timeMs - this._reactorLastSeedMs > 10000) {
         this._reactorSeed();
@@ -3161,85 +3187,15 @@ export class WebGPURenderer extends RendererBase {
       }
       this._reactorStep(5);
     } else if (this._reactorRtA) {
-      // Theme switched away — release RT GPU memory. Pipelines + the
-      // sampler + dummy stay so a return to the theme is cheap.
+      // No layer references reactor — release RT GPU memory. Pipelines
+      // + the sampler + dummy stay so a return to the theme is cheap.
       this._reactorDestroy();
     }
 
-    const data = this._bgUniformData;
-    // misc
-    data[0] = kind;
-    data[1] = bg.vignette || 0;
-    data[2] = bg.gridStep || 48;
-    data[3] = t;
-    // cam (.w = rotation-radians)
-    data[4] = this.camera.scale;
-    data[5] = this.camera.tx;
-    data[6] = this.camera.ty;
-    data[7] = this.camera.rotation || 0;
-    // vp + spotCount + rbcOn
-    const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
-    data[8] = this.W;
-    data[9] = this.H;
-    data[10] = count;
-    data[11] = bg.rbcSilhouettes ? 1 : 0;
-    // base / top / bot / ringColor / gridColor (each as vec4 with .a = 0 padding)
-    const writeRgb = (off, css, fallback) => {
-      const c = cssToGpuColor(css || '', fallback);
-      data[off]     = c.r;
-      data[off + 1] = c.g;
-      data[off + 2] = c.b;
-      data[off + 3] = 0;
-    };
-    writeRgb(12, bg.base,                       { r: 0, g: 0, b: 0, a: 1 });
-    writeRgb(16, bg.topColor || bg.base,        { r: 0, g: 0, b: 0, a: 1 });
-    writeRgb(20, bg.botColor || bg.base,        { r: 0, g: 0, b: 0, a: 1 });
-    writeRgb(24, bg.ringColor || 'rgba(120,80,30,0.5)',  { r: 120/255, g: 80/255, b: 30/255, a: 0.5 });
-    writeRgb(28, bg.gridColor || 'rgba(0,255,170,0.5)',  { r: 0, g: 1, b: 170/255, a: 0.5 });
-    // spots[8] + spotCols[8]: drift positions and pre-multiplied colours
-    const spotCols = Array.isArray(bg.spotColors) ? bg.spotColors : null;
-    const fallbackCol = bg.spotColor || 'rgba(255,255,255,0.10)';
-    for (let i = 0; i < MAX_SPOTS; i++) {
-      const s = this._spots[i];
-      const cx = s.ax + s.ox1 * Math.sin(t * s.w1 + s.phx);
-      const cy = s.ay + s.oy1 * Math.cos(t * s.w2 + s.phy);
-      data[32 + i * 4]     = cx;
-      data[32 + i * 4 + 1] = cy;
-      data[32 + i * 4 + 2] = s.r;
-      data[32 + i * 4 + 3] = 0;
-      const colSrc = spotCols ? spotCols[i % spotCols.length] : fallbackCol;
-      const c = cssToGpuColor(colSrc, { r: 1, g: 1, b: 1, a: 0.10 });
-      // Pre-multiply rgb by source alpha so the shader can add directly.
-      data[64 + i * 4]     = c.r * c.a;
-      data[64 + i * 4 + 1] = c.g * c.a;
-      data[64 + i * 4 + 2] = c.b * c.a;
-      data[64 + i * 4 + 3] = 0;
-    }
-    this.device.queue.writeBuffer(
-      this._bgUniformBuffer, 0, data.buffer, data.byteOffset, data.byteLength,
-    );
-
-    // Pick the texture view BG_WGSL's binding 2 sees this frame:
-    // the active reactor RT (front side, post-step) for kind == 8,
-    // else the 1x1 dummy. Built fresh each frame because the front
-    // index ping-pongs and the RT view itself changes on resize.
-    const bgTexView = (kind === 8 && this._reactorRtA)
-      ? this._reactorRt(this._reactorFront).view
-      : this._reactorDummyView;
-    const bgBindGroup = this.device.createBindGroup({
-      layout: this._bgPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this._bgUniformBuffer } },
-        { binding: 1, resource: this._reactorSampler },
-        { binding: 2, resource: bgTexView },
-      ],
-    });
-
-    // Bg-only ripple mode (rippleScope='bg'): redirect THIS pass into
-    // the ripple RT, then run the ripple post-pass straight back to
-    // _frameView. Subsequent draws (cells, particles, antibodies)
-    // stay on the canvas surface (scene-view = _frameView). Scene-
-    // wide mode is the default and handled by endFrame().
+    // Bg-only ripple mode (rippleScope='bg'): redirect the entire bg
+    // stack into the ripple RT, then run the ripple post-pass straight
+    // back to _frameView. Scene-wide mode is the default and handled
+    // by endFrame().
     const bgOnlyRipples = !!S.liquidRipples && S.rippleScope === 'bg';
     let bgTarget = this._sceneView;
     if (bgOnlyRipples) {
@@ -3247,18 +3203,59 @@ export class WebGPURenderer extends RendererBase {
       this._rippleBgEnsurePipeline();
       bgTarget = this._rippleBgRt.view;
     }
-    const pass = this._frameEncoder.beginRenderPass({
-      colorAttachments: [{
-        view: bgTarget,
-        clearValue: { r: 0, g: 0, b: 0, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store',
-      }],
-    });
-    pass.setPipeline(this._bgPipeline);
-    pass.setBindGroup(0, bgBindGroup);
-    pass.draw(3, 1, 0, 0);             // big-triangle, 3 verts, no VBO
-    pass.end();
+
+    if (layers.length === 0) {
+      // No enabled layers — clear-only pass so subsequent draws
+      // (cells, particles, …) aren't painted over stale pixels.
+      const pass = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: bgTarget,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      pass.end();
+    } else {
+      for (let li = 0; li < layers.length; li++) {
+        const bg = layers[li];
+        this._writeBgLayerUniforms(bg, t);
+
+        // Pick the texture view BG_WGSL's binding 2 sees for this
+        // layer: the active reactor RT (front side, post-step) for
+        // kind == 'reactor', else the 1x1 dummy. Built fresh each
+        // layer because the front index ping-pongs.
+        const isReactor = (bg.kind === 'reactor' && !!this._reactorRtA);
+        const bgTexView = isReactor
+          ? this._reactorRt(this._reactorFront).view
+          : this._reactorDummyView;
+        const pipeline = (li === 0)
+          ? this._bgPipeline
+          : (this._bgBlendPipelines[bg.blend] || this._bgBlendPipelines.normal);
+        const bgBindGroup = this.device.createBindGroup({
+          layout: pipeline.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: { buffer: this._bgUniformBuffer } },
+            { binding: 1, resource: this._reactorSampler },
+            { binding: 2, resource: bgTexView },
+          ],
+        });
+        const pass = this._frameEncoder.beginRenderPass({
+          colorAttachments: [{
+            view: bgTarget,
+            // First layer clears; subsequent layers composite onto
+            // whatever the previous layers wrote.
+            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            loadOp: (li === 0) ? 'clear' : 'load',
+            storeOp: 'store',
+          }],
+        });
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, bgBindGroup);
+        pass.draw(3, 1, 0, 0);             // big-triangle, 3 verts, no VBO
+        pass.end();
+      }
+    }
     if (bgOnlyRipples && this._rippleBgPipeline) {
       const cellCount = this._rippleBgCollectCells();
       const u = this._rippleBgUboData;
@@ -3296,6 +3293,77 @@ export class WebGPURenderer extends RendererBase {
       post.end();
     }
     this._lastFrameSec = t;            // endFrame's post-pass reads this
+  }
+
+  _writeBgLayerUniforms(bg, t) {
+    let kind = 0; // flat
+    if (bg.kind === 'gradient') kind = 1;
+    else if (bg.kind === 'agar') kind = 2;
+    else if (bg.kind === 'cybergrid') kind = 3;
+    else if (bg.kind === 'lung') kind = 4;
+    else if (bg.kind === 'aurora') kind = 5;
+    else if (bg.kind === 'underwater') kind = 6;
+    else if (bg.kind === 'lava') kind = 7;
+    else if (bg.kind === 'reactor') kind = 8;
+    else if (bg.kind === 'bloodflow') kind = 9;
+    else if (bg.kind === 'cell-shadow') kind = 10;
+
+    const data = this._bgUniformData;
+    // misc (kind, vignette, gridStep, time)
+    data[0] = kind;
+    data[1] = bg.vignette || 0;
+    data[2] = bg.gridStep || 48;
+    data[3] = t;
+    // cam (.w = rotation-radians)
+    data[4] = this.camera.scale;
+    data[5] = this.camera.tx;
+    data[6] = this.camera.ty;
+    data[7] = this.camera.rotation || 0;
+    // vp (W, H, spotCount, rbcOn)
+    const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
+    data[8] = this.W;
+    data[9] = this.H;
+    data[10] = count;
+    data[11] = bg.rbcSilhouettes ? 1 : 0;
+    // extra (opacity, _, _, _)
+    data[12] = (typeof bg.opacity === 'number') ? bg.opacity : 1;
+    data[13] = 0;
+    data[14] = 0;
+    data[15] = 0;
+    // base / top / bot / ringColor / gridColor (each vec4 with .a = 0 padding)
+    const writeRgb = (off, css, fallback) => {
+      const c = cssToGpuColor(css || '', fallback);
+      data[off]     = c.r;
+      data[off + 1] = c.g;
+      data[off + 2] = c.b;
+      data[off + 3] = 0;
+    };
+    writeRgb(16, bg.base,                       { r: 0, g: 0, b: 0, a: 1 });
+    writeRgb(20, bg.topColor || bg.base,        { r: 0, g: 0, b: 0, a: 1 });
+    writeRgb(24, bg.botColor || bg.base,        { r: 0, g: 0, b: 0, a: 1 });
+    writeRgb(28, bg.ringColor || 'rgba(120,80,30,0.5)',  { r: 120/255, g: 80/255, b: 30/255, a: 0.5 });
+    writeRgb(32, bg.gridColor || 'rgba(0,255,170,0.5)',  { r: 0, g: 1, b: 170/255, a: 0.5 });
+    // spots[8] + spotCols[8]: drift positions and pre-multiplied colours
+    const spotCols = Array.isArray(bg.spotColors) ? bg.spotColors : null;
+    const fallbackCol = bg.spotColor || 'rgba(255,255,255,0.10)';
+    for (let i = 0; i < MAX_SPOTS; i++) {
+      const s = this._spots[i];
+      const cx = s.ax + s.ox1 * Math.sin(t * s.w1 + s.phx);
+      const cy = s.ay + s.oy1 * Math.cos(t * s.w2 + s.phy);
+      data[36 + i * 4]     = cx;
+      data[36 + i * 4 + 1] = cy;
+      data[36 + i * 4 + 2] = s.r;
+      data[36 + i * 4 + 3] = 0;
+      const colSrc = spotCols ? spotCols[i % spotCols.length] : fallbackCol;
+      const c = cssToGpuColor(colSrc, { r: 1, g: 1, b: 1, a: 0.10 });
+      data[68 + i * 4]     = c.r * c.a;
+      data[68 + i * 4 + 1] = c.g * c.a;
+      data[68 + i * 4 + 2] = c.b * c.a;
+      data[68 + i * 4 + 3] = 0;
+    }
+    this.device.queue.writeBuffer(
+      this._bgUniformBuffer, 0, data.buffer, data.byteOffset, data.byteLength,
+    );
   }
 
   drawCells(shapes, time /*, timeMs */) {

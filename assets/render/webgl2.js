@@ -12,7 +12,7 @@
 
 import {
   S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
-  currentBackground, currentTheme, currentHighlightColor, cellColors, frac,
+  currentBackground, currentBgLayers, currentTheme, currentHighlightColor, cellColors, frac,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
@@ -673,6 +673,7 @@ uniform int u_spotCount;
 uniform vec4 u_spots[${MAX_SPOTS}];      // (cx, cy, r, _) screen 0..1
 uniform vec3 u_spotCols[${MAX_SPOTS}];
 uniform int u_rbc;                        // 0=off, 1=draw drifting RBC silhouettes
+uniform float u_opacity;                  // per-layer opacity (0..1), folded into output alpha + premultiplied RGB
 
 out vec4 outColor;
 
@@ -957,7 +958,9 @@ void main() {
     col *= 1.0 - vAmt;
   }
 
-  outColor = vec4(col, 1.0);
+  // Premultiplied output so the bg pass composites correctly when
+  // u_opacity < 1 with the standard blend funcs the layer loop sets.
+  outColor = vec4(col * u_opacity, u_opacity);
 }`;
 
 // ---------- metaSplit (S.metaSplit) — per-pair metaball pass ----------
@@ -1125,12 +1128,16 @@ void main() {
   } else {
     // Crosshair — cyan ring + cross. Pure normal-blend output;
     // u_mode is ignored to keep the line legible against any scene.
+    // Ring fits the shorter viewport axis with 5% padding (radius =
+    // min(W,H) * 0.475) so it scales with the canvas while staying
+    // circular at any aspect ratio.
     vec2 px = gl_FragCoord.xy - u_resolution * 0.5;
     float armLen   = 14.0;
     float thick    = 1.0;
+    float ringR    = min(u_resolution.x, u_resolution.y) * 0.475;
     float horiz = (abs(px.y) < thick && abs(px.x) < armLen) ? 1.0 : 0.0;
     float vert  = (abs(px.x) < thick && abs(px.y) < armLen) ? 1.0 : 0.0;
-    float ring  = (abs(length(px) - 22.0) < thick) ? 0.6 : 0.0;
+    float ring  = (abs(length(px) - ringR) < thick) ? 0.6 : 0.0;
     float a = max(max(horiz, vert), ring);
     outColor = vec4(vec3(0.42, 0.95, 1.0), a * 0.6);
     return;
@@ -1991,6 +1998,7 @@ export class WebGL2Renderer extends RendererBase {
     this._bgU.spotCols = bu('u_spotCols');
     this._bgU.rbc = bu('u_rbc');
     this._bgU.reactorTex = bu('u_reactorTex');
+    this._bgU.opacity = bu('u_opacity');
 
     // Reactor (Gray-Scott) — programs compile lazily on first use,
     // not at boot: most sessions never select the theme. See
@@ -2713,28 +2721,16 @@ export class WebGL2Renderer extends RendererBase {
 
   drawBackground(timeMs) {
     const gl = this.gl;
-    const bg = currentBackground();
+    const layers = currentBgLayers();
     const t = timeMs * 0.001 * (S.bgFlowSpeed || 1);
     this._lastFrameSec = t;     // endFrame's post-pass reads this
 
-    let kind = 0; // flat
-    if (bg.kind === 'gradient') kind = 1;
-    else if (bg.kind === 'agar') kind = 2;
-    else if (bg.kind === 'cybergrid') kind = 3;
-    else if (bg.kind === 'lung') kind = 4;
-    else if (bg.kind === 'aurora') kind = 5;
-    else if (bg.kind === 'underwater') kind = 6;
-    else if (bg.kind === 'lava') kind = 7;
-    else if (bg.kind === 'reactor') kind = 8;
-    else if (bg.kind === 'bloodflow') kind = 9;
-    else if (bg.kind === 'cell-shadow') kind = 10;
-    // 'flat' / 'navy-ghost' / unknown all fall through to flat.
-
     // Reactor (Gray-Scott) — run N step iterations + maybe seed before
-    // the display pass, so the FRAG_BG kind=8 branch can sample the
-    // up-to-date front RT. Programs + RTs are allocated lazily here
-    // (most sessions never enter this theme).
-    if (kind === 8) {
+    // the display pass(es), so the FRAG_BG kind=8 branch can sample the
+    // up-to-date front RT. Update once per frame regardless of how many
+    // reactor layers reference it.
+    const hasReactor = layers.some(l => l.kind === 'reactor');
+    if (hasReactor) {
       this._reactorEnsureProgs();
       this._reactorEnsureRts();
       if (timeMs - this._reactorLastSeedMs > 10000) {
@@ -2747,61 +2743,14 @@ export class WebGL2Renderer extends RendererBase {
       gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
       gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     } else if (this._reactorRtA) {
-      // Theme switched away from reactor — release the RTs so we
-      // don't carry the GPU memory across the rest of the session.
+      // No layer references reactor — release the RTs so we don't
+      // carry the GPU memory across the rest of the session.
       this._reactorDestroy();
     }
 
-    // Compute drifting-spot positions in screen UV (matches Canvas2D).
-    const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
-    const spotCols = Array.isArray(bg.spotColors) ? bg.spotColors : null;
-    const fallbackCol = bg.spotColor;
-    for (let i = 0; i < MAX_SPOTS; i++) {
-      const s = this._spots[i];
-      const cx = s.ax + s.ox1 * Math.sin(t * s.w1 + s.phx);
-      const cy = s.ay + s.oy1 * Math.cos(t * s.w2 + s.phy);
-      this._spotsBuf[i * 4]     = cx;
-      this._spotsBuf[i * 4 + 1] = cy;
-      this._spotsBuf[i * 4 + 2] = s.r;
-      this._spotsBuf[i * 4 + 3] = 0;
-      const colSrc = spotCols ? spotCols[i % spotCols.length] : fallbackCol;
-      const v4 = colSrc ? rgbaStringToVec4(colSrc) : [1, 1, 1, 0.10];
-      // Pre-multiply rgb by source alpha so the shader can add directly.
-      this._spotColsBuf[i * 3]     = v4[0] * v4[3];
-      this._spotColsBuf[i * 3 + 1] = v4[1] * v4[3];
-      this._spotColsBuf[i * 3 + 2] = v4[2] * v4[3];
-    }
-
-    gl.useProgram(this._bgProg);
-    gl.uniform1i(this._bgU.kind, kind);
-    gl.uniform3fv(this._bgU.base, hexToVec3(bg.base || '#000000'));
-    gl.uniform3fv(this._bgU.top, hexToVec3(bg.topColor || bg.base || '#000000'));
-    gl.uniform3fv(this._bgU.bot, hexToVec3(bg.botColor || bg.base || '#000000'));
-    gl.uniform3fv(this._bgU.ringColor, rgbaStringToVec3(bg.ringColor || 'rgba(120,80,30,0.5)'));
-    gl.uniform3fv(this._bgU.gridColor, rgbaStringToVec3(bg.gridColor || 'rgba(0,255,170,0.5)'));
-    gl.uniform1f(this._bgU.gridStep, bg.gridStep || 48);
-    gl.uniform1f(this._bgU.vignette, bg.vignette || 0);
-    gl.uniform4f(this._bgU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
-    gl.uniform2f(this._bgU.viewport, this.W, this.H);
-    gl.uniform1f(this._bgU.time, t);
-    gl.uniform1i(this._bgU.spotCount, count);
-    gl.uniform4fv(this._bgU.spots, this._spotsBuf);
-    gl.uniform3fv(this._bgU.spotCols, this._spotColsBuf);
-    gl.uniform1i(this._bgU.rbc, bg.rbcSilhouettes ? 1 : 0);
-    if (kind === 8) {
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this._reactorRt(this._reactorFront).tex);
-      gl.uniform1i(this._bgU.reactorTex, 0);
-    }
-
-    gl.bindVertexArray(this._bgVao);
-    gl.disable(gl.BLEND);
-
-    // Bg-only ripple mode (rippleScope='bg'): redirect this single
-    // bg pass into the ripple RT, run the ripple post-pass right
-    // back to canvas, leaving subsequent draws (cells, particles,
-    // antibodies) untouched. Scene-wide mode is handled in
-    // endFrame() instead — see beginFrame().
+    // Bg-only ripple mode (rippleScope='bg'): redirect the entire bg
+    // stack into the ripple RT, then run the ripple post-pass back to
+    // canvas. Scene-wide mode is handled in endFrame() instead.
     const bgOnlyRipples = !!S.liquidRipples && S.rippleScope === 'bg';
     if (bgOnlyRipples) {
       this._rippleEnsureRt();
@@ -2810,7 +2759,25 @@ export class WebGL2Renderer extends RendererBase {
       gl.viewport(0, 0, this._rippleRt.w, this._rippleRt.h);
     }
 
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    if (layers.length === 0) {
+      // No enabled layers — clear to black so cells aren't drawn over
+      // stale pixels.
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    } else {
+      gl.useProgram(this._bgProg);
+      gl.bindVertexArray(this._bgVao);
+      gl.uniform4f(this._bgU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
+      gl.uniform2f(this._bgU.viewport, this.W, this.H);
+      gl.uniform1f(this._bgU.time, t);
+
+      for (let li = 0; li < layers.length; li++) {
+        const bg = layers[li];
+        this._setBgLayerUniforms(bg, t);
+        this._applyBgLayerBlend(li, bg);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+    }
 
     if (bgOnlyRipples && this._rippleProg) {
       const cellCount = this._rippleCollectCells();
@@ -2832,9 +2799,85 @@ export class WebGL2Renderer extends RendererBase {
     }
 
     gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindVertexArray(null);
     // Decor (lobules, villi, neurons, …) intentionally not ported —
     // background flair only visible in a handful of themes.
+  }
+
+  _setBgLayerUniforms(bg, t) {
+    const gl = this.gl;
+    let kind = 0; // flat
+    if (bg.kind === 'gradient') kind = 1;
+    else if (bg.kind === 'agar') kind = 2;
+    else if (bg.kind === 'cybergrid') kind = 3;
+    else if (bg.kind === 'lung') kind = 4;
+    else if (bg.kind === 'aurora') kind = 5;
+    else if (bg.kind === 'underwater') kind = 6;
+    else if (bg.kind === 'lava') kind = 7;
+    else if (bg.kind === 'reactor') kind = 8;
+    else if (bg.kind === 'bloodflow') kind = 9;
+    else if (bg.kind === 'cell-shadow') kind = 10;
+    // 'flat' / 'navy-ghost' / unknown all fall through to flat.
+
+    const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
+    const spotCols = Array.isArray(bg.spotColors) ? bg.spotColors : null;
+    const fallbackCol = bg.spotColor;
+    for (let i = 0; i < MAX_SPOTS; i++) {
+      const s = this._spots[i];
+      const cx = s.ax + s.ox1 * Math.sin(t * s.w1 + s.phx);
+      const cy = s.ay + s.oy1 * Math.cos(t * s.w2 + s.phy);
+      this._spotsBuf[i * 4]     = cx;
+      this._spotsBuf[i * 4 + 1] = cy;
+      this._spotsBuf[i * 4 + 2] = s.r;
+      this._spotsBuf[i * 4 + 3] = 0;
+      const colSrc = spotCols ? spotCols[i % spotCols.length] : fallbackCol;
+      const v4 = colSrc ? rgbaStringToVec4(colSrc) : [1, 1, 1, 0.10];
+      this._spotColsBuf[i * 3]     = v4[0] * v4[3];
+      this._spotColsBuf[i * 3 + 1] = v4[1] * v4[3];
+      this._spotColsBuf[i * 3 + 2] = v4[2] * v4[3];
+    }
+
+    gl.uniform1i(this._bgU.kind, kind);
+    gl.uniform3fv(this._bgU.base, hexToVec3(bg.base || '#000000'));
+    gl.uniform3fv(this._bgU.top, hexToVec3(bg.topColor || bg.base || '#000000'));
+    gl.uniform3fv(this._bgU.bot, hexToVec3(bg.botColor || bg.base || '#000000'));
+    gl.uniform3fv(this._bgU.ringColor, rgbaStringToVec3(bg.ringColor || 'rgba(120,80,30,0.5)'));
+    gl.uniform3fv(this._bgU.gridColor, rgbaStringToVec3(bg.gridColor || 'rgba(0,255,170,0.5)'));
+    gl.uniform1f(this._bgU.gridStep, bg.gridStep || 48);
+    gl.uniform1f(this._bgU.vignette, bg.vignette || 0);
+    gl.uniform1i(this._bgU.spotCount, count);
+    gl.uniform4fv(this._bgU.spots, this._spotsBuf);
+    gl.uniform3fv(this._bgU.spotCols, this._spotColsBuf);
+    gl.uniform1i(this._bgU.rbc, bg.rbcSilhouettes ? 1 : 0);
+    gl.uniform1f(this._bgU.opacity, (typeof bg.opacity === 'number') ? bg.opacity : 1);
+    if (kind === 8) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._reactorRt(this._reactorFront).tex);
+      gl.uniform1i(this._bgU.reactorTex, 0);
+    }
+  }
+
+  _applyBgLayerBlend(index, bg) {
+    const gl = this.gl;
+    if (index === 0) {
+      // First layer overwrites whatever was in the framebuffer.
+      gl.disable(gl.BLEND);
+      return;
+    }
+    gl.enable(gl.BLEND);
+    const mode = bg.blend || 'normal';
+    if (mode === 'additive') {
+      gl.blendFunc(gl.ONE, gl.ONE);
+    } else if (mode === 'multiply') {
+      // True multiply: srcRGB * dstRGB. Source alpha is ignored, so
+      // opacity < 1 doesn't lerp toward identity here — acceptable for
+      // PR A; tighter control lands with the per-kind config in PR C.
+      gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+    } else {
+      // 'normal' — standard premultiplied alpha over.
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    }
   }
 
   _growInstanceBuffer(targetCount) {

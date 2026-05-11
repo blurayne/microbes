@@ -88,6 +88,11 @@ export const DEFAULTS = {
   membraneIntensity: 0.9,
   cellBorderThickness: 2.5,    // multiplier on the disk-shader outline band; webgl2 / webgpu only
   background: 'solid',
+  // Background layer stack. Empty array → renderers fall back to
+  // a single layer derived from S.background (the legacy single-bg
+  // path). PR B will surface a UI that populates this array. See
+  // .claude/plan/10-bg-layer-stack.md.
+  bgLayers: [],
   renderScale: 1.0,
   upscaleMode: 'blur',
   scanlinesAlpha: 0.08,     // 0..1 strength of the CRT scanlines overlay; 0 = off (replaces the old scanlines: bool toggle)
@@ -226,6 +231,19 @@ export function loadSettings() {
     const validBlendModes = ['normal', 'multiply', 'additive'];
     if (!validBlendModes.includes(parsed.staticNoiseBlend)) parsed.staticNoiseBlend = DEFAULTS.staticNoiseBlend;
     if (!validBlendModes.includes(parsed.vignetteBlend))    parsed.vignetteBlend    = DEFAULTS.vignetteBlend;
+    // bgLayers: array of { kind, opacity, blend, enabled, ...params }.
+    // Missing / malformed → empty; renderers fall back to S.background.
+    if (!Array.isArray(parsed.bgLayers)) {
+      parsed.bgLayers = [];
+    } else {
+      parsed.bgLayers = parsed.bgLayers.filter(l => l && typeof l === 'object' && typeof l.kind === 'string')
+        .map(l => ({
+          ...l,
+          opacity: (typeof l.opacity === 'number') ? Math.max(0, Math.min(1, l.opacity)) : 1,
+          blend:   validBlendModes.includes(l.blend) ? l.blend : 'normal',
+          enabled: l.enabled !== false,
+        }));
+    }
     // maxCells: invalid (non-number / NaN / Infinity) → 512; otherwise
     // clamp to [32, 4096]. Bounds match the Settings number input.
     if (typeof parsed.maxCells !== 'number' || !Number.isFinite(parsed.maxCells)) {
@@ -1456,6 +1474,19 @@ export const BACKGROUNDS = (() => {
 
 export function currentBackground() {
   return BACKGROUNDS[S.background] || BACKGROUNDS[S.interfaceColor] || BACKGROUNDS.solid;
+}
+
+// Layer stack the renderers iterate. If S.bgLayers is non-empty,
+// each entry is a fully-formed bg blob plus { opacity, blend,
+// enabled }. If empty, fall back to a single-layer stack derived
+// from the legacy S.background preset key — preserves N=1 parity
+// with the single-bg pipeline. See .claude/plan/10-bg-layer-stack.md.
+export function currentBgLayers() {
+  if (Array.isArray(S.bgLayers) && S.bgLayers.length > 0) {
+    return S.bgLayers.filter(l => l.enabled !== false);
+  }
+  const bg = currentBackground();
+  return [{ ...bg, opacity: 1, blend: 'normal', enabled: true }];
 }
 
 // ---------- Cell types ----------
