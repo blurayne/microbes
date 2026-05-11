@@ -260,6 +260,21 @@ export function loadSettings() {
     parsed.makeItRealHue1          = clamp01(parsed.makeItRealHue1,          DEFAULTS.makeItRealHue1);
     parsed.makeItRealHue2          = clamp01(parsed.makeItRealHue2,          DEFAULTS.makeItRealHue2);
     parsed.makeItRealSaturation    = clamp01(parsed.makeItRealSaturation,    DEFAULTS.makeItRealSaturation);
+    // One-time migration after PR #147 shipped broken: force all
+    // overlay toggles OFF on first load so users who toggled them on
+    // before this fix don't see a stale (now-different) effect. They
+    // can re-enable from Settings → Overlays. Flag is set once; later
+    // sessions persist whatever the user actually chose.
+    if (!parsed._microscopeFxResetV1) {
+      parsed.microscopeBlur   = false;
+      parsed.makeItReal       = false;
+      parsed.causticsOverlay  = false;
+      parsed.liquidRipples    = false;
+      parsed.staticNoise      = false;
+      parsed.vignette         = false;
+      parsed.crosshair        = false;
+      parsed._microscopeFxResetV1 = true;
+    }
     // bgLayers: array of { kind, opacity, blend, enabled, ...params }.
     // Missing / malformed → empty; renderers fall back to S.background.
     if (!Array.isArray(parsed.bgLayers)) {
