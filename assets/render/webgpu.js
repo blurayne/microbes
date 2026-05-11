@@ -990,6 +990,90 @@ struct CausticU {
 }
 `;
 
+// Microscope FX post-pass — mirror of webgl2.js FRAG_SCENE_FX.
+// Combined microscope blur (variable-radius bokeh, sharp center →
+// blurry edges) + "make it real" duotone color grade. Both effects
+// gated independently by uniforms. Single pass.
+const SCENE_FX_WGSL = /* wgsl */ `
+struct SceneFxU {
+  // (W, H, _, _)
+  res:   vec4<f32>,
+  // (blurOn, focusRadius, blurStrength, falloff)
+  blur:  vec4<f32>,
+  // (gradeOn, hue1, hue2, saturation)
+  grade: vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> U : SceneFxU;
+@group(0) @binding(1) var sceneSamp : sampler;
+@group(0) @binding(2) var sceneTex  : texture_2d<f32>;
+
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+  let x = f32((vi << 1u) & 2u) * 2.0 - 1.0;
+  let y = f32(vi & 2u) * 2.0 - 1.0;
+  return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
+  let K = vec4<f32>(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  let p = abs(fract(vec3<f32>(c.x) + K.xyz) * 6.0 - vec3<f32>(K.w));
+  return c.z * mix(vec3<f32>(K.x), clamp(p - vec3<f32>(K.x), vec3<f32>(0.0), vec3<f32>(1.0)), c.y);
+}
+
+@fragment fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+  let dim = vec2<f32>(textureDimensions(sceneTex, 0));
+  let uv  = frag.xy / dim;
+  // Aspect-correct radial distance so the focus zone is circular.
+  let ndc = uv * 2.0 - vec2<f32>(1.0);
+  let aspect = dim.x / max(1.0, dim.y);
+  var nd = ndc;
+  if (aspect > 1.0) { nd.x = nd.x * aspect; } else { nd.y = nd.y / aspect; }
+  let r = length(nd);
+
+  let blurOn       = U.blur.x;
+  let focusRadius  = U.blur.y;
+  let blurStrength = U.blur.z;
+  let falloff      = U.blur.w;
+  let gradeOn     = U.grade.x;
+  let hue1        = U.grade.y;
+  let hue2        = U.grade.z;
+  let saturation  = U.grade.w;
+
+  var col: vec3<f32>;
+  if (blurOn > 0.5 && blurStrength > 0.001) {
+    let beyond = clamp((r - focusRadius) / max(1e-3, 1.0 - focusRadius), 0.0, 1.0);
+    let curve  = mix(1.2, 5.0, falloff);
+    let blurAmt = pow(beyond, curve);
+    let minDim  = min(dim.x, dim.y);
+    let blurRadius = blurStrength * 0.06 * minDim * blurAmt;
+    if (blurRadius < 0.5) {
+      col = textureSample(sceneTex, sceneSamp, uv).rgb;
+    } else {
+      let px = vec2<f32>(blurRadius) / dim;
+      var sum = textureSample(sceneTex, sceneSamp, uv).rgb;
+      let TAU: f32 = 6.28318530718;
+      for (var i: i32 = 0; i < 8; i = i + 1) {
+        let a = (f32(i) / 8.0) * TAU;
+        sum = sum + textureSample(sceneTex, sceneSamp, uv + vec2<f32>(cos(a), sin(a)) * px).rgb;
+      }
+      col = sum / 9.0;
+    }
+  } else {
+    col = textureSample(sceneTex, sceneSamp, uv).rgb;
+  }
+
+  if (gradeOn > 0.5) {
+    let Y = dot(col, vec3<f32>(0.299, 0.587, 0.114));
+    var dh = hue2 - hue1;
+    if (dh >  0.5) { dh = dh - 1.0; }
+    if (dh < -0.5) { dh = dh + 1.0; }
+    let targetHue = fract(hue1 + dh * Y);
+    col = hsv2rgb(vec3<f32>(targetHue, saturation, Y));
+  }
+
+  return vec4<f32>(col, 1.0);
+}
+`;
+
 // Liquid-ripples post-process. Mirror of FRAG_RIPPLE_BG. Each cell
 // is packed as vec4(uvX, uvY, uvR, _); WGSL pads vec3 arrays to
 // vec4 anyway, so explicit vec4 keeps the JS-side layout simple.
@@ -2751,6 +2835,53 @@ export class WebGPURenderer extends RendererBase {
     this._causticBgUboData = null;
   }
 
+  // ── Microscope FX post-pass (S.microscopeBlur + S.makeItReal) ──
+  // Mirror of webgl2.js _sceneFx*. Shared RT for blur + duotone grade.
+  // Mutually exclusive with caustics + ripples-scene-wide (one RT slot
+  // for any scene-wide post-process). Lazy alloc + lazy destroy.
+  _sceneFxEnsureRt() {
+    const device = this.device;
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
+    if (this._sceneFxRt && this._sceneFxRt.w === w && this._sceneFxRt.h === h) return;
+    if (this._sceneFxRt) { try { this._sceneFxRt.tex.destroy(); } catch {} }
+    const tex = device.createTexture({
+      size: [w, h],
+      format: this.format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    });
+    this._sceneFxRt = { tex, view: tex.createView(), w, h };
+  }
+  _sceneFxEnsurePipeline() {
+    if (this._sceneFxPipeline) return;
+    const device = this.device;
+    const mod = device.createShaderModule({ code: SCENE_FX_WGSL });
+    this._sceneFxPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex:   { module: mod, entryPoint: 'vs_main' },
+      fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format }] },
+      primitive: { topology: 'triangle-list' },
+    });
+    this._sceneFxSampler = device.createSampler({
+      magFilter: 'linear', minFilter: 'linear',
+      addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
+    });
+    // 3 × vec4 = 48 bytes. Layout: res, blur (on/focus/strength/falloff),
+    // grade (on/hue1/hue2/saturation).
+    this._sceneFxUbo = device.createBuffer({
+      size: 48,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._sceneFxUboData = new Float32Array(12);
+  }
+  _sceneFxDestroy() {
+    if (this._sceneFxRt) { try { this._sceneFxRt.tex.destroy(); } catch {} this._sceneFxRt = null; }
+    if (this._sceneFxUbo) { try { this._sceneFxUbo.destroy(); } catch {} this._sceneFxUbo = null; }
+    this._sceneFxPipeline = null;
+    this._sceneFxSampler = null;
+    this._sceneFxUboData = null;
+  }
+
   // ── Liquid-ripples overlay (S.liquidRipples) ──
   // Mirror of WebGL2 _ripple* helpers. Shares no state with caustics
   // — separate RT + pipeline + UBO. drawBackground picks one or the
@@ -3151,6 +3282,7 @@ export class WebGPURenderer extends RendererBase {
     const useRipples       = !!S.liquidRipples;
     const ripplesSceneWide = useRipples && S.rippleScope !== 'bg';
     const useCaustics      = !!S.causticsOverlay && !ripplesSceneWide;
+    const useSceneFx       = (!!S.microscopeBlur || !!S.makeItReal) && !ripplesSceneWide && !useCaustics;
     if (ripplesSceneWide) {
       this._rippleBgEnsureRt();
       this._rippleBgEnsurePipeline();
@@ -3161,11 +3293,17 @@ export class WebGPURenderer extends RendererBase {
       this._causticBgEnsurePipeline();
       this._sceneView = this._causticBgRt.view;
       this._scenePostProc = 'caustics';
+    } else if (useSceneFx) {
+      this._sceneFxEnsureRt();
+      this._sceneFxEnsurePipeline();
+      this._sceneView = this._sceneFxRt.view;
+      this._scenePostProc = 'sceneFx';
     }
     if (!ripplesSceneWide && !(useRipples && S.rippleScope === 'bg') && this._rippleBgRt) {
       this._rippleBgDestroy();
     }
     if (!useCaustics && this._causticBgRt) this._causticBgDestroy();
+    if (!useSceneFx && this._sceneFxRt) this._sceneFxDestroy();
   }
 
   drawBackground(timeMs) {
@@ -4028,6 +4166,43 @@ export class WebGPURenderer extends RendererBase {
       post.setBindGroup(0, bg);
       post.draw(3, 1, 0, 0);
       post.end();
+    } else if (this._scenePostProc === 'sceneFx' && this._sceneFxPipeline && this._sceneFxRt) {
+      const u = this._sceneFxUboData;
+      u[0] = this.canvas.width;
+      u[1] = this.canvas.height;
+      u[2] = 0; u[3] = 0;
+      u[4] = S.microscopeBlur ? 1 : 0;
+      u[5] = S.microscopeFocus ?? 0.35;
+      u[6] = S.microscopeBlurStrength ?? 0.5;
+      u[7] = S.microscopeFalloff ?? 0.5;
+      u[8]  = S.makeItReal ? 1 : 0;
+      u[9]  = S.makeItRealHue1 ?? 0.30;
+      u[10] = S.makeItRealHue2 ?? 0.55;
+      u[11] = S.makeItRealSaturation ?? 0.55;
+      this.device.queue.writeBuffer(
+        this._sceneFxUbo, 0,
+        u.buffer, u.byteOffset, u.byteLength,
+      );
+      const bg = this.device.createBindGroup({
+        layout: this._sceneFxPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._sceneFxUbo } },
+          { binding: 1, resource: this._sceneFxSampler },
+          { binding: 2, resource: this._sceneFxRt.view },
+        ],
+      });
+      const post = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: this._frameView,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      post.setPipeline(this._sceneFxPipeline);
+      post.setBindGroup(0, bg);
+      post.draw(3, 1, 0, 0);
+      post.end();
     }
     // FX overlays (noise / vignette / crosshair) layer on top of
     // whatever the scene + post-pass produced. Each enabled effect
@@ -4440,6 +4615,7 @@ export class WebGPURenderer extends RendererBase {
     this._reactorDestroy();
     this._causticBgDestroy();
     this._rippleBgDestroy();
+    this._sceneFxDestroy();
     tryDestroy(this._reactorStepUniformBuffer);
     tryDestroy(this._reactorSeedUniformBuffer);
     tryDestroy(this._reactorDummyTex);

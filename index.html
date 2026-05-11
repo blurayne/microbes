@@ -124,6 +124,30 @@
           </label>
         </div>
         <label><input type="checkbox" id="crosshairToggle" /> <span data-i18n="crosshair">Crosshair</span></label>
+        <label><input type="checkbox" id="microscopeBlurToggle" /> <span data-i18n="microscope_blur">Microscope blur</span></label>
+        <div id="microscopeBlurControls" class="sub-controls" hidden>
+          <label><span data-i18n="microscope_focus">Focus radius</span> <span id="microscopeFocusVal" class="val"></span>
+            <input type="range" id="microscopeFocus" min="0" max="1" step="0.01" />
+          </label>
+          <label><span data-i18n="microscope_blur_strength">Blur strength</span> <span id="microscopeBlurStrengthVal" class="val"></span>
+            <input type="range" id="microscopeBlurStrength" min="0" max="1" step="0.01" />
+          </label>
+          <label><span data-i18n="microscope_falloff">Falloff</span> <span id="microscopeFalloffVal" class="val"></span>
+            <input type="range" id="microscopeFalloff" min="0" max="1" step="0.01" />
+          </label>
+        </div>
+        <label><input type="checkbox" id="makeItRealToggle" /> <span data-i18n="make_it_real">Make it real</span></label>
+        <div id="makeItRealControls" class="sub-controls" hidden>
+          <label><span data-i18n="make_it_real_hue1">Shadow hue</span> <span id="makeItRealHue1Val" class="val"></span>
+            <input type="range" id="makeItRealHue1" min="0" max="1" step="0.01" />
+          </label>
+          <label><span data-i18n="make_it_real_hue2">Highlight hue</span> <span id="makeItRealHue2Val" class="val"></span>
+            <input type="range" id="makeItRealHue2" min="0" max="1" step="0.01" />
+          </label>
+          <label><span data-i18n="make_it_real_saturation">Saturation</span> <span id="makeItRealSaturationVal" class="val"></span>
+            <input type="range" id="makeItRealSaturation" min="0" max="1" step="0.01" />
+          </label>
+        </div>
       </details>
 
       <details class="settings-section">

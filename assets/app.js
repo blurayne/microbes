@@ -956,6 +956,32 @@ if (vignetteBlendEl) {
 // Crosshair overlay — toggle-only (cyan + at viewport centre).
 bindCheckbox('crosshairToggle', 'crosshair');
 
+// Microscope blur — scene-wide variable-radius blur. Same pattern as
+// the caustics / ripples / staticNoise sections: toggle reveals a
+// sub-controls block; sliders persist to S without per-change side
+// effects (the renderer reads S each frame).
+const microscopeBlurControlsEl = document.getElementById('microscopeBlurControls');
+function applyMicroscopeBlurVis() {
+  if (microscopeBlurControlsEl) microscopeBlurControlsEl.hidden = !S.microscopeBlur;
+}
+bindCheckbox('microscopeBlurToggle', 'microscopeBlur', applyMicroscopeBlurVis);
+applyMicroscopeBlurVis();
+bindRange('microscopeFocus',         'microscopeFocus',         'microscopeFocusVal',         v => v.toFixed(2));
+bindRange('microscopeBlurStrength',  'microscopeBlurStrength',  'microscopeBlurStrengthVal',  v => v.toFixed(2));
+bindRange('microscopeFalloff',       'microscopeFalloff',       'microscopeFalloffVal',       v => v.toFixed(2));
+
+// "Make it real" microscope-photo color grade — duotone gradient
+// (shadow hue → highlight hue) with a saturation knob.
+const makeItRealControlsEl = document.getElementById('makeItRealControls');
+function applyMakeItRealVis() {
+  if (makeItRealControlsEl) makeItRealControlsEl.hidden = !S.makeItReal;
+}
+bindCheckbox('makeItRealToggle', 'makeItReal', applyMakeItRealVis);
+applyMakeItRealVis();
+bindRange('makeItRealHue1',       'makeItRealHue1',       'makeItRealHue1Val',       v => v.toFixed(2));
+bindRange('makeItRealHue2',       'makeItRealHue2',       'makeItRealHue2Val',       v => v.toFixed(2));
+bindRange('makeItRealSaturation', 'makeItRealSaturation', 'makeItRealSaturationVal', v => v.toFixed(2));
+
 // Fullscreen toggle. Browsers REQUIRE a user gesture to enter
 // fullscreen, so this can't be a saved-and-restored S.* setting —
 // we only react to the user's click. The checkbox state is kept
