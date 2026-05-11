@@ -57,6 +57,15 @@ export const DEFAULTS = {
   causticTintR: 0.0,
   causticTintG: 1.35,
   causticTintB: 0.5,
+  // Fullscreen overlay effects (all post-bg, post-cells). Ported from
+  // docs/shader-test.html's microscope chrome — toggleable + tunable.
+  staticNoise: false,            // film-grain per-pixel hash noise
+  staticNoiseIntensity: 0.4,
+  staticNoiseBlend: 'additive',  // 'normal' | 'multiply' | 'additive'
+  vignette: false,               // viewport-radial blue tint at corners (microscope)
+  vignetteIntensity: 0.6,
+  vignetteBlend: 'additive',
+  crosshair: false,              // small cyan + at viewport centre
   // Liquid-ripples knobs. All three are visible in the settings panel
   // only while S.liquidRipples is on. They feed straight into the
   // ripple shader's per-cell uniforms (see _rippleCollectCells + UBO).
@@ -214,6 +223,9 @@ export function loadSettings() {
     if (!validRippleScopes.includes(parsed.rippleScope)) parsed.rippleScope = DEFAULTS.rippleScope;
     const validAddDialogViews = ['grid', 'list'];
     if (!validAddDialogViews.includes(parsed.addDialogView)) parsed.addDialogView = DEFAULTS.addDialogView;
+    const validBlendModes = ['normal', 'multiply', 'additive'];
+    if (!validBlendModes.includes(parsed.staticNoiseBlend)) parsed.staticNoiseBlend = DEFAULTS.staticNoiseBlend;
+    if (!validBlendModes.includes(parsed.vignetteBlend))    parsed.vignetteBlend    = DEFAULTS.vignetteBlend;
     if (typeof parsed.maxCells !== 'number' || !Number.isFinite(parsed.maxCells)) {
       parsed.maxCells = DEFAULTS.maxCells;
     }
@@ -351,6 +363,16 @@ export const LOCALES = {
     view_grid: 'Grid view', view_list: 'List view',
     max_cells: 'Max cells',
     max_cells_hint: 'At the cap, new spawns + splits silently recycle the oldest cell.',
+    overlays_section: 'Overlays',
+    static_noise: 'Static noise',
+    static_noise_intensity: 'Noise intensity',
+    vignette: 'Vignette',
+    vignette_intensity: 'Vignette intensity',
+    crosshair: 'Crosshair',
+    overlay_blend_label: 'Blend',
+    overlay_blend_normal: 'Normal',
+    overlay_blend_multiply: 'Multiply',
+    overlay_blend_additive: 'Additive',
     palette_to_help: 'Learn what each cell does →',
     palette_bad_to_help: 'Learn what each pathogen does →',
     debug_log: 'Debug log', clear: 'Clear', copy: 'Copy',
@@ -481,6 +503,16 @@ export const LOCALES = {
     view_grid: 'Rasteransicht', view_list: 'Listenansicht',
     max_cells: 'Max. Zellen',
     max_cells_hint: 'Am Limit recyceln neue Spawns + Teilungen die älteste Zelle.',
+    overlays_section: 'Overlays',
+    static_noise: 'Statisches Rauschen',
+    static_noise_intensity: 'Rausch-Intensität',
+    vignette: 'Vignette',
+    vignette_intensity: 'Vignette-Intensität',
+    crosshair: 'Fadenkreuz',
+    overlay_blend_label: 'Mischung',
+    overlay_blend_normal: 'Normal',
+    overlay_blend_multiply: 'Multiplikativ',
+    overlay_blend_additive: 'Additiv',
     palette_to_help: 'Was macht jede Zelle? →',
     palette_bad_to_help: 'Was macht jeder Erreger? →',
     debug_log: 'Debug-Log', clear: 'Leeren', copy: 'Kopieren',
