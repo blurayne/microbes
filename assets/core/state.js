@@ -358,6 +358,9 @@ export const LOCALES = {
     bg_mitochondria: 'Mitochondria (amber)',
     bg_neuron: 'Neuron (electric blue)',
     bg_bile: 'Bile (chartreuse)',
+    bg_neuralNetwork: 'Neural network',
+    bg_reactorAgar: 'Reactor agar',
+    bg_cyberTissue: 'Cyber tissue',
     ic_pink: 'Pink', ic_red: 'Red', ic_amber: 'Amber', ic_yellow: 'Yellow',
     ic_green: 'Green', ic_cyan: 'Cyan', ic_blue: 'Blue', ic_violet: 'Violet', ic_mono: 'Mono',
     theme: 'Theme', interface_color: 'Interface color', background: 'Background', gameplay: 'Gameplay',
@@ -536,6 +539,9 @@ export const LOCALES = {
     bg_mitochondria: 'Mitochondrium (Bernstein)',
     bg_neuron: 'Neuron (Elektroblau)',
     bg_bile: 'Galle (Chartreuse)',
+    bg_neuralNetwork: 'Neuronales Netz',
+    bg_reactorAgar: 'Reaktor-Agar',
+    bg_cyberTissue: 'Cyber-Gewebe',
     ic_pink: 'Rosa', ic_red: 'Rot', ic_amber: 'Bernstein', ic_yellow: 'Gelb',
     ic_green: 'Grün', ic_cyan: 'Cyan', ic_blue: 'Blau', ic_violet: 'Violett', ic_mono: 'Mono',
     theme: 'Thema', interface_color: 'Schnittstellenfarbe', background: 'Hintergrund', gameplay: 'Spiel',
@@ -1563,11 +1569,47 @@ export const BACKGROUNDS = (() => {
   for (const [k, t] of Object.entries(THEMES)) {
     if (t.bg) out[k] = Object.assign({ label: t.label }, t.bg);
   }
+  // Composite presets (plan #10 PR D). Each entry has a `layers`
+  // array whose items are full bg blobs plus { opacity, blend }. They
+  // route through bgLayersFromPreset → S.bgLayers when picked from
+  // the dropdown. legacy currentBackground() returns the first layer
+  // so theme/palette code that reads bg.kind still works.
+  out.neuralNetwork = {
+    label: 'Neural network',
+    layers: [
+      { kind: 'neuron',    base: '#0a1218', vignette: 0.32, spotCount: 0 },
+      { kind: 'bloodflow', topColor: '#3a0a12', botColor: '#0e0205', vignette: 0,
+        opacity: 0.55, blend: 'multiply' },
+    ],
+  };
+  out.reactorAgar = {
+    label: 'Reactor agar',
+    layers: [
+      { kind: 'reactor', base: '#04130a', vignette: 0.25 },
+      { kind: 'agar',    base: '#0a0612', ringColor: 'rgba(255,255,255,0.10)', vignette: 0,
+        opacity: 0.75, blend: 'additive' },
+    ],
+  };
+  out.cyberTissue = {
+    label: 'Cyber tissue',
+    layers: [
+      { kind: 'gradient', topColor: '#1a0a3a', botColor: '#080214', spotCount: 5,
+        spotColor: 'rgba(180,140,255,0.18)', vignette: 0.30 },
+      { kind: 'cybergrid', base: '#000000', gridColor: 'rgba(0,255,170,0.22)',
+        gridStep: 64, vignette: 0, opacity: 0.65, blend: 'additive' },
+    ],
+  };
   return out;
 })();
 
 export function currentBackground() {
-  return BACKGROUNDS[S.background] || BACKGROUNDS[S.interfaceColor] || BACKGROUNDS.solid;
+  const bg = BACKGROUNDS[S.background] || BACKGROUNDS[S.interfaceColor] || BACKGROUNDS.solid;
+  // Composite preset: legacy single-bg callers (theme palette
+  // derivation, e.g. colorNameFor on bg.base) see the first layer
+  // as a representative blob. The renderers don't go through this
+  // path — they iterate currentBgLayers() instead.
+  if (Array.isArray(bg.layers) && bg.layers.length > 0) return bg.layers[0];
+  return bg;
 }
 
 // Layer stack the renderers iterate. If S.bgLayers is non-empty,
@@ -1594,15 +1636,32 @@ export function makeBgLayerId() {
 }
 export function bgLayerFromPreset(key) {
   const bg = BACKGROUNDS[key] || BACKGROUNDS.solid;
+  // Composite preset: synthesise a single representative layer from
+  // the first item (the +Add Layer button gets one layer, not a
+  // whole stack — composite presets land via bgLayersFromPreset).
+  const base = Array.isArray(bg.layers) ? bg.layers[0] : bg;
   return {
     id: makeBgLayerId(),
-    ...bg,
     opacity: 1,
     blend: 'normal',
     enabled: true,
+    ...base,
   };
 }
 export function bgLayersFromPreset(key) {
+  const bg = BACKGROUNDS[key] || BACKGROUNDS.solid;
+  if (Array.isArray(bg.layers) && bg.layers.length > 0) {
+    // Composite preset: each entry in the layers array is a full bg
+    // blob + per-layer (opacity, blend). Stamp an id + apply the
+    // defaults for any missing fields.
+    return bg.layers.map(l => ({
+      id: makeBgLayerId(),
+      opacity: 1,
+      blend: 'normal',
+      enabled: true,
+      ...l,
+    }));
+  }
   return [bgLayerFromPreset(key)];
 }
 
