@@ -1036,32 +1036,66 @@ void main() {
 `;
 
 // Microscope FX post-pass: combines microscope blur (variable-radius
-// bokeh blur — sharp center, blurry edges) with "make it real" duotone
-// color grade (luminance-mapped gradient between hue1 → hue2 with a
-// saturation knob). Both effects gated independently by uniforms so
-// the user can enable either / both / neither. Single pass; one
-// fullscreen quad. Mutually exclusive with scene-wide ripples +
-// caustics — only one scene-wide post-pass can own the RT.
+// bokeh-style blur — sharp center, blurry edges) with "make it real"
+// gradient-mapped color grade + chromatic aberration. Both effects
+// gated independently by uniforms so the user can enable either / both
+// / neither. Single fullscreen quad. Mutually exclusive with scene-
+// wide ripples + caustics — only one scene-wide post-pass owns the
+// scene RT.
+//
+// The grade math switched from HSV-duotone (PR #147, didn't look
+// like microscopy) to a 2-stop RGB gradient between user-chosen
+// anchor colors derived from (hue1, hue2, saturation). RGB
+// interpolation is what every shipped duotone shader uses; HSV
+// interpolation produces hue-wheel banding and ignores perceptual
+// luminance, which is why the original looked wrong. See
+// https://agatedragon.blog/2024/01/01/creating-a-duotone-effect-in-a-glsl-shader/
+// for the reference pattern.
 const FRAG_SCENE_FX = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_scene;
 uniform vec2 u_resolution;
 uniform float u_blurOn;        // 0 / 1
-uniform float u_focusRadius;   // 0..1, fraction of the half-diagonal
+uniform float u_focusRadius;   // 0..1, fraction of the half-diagonal that stays sharp
 uniform float u_blurStrength;  // 0..1, peak edge blur as fraction of min(W,H)
 uniform float u_falloff;       // 0..1, transition hardness (0 soft → 1 abrupt)
 uniform float u_gradeOn;       // 0 / 1
 uniform float u_hue1;          // 0..1, shadow hue
 uniform float u_hue2;          // 0..1, highlight hue
-uniform float u_saturation;    // 0..1, HSV S of the duotone output
+uniform float u_saturation;    // 0..1, anchor-color saturation
 out vec4 outColor;
+
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 vec3 hsv2rgb(vec3 c) {
   vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
   vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
   return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
+
+// 16-tap Poisson disk for softer bokeh than a single 8-tap ring.
+// Coords pre-normalized to ±1; the shader scales by the per-pixel
+// blur radius. Pattern from Bart Wronski's "Optimized Spatial Blur"
+// reference set (CC0).
+const vec2 POISSON16[16] = vec2[16](
+  vec2( 0.0, 0.0),
+  vec2( 0.50, 0.0),
+  vec2(-0.50, 0.0),
+  vec2( 0.0,  0.50),
+  vec2( 0.0, -0.50),
+  vec2( 0.92,  0.39),
+  vec2(-0.92,  0.39),
+  vec2( 0.92, -0.39),
+  vec2(-0.92, -0.39),
+  vec2( 0.39,  0.92),
+  vec2(-0.39,  0.92),
+  vec2( 0.39, -0.92),
+  vec2(-0.39, -0.92),
+  vec2( 0.68,  0.68),
+  vec2(-0.68,  0.68),
+  vec2( 0.68, -0.68)
+);
 
 void main() {
   vec2 uv = v_uv;
@@ -1072,42 +1106,60 @@ void main() {
   if (aspect > 1.0) nd.x *= aspect; else nd.y /= aspect;
   float r = length(nd);
 
+  // Variable-radius blur (or straight sample). The radius is what
+  // drives the visible defocus — bumped 2× from the PR #147 baseline
+  // so the user can actually see the effect at default sliders.
   vec3 col;
   if (u_blurOn > 0.5 && u_blurStrength > 0.001) {
-    // beyond ∈ [0, 1]: 0 inside the focus zone, ramps up outside.
     float beyond = clamp((r - u_focusRadius) / max(1e-3, 1.0 - u_focusRadius), 0.0, 1.0);
-    // Power-curve falloff: lower exponent = softer; higher = sharper edge.
     float curve = mix(1.2, 5.0, u_falloff);
     float blurAmt = pow(beyond, curve);
     float minDim = min(u_resolution.x, u_resolution.y);
-    float blurRadius = u_blurStrength * 0.06 * minDim * blurAmt;
+    float blurRadius = u_blurStrength * 0.12 * minDim * blurAmt;
     if (blurRadius < 0.5) {
       col = texture(u_scene, uv).rgb;
     } else {
       vec2 px = vec2(blurRadius) / u_resolution;
-      // 8-tap ring + center = 9 samples. Cheap microscope-defocus look.
-      vec3 sum = texture(u_scene, uv).rgb;
-      const float TAU = 6.28318530718;
-      for (int i = 0; i < 8; i++) {
-        float a = (float(i) / 8.0) * TAU;
-        sum += texture(u_scene, uv + vec2(cos(a), sin(a)) * px).rgb;
+      vec3 sum = vec3(0.0);
+      for (int i = 0; i < 16; i++) {
+        sum += texture(u_scene, uv + POISSON16[i] * px).rgb;
       }
-      col = sum / 9.0;
+      col = sum / 16.0;
     }
   } else {
     col = texture(u_scene, uv).rgb;
   }
 
   if (u_gradeOn > 0.5) {
-    // Duotone: map luminance Y along the shortest hue-wheel arc from
-    // hue1 → hue2, output HSV(targetHue, saturation, Y). Preserves
-    // luminance, replaces chroma with the duotone gradient.
-    float Y = dot(col, vec3(0.299, 0.587, 0.114));
-    float dh = u_hue2 - u_hue1;
-    if (dh > 0.5)  dh -= 1.0;
-    if (dh < -0.5) dh += 1.0;
-    float targetHue = fract(u_hue1 + dh * Y);
-    col = hsv2rgb(vec3(targetHue, u_saturation, Y));
+    // Chromatic aberration: radial offset on R/B channels. Strength
+    // ramps with distance² from screen center, so the corners get a
+    // visible pink/cyan fringe and the focus zone stays clean.
+    vec2 toCtr = uv - 0.5;
+    float caAmt = 0.006 * dot(toCtr, toCtr) * 4.0;
+    float Rc = texture(u_scene, uv - toCtr * caAmt).r;
+    float Bc = texture(u_scene, uv + toCtr * caAmt).b;
+    // If blur is on we already lost the sharp sample — use the
+    // blurred col.g, but pull fresh R/B taps from the scene RT for
+    // the aberration look.
+    vec3 src = vec3(Rc, col.g, Bc);
+
+    // Anchor colors: shadow at low V, highlight at high V, both
+    // tinted by the user-chosen hues and shared saturation. The two
+    // anchors are NOT V=0 and V=1 because that would crush blacks
+    // and blow out whites; 0.18 / 0.92 leaves headroom.
+    vec3 shadowAnchor    = hsv2rgb(vec3(u_hue1, u_saturation, 0.18));
+    vec3 highlightAnchor = hsv2rgb(vec3(u_hue2, u_saturation, 0.92));
+
+    // Map perceptual luminance along the anchor gradient. The
+    // smoothstep gives a Photoshop-style gentle contrast curve.
+    float Y = clamp(dot(src, LUMA), 0.0, 1.0);
+    float t = smoothstep(0.05, 0.95, Y);
+    vec3 graded = mix(shadowAnchor, highlightAnchor, t);
+
+    // Blend 15% of the original chroma back so cell colours don't
+    // collapse entirely into the gradient (microscopy preserves
+    // some local hue — pure duotone looks plasticky).
+    col = mix(graded, src, 0.15);
   }
 
   outColor = vec4(col, 1.0);

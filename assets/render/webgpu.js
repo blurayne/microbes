@@ -991,9 +991,9 @@ struct CausticU {
 `;
 
 // Microscope FX post-pass — mirror of webgl2.js FRAG_SCENE_FX.
-// Combined microscope blur (variable-radius bokeh, sharp center →
-// blurry edges) + "make it real" duotone color grade. Both effects
-// gated independently by uniforms. Single pass.
+// 16-tap Poisson bokeh blur + 2-stop RGB gradient grade with radial
+// chromatic aberration. See FRAG_SCENE_FX for the design rationale
+// (RGB gradient beats HSV-duotone; +CA gives the microscopy fringe).
 const SCENE_FX_WGSL = /* wgsl */ `
 struct SceneFxU {
   // (W, H, _, _)
@@ -1037,6 +1037,28 @@ fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
   let hue1        = U.grade.y;
   let hue2        = U.grade.z;
   let saturation  = U.grade.w;
+  let LUMA = vec3<f32>(0.2126, 0.7152, 0.0722);
+
+  // 16-tap Poisson disk. WGSL arrays are const-init-only at module
+  // scope; declare inside fn so the compiler can fold the loop.
+  var poisson: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
+    vec2<f32>( 0.0,  0.0),
+    vec2<f32>( 0.50, 0.0),
+    vec2<f32>(-0.50, 0.0),
+    vec2<f32>( 0.0,  0.50),
+    vec2<f32>( 0.0, -0.50),
+    vec2<f32>( 0.92,  0.39),
+    vec2<f32>(-0.92,  0.39),
+    vec2<f32>( 0.92, -0.39),
+    vec2<f32>(-0.92, -0.39),
+    vec2<f32>( 0.39,  0.92),
+    vec2<f32>(-0.39,  0.92),
+    vec2<f32>( 0.39, -0.92),
+    vec2<f32>(-0.39, -0.92),
+    vec2<f32>( 0.68,  0.68),
+    vec2<f32>(-0.68,  0.68),
+    vec2<f32>( 0.68, -0.68),
+  );
 
   var col: vec3<f32>;
   if (blurOn > 0.5 && blurStrength > 0.001) {
@@ -1044,30 +1066,33 @@ fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
     let curve  = mix(1.2, 5.0, falloff);
     let blurAmt = pow(beyond, curve);
     let minDim  = min(dim.x, dim.y);
-    let blurRadius = blurStrength * 0.06 * minDim * blurAmt;
+    let blurRadius = blurStrength * 0.12 * minDim * blurAmt;
     if (blurRadius < 0.5) {
       col = textureSample(sceneTex, sceneSamp, uv).rgb;
     } else {
       let px = vec2<f32>(blurRadius) / dim;
-      var sum = textureSample(sceneTex, sceneSamp, uv).rgb;
-      let TAU: f32 = 6.28318530718;
-      for (var i: i32 = 0; i < 8; i = i + 1) {
-        let a = (f32(i) / 8.0) * TAU;
-        sum = sum + textureSample(sceneTex, sceneSamp, uv + vec2<f32>(cos(a), sin(a)) * px).rgb;
+      var sum = vec3<f32>(0.0);
+      for (var i: i32 = 0; i < 16; i = i + 1) {
+        sum = sum + textureSample(sceneTex, sceneSamp, uv + poisson[i] * px).rgb;
       }
-      col = sum / 9.0;
+      col = sum / 16.0;
     }
   } else {
     col = textureSample(sceneTex, sceneSamp, uv).rgb;
   }
 
   if (gradeOn > 0.5) {
-    let Y = dot(col, vec3<f32>(0.299, 0.587, 0.114));
-    var dh = hue2 - hue1;
-    if (dh >  0.5) { dh = dh - 1.0; }
-    if (dh < -0.5) { dh = dh + 1.0; }
-    let targetHue = fract(hue1 + dh * Y);
-    col = hsv2rgb(vec3<f32>(targetHue, saturation, Y));
+    let toCtr = uv - vec2<f32>(0.5);
+    let caAmt = 0.006 * dot(toCtr, toCtr) * 4.0;
+    let Rc = textureSample(sceneTex, sceneSamp, uv - toCtr * caAmt).r;
+    let Bc = textureSample(sceneTex, sceneSamp, uv + toCtr * caAmt).b;
+    let src = vec3<f32>(Rc, col.g, Bc);
+    let shadowAnchor    = hsv2rgb(vec3<f32>(hue1, saturation, 0.18));
+    let highlightAnchor = hsv2rgb(vec3<f32>(hue2, saturation, 0.92));
+    let Y = clamp(dot(src, LUMA), 0.0, 1.0);
+    let t = smoothstep(0.05, 0.95, Y);
+    let graded = mix(shadowAnchor, highlightAnchor, t);
+    col = mix(graded, src, 0.15);
   }
 
   return vec4<f32>(col, 1.0);
