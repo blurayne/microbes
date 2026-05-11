@@ -689,7 +689,22 @@ function bindRange(id, key, valId, fmt, onChange) {
   });
 }
 bindRange('autoSplitSeconds', 'autoSplitSeconds', 'autoVal', v => v.toFixed(0) + 's');
-bindRange('maxCells', 'maxCells', 'maxCellsVal', v => v.toFixed(0));
+bindRange('maxCells', 'maxCells', 'maxCellsVal', v => v.toFixed(0), (v) => {
+  // Lowering the cap mid-game should visibly shrink the population —
+  // recycle (silent eviction) until cells.length <= cap. Without
+  // this the slider only blocks NEW spawns; existing cells stay
+  // alive and the user can't tell the slider had any effect.
+  if (sim && sim.cells && sim.cells.length > v) {
+    let removed = 0;
+    while (sim.cells.length > v) {
+      const before = sim.cells.length;
+      sim._recycleOldest();
+      if (sim.cells.length === before) break;
+      removed++;
+    }
+    if (removed) console.info('[sim] maxCells', v, '— culled', removed);
+  }
+});
 bindRange('bgFlowSpeed', 'bgFlowSpeed', 'bgVal', v => v.toFixed(2) + '×');
 bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
 bindRange('membraneIntensity', 'membraneIntensity', 'membraneVal', v => v.toFixed(2));
