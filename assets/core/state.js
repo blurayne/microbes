@@ -162,7 +162,7 @@ const KNOWN_BACKGROUND_KEYS = [
   'bloodstream', 'bloodflow', 'cellShadow',
   'cartoonNight', 'spectrum', 'lymphNode',
   'lung', 'lavaFire', 'reactor',
-  'boneMarrow', 'mitochondria', 'neuron', 'bile',
+  'mitochondria', 'neuron', 'bile',
 ];
 
 // Map old THEMES keys → new accent keys for the interfaceColor
@@ -172,7 +172,7 @@ const LEGACY_INTERFACE_COLOR_MIGRATION = {
   bloodstream: 'red',  bloodflow: 'red',     cellShadow: 'red',
   cartoonNight: 'cyan', spectrum: 'violet',  lymphNode: 'violet',
   lung: 'pink',         lavaFire: 'amber',   reactor: 'green',
-  boneMarrow: 'amber',  mitochondria: 'amber',
+  mitochondria: 'amber',
   neuron: 'cyan',       bile: 'green',
   // Removed scenes — fold to a sensible accent.
   dracula: 'violet',
@@ -371,7 +371,6 @@ export const LOCALES = {
     bg_lung: 'Lung (smoke)',
     bg_lavaFire: 'Magma (orange)',
     bg_reactor: 'Reactor (acid green)',
-    bg_boneMarrow: 'Bone Marrow (cream)',
     bg_mitochondria: 'Mitochondria (amber)',
     bg_neuron: 'Neuron (electric blue)',
     bg_bile: 'Bile (chartreuse)',
@@ -560,7 +559,6 @@ export const LOCALES = {
     bg_lung: 'Lunge (Rauch)',
     bg_lavaFire: 'Magma (Orange)',
     bg_reactor: 'Reaktor (Säuregrün)',
-    bg_boneMarrow: 'Knochenmark (Creme)',
     bg_mitochondria: 'Mitochondrium (Bernstein)',
     bg_neuron: 'Neuron (Elektroblau)',
     bg_bile: 'Galle (Chartreuse)',
@@ -736,7 +734,6 @@ export const LOCALES = {
     bg_lung: 'Pulmón (humo)',
     bg_lavaFire: 'Magma (naranja)',
     bg_reactor: 'Reactor (verde ácido)',
-    bg_boneMarrow: 'Médula ósea (crema)',
     bg_mitochondria: 'Mitocondria (ámbar)',
     bg_neuron: 'Neurona (azul eléctrico)',
     bg_bile: 'Bilis (chartreuse)',
@@ -863,7 +860,6 @@ export const LOCALES = {
     bg_lung: 'Lunga (Rauch)',
     bg_lavaFire: 'Magma (Orange)',
     bg_reactor: 'Reakta (Saurgrea)',
-    bg_boneMarrow: 'Knochnmark (Creme)',
     bg_mitochondria: 'Mitochondrium (Bernstoaa)',
     bg_neuron: 'Neuron (Elektrobloh)',
     bg_bile: 'Goi (Chartreuse)',
@@ -992,7 +988,6 @@ export const LOCALES = {
     bg_lung: 'Lung (Rauch)',
     bg_lavaFire: 'Magma (Orsch)',
     bg_reactor: 'Reakta (Saurgrie)',
-    bg_boneMarrow: 'Knochemark (Creme)',
     bg_mitochondria: 'Mitochondrium (Bernstaa)',
     bg_neuron: 'Neuron (Elektrablau)',
     bg_bile: 'Gall (Chartreuse)',
@@ -1121,7 +1116,6 @@ export const LOCALES = {
     bg_lung: 'Lung (Rauch)',
     bg_lavaFire: 'Magma (Orsch)',
     bg_reactor: 'Reaktor (Saurgrie)',
-    bg_boneMarrow: 'Knochemark (Creem)',
     bg_mitochondria: 'Mitochondrium (Bernstaa)',
     bg_neuron: 'Neuron (Elektroblau)',
     bg_bile: 'Gall (Chartreuse)',
@@ -1247,7 +1241,6 @@ export const LOCALES = {
     bg_lung: 'Pulmo (fumus)',
     bg_lavaFire: 'Magma (aurantium)',
     bg_reactor: 'Reactor (viride acidum)',
-    bg_boneMarrow: 'Medulla ossea (cremor)',
     bg_mitochondria: 'Mitochondrium (succinum)',
     bg_neuron: 'Neuron (caeruleum electricum)',
     bg_bile: 'Bilis (chartreuse)',
@@ -1460,18 +1453,15 @@ export const THEMES = {
   },
   lavaFire: {
     label: 'Magma (orange)',
-    bg: { kind: 'lava', base: '#1a0402', topColor: '#3b0a05', botColor: '#0a0202', spotCount: 0, vignette: 0.50 },
+    // base/bot/top/peak ramp now reads u_base/u_bot/u_top in the lava
+    // shader. Defaults match the previous hard-coded stops
+    // (0.05,0.01,0.00)/(0.50,0.03,0.01)/(1.00,0.45,0.05) so the look
+    // is preserved out of the box; peak is derived as clamp(top*2).
+    bg: { kind: 'lava', base: '#0d0300', topColor: '#ff730d', botColor: '#800803', spotCount: 0, vignette: 0.50 },
     outline: { color: '#1a0606', defaultPx: 4 },
     ui: { panelAccent: '#ff5a00' },
   },
   // ── New palettes (2026) — common themes the project lacked.
-  boneMarrow: {
-    // Pale cream + tan — bone-marrow / cancellous-bone aesthetic.
-    label: 'Bone Marrow (cream)',
-    bg: { kind: 'flat', base: '#e9dcb8', spotColors: ['#c9a87a','#b0905e','#937444'], spotCount: 5, vignette: 0.20 },
-    outline: { color: '#5a432a', defaultPx: 3 },
-    ui: { panelAccent: '#b0905e' },
-  },
   mitochondria: {
     // Warm amber on deep brown — mitochondrial inner-membrane palette.
     label: 'Mitochondria (amber)',

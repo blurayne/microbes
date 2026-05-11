@@ -1419,17 +1419,17 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   }
 
   // ---- Lava / fire: boiling fbm (kind 7) ----
+  // Hot gradient: base → bot → top → peak (clamped 2×u.top) so the
+  // picker drives all the hot tendrils. Default state colours match
+  // the previous hard-coded ramp.
   if (kind == 7) {
     var p = worldPx * 0.005;
     p.y = p.y - time * 1.2;
     let n = bgFbm(p + vec2<f32>(bgFbm(p * 0.5 + vec2<f32>(time * 0.05, time * 0.05))));
-    let black   = vec3<f32>(0.05, 0.01, 0.00);
-    let deepRed = vec3<f32>(0.50, 0.03, 0.01);
-    let orange  = vec3<f32>(1.00, 0.45, 0.05);
-    let yellow  = vec3<f32>(1.00, 0.92, 0.50);
-    var hot = mix(black, deepRed, smoothstep(0.20, 0.45, n));
-    hot     = mix(hot,   orange,  smoothstep(0.45, 0.70, n));
-    hot     = mix(hot,   yellow,  smoothstep(0.70, 0.95, n));
+    let peak = clamp(u.top.rgb * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
+    var hot = mix(u.base.rgb, u.bot.rgb, smoothstep(0.20, 0.45, n));
+    hot     = mix(hot,       u.top.rgb, smoothstep(0.45, 0.70, n));
+    hot     = mix(hot,       peak,      smoothstep(0.70, 0.95, n));
     col = mix(col, hot, 0.85);
   }
 
