@@ -235,12 +235,20 @@ function enterAddMode(typeKey) {
   const lbl = document.getElementById('addBadgeLabel');
   if (lbl) lbl.textContent = T('adding', { name: localised });
   document.body.classList.add('adding');
+  // Mutual exclusion with the other top-screen mode buttons —
+  // add-mode is the fourth peer of target / split / kill. Clear
+  // the others; their setters re-run applyModeUi which we also
+  // call below to sync the `+` FAB's .active ring.
+  if (sim.killMode) setKillMode(false);
+  if (S.splitOnTap) setSplitOnTap(false);
+  applyModeUi();
   console.info('[add] enter', typeKey);
 }
 function cancelAddMode() {
   if (sim.addMode) console.info('[add] cancel', sim.addMode.type);
   sim.addMode = null;
   document.body.classList.remove('adding');
+  applyModeUi();
 }
 
 canvas.addEventListener('pointerdown', (ev) => {
@@ -269,7 +277,9 @@ canvas.addEventListener('pointerdown', (ev) => {
     // type the user has already seen (localStorage-tracked) so
     // it's safe to call unconditionally.
     spawnBanner.notify(justSpawnedType);
-    cancelAddMode();
+    // Sticky add-mode: stay armed so subsequent clicks keep
+    // spawning the same type. Exit via the `+` FAB toggle, another
+    // mode button, Esc, or the badge `×`.
     return;
   }
 
@@ -448,7 +458,7 @@ window.addEventListener('pointerdown', (ev) => {
     spawned ? 'ok' : 'CAP',
   );
   spawnBanner.notify(justSpawnedType);
-  cancelAddMode();
+  // Sticky add-mode (same contract as the canvas-level handler).
 }, true);   // capture phase — runs before any inner-element handler
 
 canvas.addEventListener('wheel', (ev) => {
@@ -630,6 +640,15 @@ for (const btn of addDialog.querySelectorAll('.view-toggle-btn')) {
 }
 
 if (paletteBtn) paletteBtn.addEventListener('click', () => {
+  // The + FAB is now a sticky-mode toggle, peer to target / split
+  // / kill. Three states drive the click handler:
+  //   1. add-mode is on  → exit (toggle off). No dialog reopen.
+  //   2. dialog is open  → close it (same as today's `else closeAll()`).
+  //   3. neither         → open the dialog so the user can pick a type.
+  if (sim.addMode) {
+    cancelAddMode();
+    return;
+  }
   if (addDialog.classList.contains('hidden')) {
     renderAddDialogContents();
     openOnly(addDialog);
@@ -741,13 +760,20 @@ const modeSplitBtn  = document.getElementById('modeSplit');
 const modeKillBtn   = document.getElementById('modeKill');
 function applyModeUi() {
   const kill = !!sim.killMode;
-  if (modeKillBtn)   modeKillBtn.classList.toggle('active',   kill);
-  if (modeTargetBtn) modeTargetBtn.classList.toggle('active', !kill && !S.splitOnTap);
-  if (modeSplitBtn)  modeSplitBtn.classList.toggle('active',  !kill &&  !!S.splitOnTap);
+  const add  = !!sim.addMode;
+  // Add-mode takes priority: when it's on, the other three peers
+  // drop their .active ring so only the `+` FAB lights up.
+  if (modeKillBtn)   modeKillBtn.classList.toggle('active',   kill && !add);
+  if (modeTargetBtn) modeTargetBtn.classList.toggle('active', !kill && !S.splitOnTap && !add);
+  if (modeSplitBtn)  modeSplitBtn.classList.toggle('active',  !kill &&  !!S.splitOnTap && !add);
+  if (paletteBtn)    paletteBtn.classList.toggle('active',    add);
 }
 function setSplitOnTap(on) {
   S.splitOnTap = !!on;
   sim.killMode = false;
+  // Picking split / kill drops add-mode too (the four FABs are a
+  // single mutually-exclusive set).
+  if (on && sim.addMode) cancelAddMode();
   saveSettings();
   applyModeUi();
   const cb = document.getElementById('splitOnTap');
@@ -755,6 +781,7 @@ function setSplitOnTap(on) {
 }
 function setKillMode(on) {
   sim.killMode = !!on;
+  if (on && sim.addMode) cancelAddMode();
   applyModeUi();
 }
 if (modeTargetBtn) modeTargetBtn.addEventListener('click', () => {
