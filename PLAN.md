@@ -10,9 +10,18 @@ file in sync.
 
 ## Open
 
-- [ ] **Background layer stack (drag-drop compositable bgs)** — [`.claude/plan/10-bg-layer-stack.md`](./.claude/plan/10-bg-layer-stack.md)
+_None — see Done. PR A of plan #10 shipped the foundation; PR B
+(drag-drop layer-list UI), PR C (per-kind config controls), and
+PR D (multi-layer presets) will get fresh entries here when
+started. Day-to-day work for this project has moved to small
+standalone PRs (defaults / shaders / settings polish); they're
+tracked in the git log + PR descriptions rather than as numbered
+plan files. New non-trivial features should still drop a plan
+here per the Process section below._
 
 ## Done
+
+- [x] **Background layer stack (drag-drop compositable bgs)** — PR A foundation only · [`.claude/plan/10-bg-layer-stack.md`](./.claude/plan/10-bg-layer-stack.md) (#143)
 
 - [x] **Rotation gesture + 2× zoom-out** — [`.claude/plan/01-rotation-and-zoom.md`](./.claude/plan/01-rotation-and-zoom.md) (#35)
 - [x] **Reactor background (Gray-Scott, WebGL2)** — [`.claude/plan/04-reactor-bg.md`](./.claude/plan/04-reactor-bg.md) (#37)
