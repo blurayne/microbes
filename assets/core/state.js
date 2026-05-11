@@ -16,7 +16,7 @@ export const ALL_CELL_KEYS = [
 export const DEFAULTS = {
   splitMode: 'bondDrift',
   autoSplitSeconds: 10,
-  maxCells: 511,            // population cap. UI slider lives in Settings → Population. Reached cap = spawnAtWorld/beginSplit recycle the oldest cell (#136); see TODO.md for future ideas.
+  maxCells: 512,            // population cap. UI number input in Settings → Population; clamps to [32, 4096], invalid input resets to 512. Reached cap = spawnAtWorld/beginSplit recycle the oldest cell (#136); see TODO.md for future ideas.
   bgFlowSpeed: 0.55,
   outlinePx: 5,
   showDebugField: false,
@@ -244,10 +244,12 @@ export function loadSettings() {
           enabled: l.enabled !== false,
         }));
     }
+    // maxCells: invalid (non-number / NaN / Infinity) → 512; otherwise
+    // clamp to [32, 4096]. Bounds match the Settings number input.
     if (typeof parsed.maxCells !== 'number' || !Number.isFinite(parsed.maxCells)) {
-      parsed.maxCells = DEFAULTS.maxCells;
+      parsed.maxCells = 512;
     }
-    parsed.maxCells = Math.max(16, Math.min(1024, Math.round(parsed.maxCells)));
+    parsed.maxCells = Math.max(32, Math.min(4096, Math.round(parsed.maxCells)));
     // 2026-05: user explicitly asked for the split outline to follow
     // the actual rendered metaball shape. 'edge' mode traces the
     // blurred-mask 0.5 contour, which IS the rendered blob silhouette

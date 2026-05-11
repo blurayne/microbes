@@ -708,22 +708,44 @@ function bindRange(id, key, valId, fmt, onChange) {
   });
 }
 bindRange('autoSplitSeconds', 'autoSplitSeconds', 'autoVal', v => v.toFixed(0) + 's');
-bindRange('maxCells', 'maxCells', 'maxCellsVal', v => v.toFixed(0), (v) => {
-  // Lowering the cap mid-game should visibly shrink the population —
-  // recycle (silent eviction) until cells.length <= cap. Without
-  // this the slider only blocks NEW spawns; existing cells stay
-  // alive and the user can't tell the slider had any effect.
-  if (sim && sim.cells && sim.cells.length > v) {
-    let removed = 0;
-    while (sim.cells.length > v) {
-      const before = sim.cells.length;
-      sim._recycleOldest();
-      if (sim.cells.length === before) break;
-      removed++;
+// maxCells uses a number input (not a slider) so users can type
+// values directly. Validation: invalid → 512, otherwise clamp to
+// [32, 4096]. Mirrors the loadSettings shim in state.js so a saved
+// blob and a UI commit converge on the same value.
+const maxCellsEl = document.getElementById('maxCells');
+if (maxCellsEl) {
+  maxCellsEl.value = S.maxCells;
+  const applyMaxCells = (v) => {
+    S.maxCells = v;
+    maxCellsEl.value = v;
+    saveSettings();
+    // Lowering the cap mid-game should visibly shrink the population —
+    // recycle (silent eviction) until cells.length <= cap. Without
+    // this the input only blocks NEW spawns; existing cells stay
+    // alive and the user can't tell the change had any effect.
+    if (sim && sim.cells && sim.cells.length > v) {
+      let removed = 0;
+      while (sim.cells.length > v) {
+        const before = sim.cells.length;
+        sim._recycleOldest();
+        if (sim.cells.length === before) break;
+        removed++;
+      }
+      if (removed) console.info('[sim] maxCells', v, '— culled', removed);
     }
-    if (removed) console.info('[sim] maxCells', v, '— culled', removed);
-  }
-});
+  };
+  maxCellsEl.addEventListener('change', () => {
+    const raw = maxCellsEl.value;
+    const parsed = (raw === '' || raw == null) ? NaN : Number(raw);
+    let v;
+    if (!Number.isFinite(parsed)) {
+      v = 512;
+    } else {
+      v = Math.max(32, Math.min(4096, Math.round(parsed)));
+    }
+    applyMaxCells(v);
+  });
+}
 bindRange('bgFlowSpeed', 'bgFlowSpeed', 'bgVal', v => v.toFixed(2) + '×');
 bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
 bindRange('membraneIntensity', 'membraneIntensity', 'membraneVal', v => v.toFixed(2));

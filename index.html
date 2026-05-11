@@ -156,8 +156,8 @@
         <label><span data-i18n="auto_split">Auto-split (s)</span> <span id="autoVal" class="val"></span>
           <input type="range" id="autoSplitSeconds" min="2" max="30" step="1" />
         </label>
-        <label><span data-i18n="max_cells">Max cells</span> <span id="maxCellsVal" class="val"></span>
-          <input type="range" id="maxCells" min="16" max="1024" step="1" />
+        <label><span data-i18n="max_cells">Max cells</span>
+          <input type="number" id="maxCells" min="32" max="4096" step="1" inputmode="numeric" />
         </label>
         <p class="hint" data-i18n="max_cells_hint">At the cap, new spawns + splits silently recycle the oldest cell.</p>
       </details>
