@@ -957,6 +957,96 @@ if (vignetteBlendEl) {
 // Crosshair overlay — toggle-only (cyan + at viewport centre).
 bindCheckbox('crosshairToggle', 'crosshair');
 
+// FX overlay order: sortable list of the three fixed-function FX
+// overlays (noise/vignette/crosshair). Drag-and-drop reorder OR
+// up/down buttons. The renderers iterate S.fxOrder each frame so
+// changes take effect on the next draw — no pipeline reset needed.
+// On/off toggles + per-effect sliders stay where they are above;
+// this list only owns the draw order.
+const fxOrderListEl = document.getElementById('fxOrderList');
+const FX_ORDER_KINDS = ['noise', 'vignette', 'crosshair'];
+function renderFxOrderList() {
+  if (!fxOrderListEl) return;
+  if (!Array.isArray(S.fxOrder) || S.fxOrder.length !== FX_ORDER_KINDS.length) {
+    S.fxOrder = [...FX_ORDER_KINDS];
+    saveSettings();
+  }
+  fxOrderListEl.innerHTML = '';
+  S.fxOrder.forEach((kind, index) => {
+    const row = document.createElement('div');
+    row.className = 'fx-order-row';
+    row.draggable = true;
+    row.dataset.index = String(index);
+
+    const handle = document.createElement('span');
+    handle.className = 'drag-handle';
+    handle.textContent = '☰';
+    handle.title = T('fx_drag_reorder') || 'Drag to reorder';
+    row.appendChild(handle);
+
+    const label = document.createElement('span');
+    label.className = 'label';
+    label.textContent = T('fx_kind_' + kind) || kind;
+    row.appendChild(label);
+
+    const up = document.createElement('button');
+    up.type = 'button';
+    up.className = 'move-btn';
+    up.textContent = '▲';
+    up.title = T('fx_move_up') || 'Move up';
+    up.disabled = index === 0;
+    up.addEventListener('click', () => moveFxOrder(index, index - 1));
+    row.appendChild(up);
+
+    const down = document.createElement('button');
+    down.type = 'button';
+    down.className = 'move-btn';
+    down.textContent = '▼';
+    down.title = T('fx_move_down') || 'Move down';
+    down.disabled = index === S.fxOrder.length - 1;
+    down.addEventListener('click', () => moveFxOrder(index, index + 1));
+    row.appendChild(down);
+
+    // Drag-drop reorder. Same idiom as the bg-layer list (PR #151).
+    row.addEventListener('dragstart', (e) => {
+      _fxDragFromIndex = index;
+      row.classList.add('dragging');
+      try { e.dataTransfer.setData('text/plain', String(index)); } catch {}
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      _fxDragFromIndex = -1;
+      document.querySelectorAll('.fx-order-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      if (_fxDragFromIndex < 0 || _fxDragFromIndex === index) return;
+      moveFxOrder(_fxDragFromIndex, index);
+    });
+
+    fxOrderListEl.appendChild(row);
+  });
+}
+let _fxDragFromIndex = -1;
+function moveFxOrder(from, to) {
+  if (from < 0 || from >= S.fxOrder.length) return;
+  if (to < 0 || to >= S.fxOrder.length) return;
+  if (from === to) return;
+  const moved = S.fxOrder.splice(from, 1)[0];
+  S.fxOrder.splice(to, 0, moved);
+  saveSettings();
+  renderFxOrderList();
+}
+renderFxOrderList();
+
 // Microscope blur — scene-wide variable-radius blur. Same pattern as
 // the caustics / ripples / staticNoise sections: toggle reveals a
 // sub-controls block; sliders persist to S without per-change side

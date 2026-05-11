@@ -2836,10 +2836,22 @@ export class WebGL2Renderer extends RendererBase {
   // crosshair. Each enabled effect picks up its own blend mode +
   // intensity; the shader branches internally on `u_effect`.
   _fxOverlayDraw(t) {
-    const noise = !!S.staticNoise;
-    const vign  = !!S.vignette;
-    const cross = !!S.crosshair;
-    if (!noise && !vign && !cross) return;
+    // Three fixed-function FX overlays composited on top of the
+    // scene framebuffer. Order comes from S.fxOrder so the user can
+    // reorder via the sortable list (Settings → Overlays). Each
+    // entry checks its own enabled-toggle. Per-frame read of S.*
+    // means reorders + toggles take effect on the next draw with
+    // no pipeline reset needed.
+    const order = Array.isArray(S.fxOrder) && S.fxOrder.length === 3
+      ? S.fxOrder
+      : ['noise', 'vignette', 'crosshair'];
+    const anyOn = order.some(k => {
+      if (k === 'noise')     return !!S.staticNoise;
+      if (k === 'vignette')  return !!S.vignette;
+      if (k === 'crosshair') return !!S.crosshair;
+      return false;
+    });
+    if (!anyOn) return;
     const gl = this.gl;
     this._fxOverlayEnsureProg();
     gl.useProgram(this._fxOverlayProg);
@@ -2849,26 +2861,26 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform2f(this._fxOverlayU.res, this.canvas.width, this.canvas.height);
     gl.uniform1f(this._fxOverlayU.time, t);
     const _MODES = { normal: 1, multiply: 2, additive: 3 };
-    if (noise) {
-      gl.uniform1i(this._fxOverlayU.effect, 1);
-      gl.uniform1i(this._fxOverlayU.mode, _MODES[S.staticNoiseBlend] || 3);
-      gl.uniform1f(this._fxOverlayU.intensity, S.staticNoiseIntensity ?? 0.4);
-      this._fxOverlayBlend(S.staticNoiseBlend);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
-    if (vign) {
-      gl.uniform1i(this._fxOverlayU.effect, 2);
-      gl.uniform1i(this._fxOverlayU.mode, _MODES[S.vignetteBlend] || 3);
-      gl.uniform1f(this._fxOverlayU.intensity, S.vignetteIntensity ?? 0.6);
-      this._fxOverlayBlend(S.vignetteBlend);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    }
-    if (cross) {
-      gl.uniform1i(this._fxOverlayU.effect, 3);
-      gl.uniform1i(this._fxOverlayU.mode, 1);
-      gl.uniform1f(this._fxOverlayU.intensity, 1.0);
-      this._fxOverlayBlend('normal');
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    for (const k of order) {
+      if (k === 'noise' && S.staticNoise) {
+        gl.uniform1i(this._fxOverlayU.effect, 1);
+        gl.uniform1i(this._fxOverlayU.mode, _MODES[S.staticNoiseBlend] || 3);
+        gl.uniform1f(this._fxOverlayU.intensity, S.staticNoiseIntensity ?? 0.4);
+        this._fxOverlayBlend(S.staticNoiseBlend);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      } else if (k === 'vignette' && S.vignette) {
+        gl.uniform1i(this._fxOverlayU.effect, 2);
+        gl.uniform1i(this._fxOverlayU.mode, _MODES[S.vignetteBlend] || 3);
+        gl.uniform1f(this._fxOverlayU.intensity, S.vignetteIntensity ?? 0.6);
+        this._fxOverlayBlend(S.vignetteBlend);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      } else if (k === 'crosshair' && S.crosshair) {
+        gl.uniform1i(this._fxOverlayU.effect, 3);
+        gl.uniform1i(this._fxOverlayU.mode, 1);
+        gl.uniform1f(this._fxOverlayU.intensity, 1.0);
+        this._fxOverlayBlend('normal');
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
     }
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindVertexArray(null);

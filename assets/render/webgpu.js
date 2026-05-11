@@ -2968,10 +2968,19 @@ export class WebGPURenderer extends RendererBase {
   }
 
   _fxOverlayDraw(t) {
-    const noise = !!S.staticNoise;
-    const vign  = !!S.vignette;
-    const cross = !!S.crosshair;
-    if (!noise && !vign && !cross) return;
+    // Order from S.fxOrder so the user can reorder via Settings →
+    // Overlays. Mirror of webgl2.js _fxOverlayDraw. Per-frame read
+    // means reorders + toggles take effect on the next draw; no
+    // pipeline reset needed.
+    const order = Array.isArray(S.fxOrder) && S.fxOrder.length === 3
+      ? S.fxOrder
+      : ['noise', 'vignette', 'crosshair'];
+    const anyOn = order.some(k =>
+      (k === 'noise' && S.staticNoise) ||
+      (k === 'vignette' && S.vignette) ||
+      (k === 'crosshair' && S.crosshair)
+    );
+    if (!anyOn) return;
     if (!this._frameEncoder || !this._frameView) return;
     this._fxOverlayEnsurePipelines();
     const device = this.device;
@@ -3008,9 +3017,15 @@ export class WebGPURenderer extends RendererBase {
       pass.end();
     };
     const MODES = { normal: 1, multiply: 2, additive: 3 };
-    if (noise) drawOne(1, MODES[S.staticNoiseBlend] || 3, S.staticNoiseIntensity ?? 0.4);
-    if (vign)  drawOne(2, MODES[S.vignetteBlend]    || 3, S.vignetteIntensity    ?? 0.6);
-    if (cross) drawOne(3, 1, 1.0);
+    for (const k of order) {
+      if (k === 'noise' && S.staticNoise) {
+        drawOne(1, MODES[S.staticNoiseBlend] || 3, S.staticNoiseIntensity ?? 0.4);
+      } else if (k === 'vignette' && S.vignette) {
+        drawOne(2, MODES[S.vignetteBlend] || 3, S.vignetteIntensity ?? 0.6);
+      } else if (k === 'crosshair' && S.crosshair) {
+        drawOne(3, 1, 1.0);
+      }
+    }
   }
 
   _rippleBgEnsurePipeline() {

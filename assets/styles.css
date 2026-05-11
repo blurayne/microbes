@@ -406,6 +406,40 @@ body.is-paused #aboutDialog {
 }
 .bg-add-layer-row button:hover { border-color: var(--accent); }
 
+/* FX overlay order panel — sortable list of the three fixed-function
+ * FX overlays (noise/vignette/crosshair). Each row: drag handle,
+ * label, ▲/▼ buttons. The on/off toggle is the existing checkbox
+ * above each effect's sub-controls block; this list only owns the
+ * order. (Plan: see commit message + IDEAS.md blend-modes entry.) */
+.fx-order-block { margin: 6px 0 10px 0; }
+.fx-order-title { font-size: 0.85em; opacity: 0.7; margin-bottom: 4px; }
+.fx-order-list { display: flex; flex-direction: column; gap: 4px; }
+.fx-order-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 6px; align-items: center;
+  padding: 4px 6px;
+  background: #00000022;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: grab;
+  font-size: 0.85em;
+}
+.fx-order-row:active { cursor: grabbing; }
+.fx-order-row.dragging { opacity: 0.4; }
+.fx-order-row.drag-over { border-color: var(--accent); }
+.fx-order-row .drag-handle {
+  font-family: monospace; padding: 0 4px; user-select: none; opacity: 0.5;
+}
+.fx-order-row .label { user-select: none; }
+.fx-order-row .move-btn {
+  background: none; border: 1px solid var(--line); color: var(--ink);
+  width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
+  padding: 0; line-height: 1; font-size: 12px;
+}
+.fx-order-row .move-btn:hover:not(:disabled) { border-color: var(--accent); }
+.fx-order-row .move-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
 .settings-panel select {
   display: block;
   width: 100%;
