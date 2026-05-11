@@ -1087,13 +1087,16 @@ fn fxHash(p: vec2<f32>) -> f32 {
     effectCol = vec3<f32>(0.05, 0.10, 0.20);
     effectMask = pow(smoothstep(0.6, 1.0, r), 2.0);
   } else {
-    // Crosshair — always normal blend.
+    // Crosshair — always normal blend. Ring fits the shorter viewport
+    // axis with 5% padding (radius = min(W,H) * 0.475) so it scales
+    // with the canvas while staying circular at any aspect ratio.
     let px = frag.xy - res * 0.5;
     let armLen: f32 = 14.0;
     let thick: f32  = 1.0;
+    let ringR: f32  = min(res.x, res.y) * 0.475;
     let horiz = select(0.0, 1.0, abs(px.y) < thick && abs(px.x) < armLen);
     let vert  = select(0.0, 1.0, abs(px.x) < thick && abs(px.y) < armLen);
-    let ring  = select(0.0, 0.6, abs(length(px) - 22.0) < thick);
+    let ring  = select(0.0, 0.6, abs(length(px) - ringR) < thick);
     let a = max(max(horiz, vert), ring);
     return vec4<f32>(vec3<f32>(0.42, 0.95, 1.0), a * 0.6);
   }

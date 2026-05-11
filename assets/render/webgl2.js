@@ -1125,12 +1125,16 @@ void main() {
   } else {
     // Crosshair — cyan ring + cross. Pure normal-blend output;
     // u_mode is ignored to keep the line legible against any scene.
+    // Ring fits the shorter viewport axis with 5% padding (radius =
+    // min(W,H) * 0.475) so it scales with the canvas while staying
+    // circular at any aspect ratio.
     vec2 px = gl_FragCoord.xy - u_resolution * 0.5;
     float armLen   = 14.0;
     float thick    = 1.0;
+    float ringR    = min(u_resolution.x, u_resolution.y) * 0.475;
     float horiz = (abs(px.y) < thick && abs(px.x) < armLen) ? 1.0 : 0.0;
     float vert  = (abs(px.x) < thick && abs(px.y) < armLen) ? 1.0 : 0.0;
-    float ring  = (abs(length(px) - 22.0) < thick) ? 0.6 : 0.0;
+    float ring  = (abs(length(px) - ringR) < thick) ? 0.6 : 0.0;
     float a = max(max(horiz, vert), ring);
     outColor = vec4(vec3(0.42, 0.95, 1.0), a * 0.6);
     return;
