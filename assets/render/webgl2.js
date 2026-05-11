@@ -1035,6 +1035,85 @@ void main() {
 }
 `;
 
+// Microscope FX post-pass: combines microscope blur (variable-radius
+// bokeh blur — sharp center, blurry edges) with "make it real" duotone
+// color grade (luminance-mapped gradient between hue1 → hue2 with a
+// saturation knob). Both effects gated independently by uniforms so
+// the user can enable either / both / neither. Single pass; one
+// fullscreen quad. Mutually exclusive with scene-wide ripples +
+// caustics — only one scene-wide post-pass can own the RT.
+const FRAG_SCENE_FX = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_scene;
+uniform vec2 u_resolution;
+uniform float u_blurOn;        // 0 / 1
+uniform float u_focusRadius;   // 0..1, fraction of the half-diagonal
+uniform float u_blurStrength;  // 0..1, peak edge blur as fraction of min(W,H)
+uniform float u_falloff;       // 0..1, transition hardness (0 soft → 1 abrupt)
+uniform float u_gradeOn;       // 0 / 1
+uniform float u_hue1;          // 0..1, shadow hue
+uniform float u_hue2;          // 0..1, highlight hue
+uniform float u_saturation;    // 0..1, HSV S of the duotone output
+out vec4 outColor;
+
+vec3 hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+void main() {
+  vec2 uv = v_uv;
+  // Aspect-correct radial distance so the focus zone stays circular.
+  vec2 ndc = uv * 2.0 - 1.0;
+  float aspect = u_resolution.x / max(1.0, u_resolution.y);
+  vec2 nd = ndc;
+  if (aspect > 1.0) nd.x *= aspect; else nd.y /= aspect;
+  float r = length(nd);
+
+  vec3 col;
+  if (u_blurOn > 0.5 && u_blurStrength > 0.001) {
+    // beyond ∈ [0, 1]: 0 inside the focus zone, ramps up outside.
+    float beyond = clamp((r - u_focusRadius) / max(1e-3, 1.0 - u_focusRadius), 0.0, 1.0);
+    // Power-curve falloff: lower exponent = softer; higher = sharper edge.
+    float curve = mix(1.2, 5.0, u_falloff);
+    float blurAmt = pow(beyond, curve);
+    float minDim = min(u_resolution.x, u_resolution.y);
+    float blurRadius = u_blurStrength * 0.06 * minDim * blurAmt;
+    if (blurRadius < 0.5) {
+      col = texture(u_scene, uv).rgb;
+    } else {
+      vec2 px = vec2(blurRadius) / u_resolution;
+      // 8-tap ring + center = 9 samples. Cheap microscope-defocus look.
+      vec3 sum = texture(u_scene, uv).rgb;
+      const float TAU = 6.28318530718;
+      for (int i = 0; i < 8; i++) {
+        float a = (float(i) / 8.0) * TAU;
+        sum += texture(u_scene, uv + vec2(cos(a), sin(a)) * px).rgb;
+      }
+      col = sum / 9.0;
+    }
+  } else {
+    col = texture(u_scene, uv).rgb;
+  }
+
+  if (u_gradeOn > 0.5) {
+    // Duotone: map luminance Y along the shortest hue-wheel arc from
+    // hue1 → hue2, output HSV(targetHue, saturation, Y). Preserves
+    // luminance, replaces chroma with the duotone gradient.
+    float Y = dot(col, vec3(0.299, 0.587, 0.114));
+    float dh = u_hue2 - u_hue1;
+    if (dh > 0.5)  dh -= 1.0;
+    if (dh < -0.5) dh += 1.0;
+    float targetHue = fract(u_hue1 + dh * Y);
+    col = hsv2rgb(vec3(targetHue, u_saturation, Y));
+  }
+
+  outColor = vec4(col, 1.0);
+}
+`;
+
 // Liquid-ripples overlay: each on-screen cell radiates concentric
 // ripples that distort the bg sample UV. Reads as cells moving
 // through liquid. Cells render on top normally; only the bg layer
@@ -2354,6 +2433,7 @@ export class WebGL2Renderer extends RendererBase {
     const useRipples       = !!S.liquidRipples;
     const ripplesSceneWide = useRipples && S.rippleScope !== 'bg';
     const useCaustics      = !!S.causticsOverlay && !ripplesSceneWide;
+    const useSceneFx       = (!!S.microscopeBlur || !!S.makeItReal) && !ripplesSceneWide && !useCaustics;
     if (ripplesSceneWide) {
       this._rippleEnsureRt();
       this._rippleEnsureProg();
@@ -2364,12 +2444,18 @@ export class WebGL2Renderer extends RendererBase {
       this._causticEnsureProg();
       this._sceneFbo = this._causticRt.fbo;
       this._scenePostProc = 'caustics';
+    } else if (useSceneFx) {
+      this._sceneFxEnsureRt();
+      this._sceneFxEnsureProg();
+      this._sceneFbo = this._sceneFxRt.fbo;
+      this._scenePostProc = 'sceneFx';
     }
     // Lazy-release RTs the user disabled mid-session.
     if (!ripplesSceneWide && !(useRipples && S.rippleScope === 'bg') && this._rippleRt) {
       this._rippleDestroy();
     }
     if (!useCaustics && this._causticRt) this._causticDestroy();
+    if (!useSceneFx && this._sceneFxRt) this._sceneFxDestroy();
     gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
   }
 
@@ -2559,6 +2645,65 @@ export class WebGL2Renderer extends RendererBase {
       gl.deleteProgram(this._causticProg);
       this._causticProg = null;
       this._causticU = null;
+    }
+  }
+
+  // ── Microscope FX post-pass (S.microscopeBlur + S.makeItReal) ──
+  // Shared RT slot for scene-wide blur + duotone color grade. Mutually
+  // exclusive with caustics + ripples-scene-wide (one RT slot for any
+  // scene-wide post). Lazily allocated; lazily destroyed.
+  _sceneFxEnsureRt() {
+    const gl = this.gl;
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
+    if (this._sceneFxRt && this._sceneFxRt.w === w && this._sceneFxRt.h === h) return;
+    if (this._sceneFxRt) {
+      gl.deleteFramebuffer(this._sceneFxRt.fbo);
+      gl.deleteTexture(this._sceneFxRt.tex);
+    }
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    this._sceneFxRt = { fbo, tex, w, h };
+  }
+  _sceneFxEnsureProg() {
+    if (this._sceneFxProg) return;
+    const gl = this.gl;
+    const prog = link(gl, VERT_FULLSCREEN, FRAG_SCENE_FX);
+    this._sceneFxProg = prog;
+    this._sceneFxU = {
+      scene:        gl.getUniformLocation(prog, 'u_scene'),
+      res:          gl.getUniformLocation(prog, 'u_resolution'),
+      blurOn:       gl.getUniformLocation(prog, 'u_blurOn'),
+      focusRadius:  gl.getUniformLocation(prog, 'u_focusRadius'),
+      blurStrength: gl.getUniformLocation(prog, 'u_blurStrength'),
+      falloff:      gl.getUniformLocation(prog, 'u_falloff'),
+      gradeOn:      gl.getUniformLocation(prog, 'u_gradeOn'),
+      hue1:         gl.getUniformLocation(prog, 'u_hue1'),
+      hue2:         gl.getUniformLocation(prog, 'u_hue2'),
+      saturation:   gl.getUniformLocation(prog, 'u_saturation'),
+    };
+  }
+  _sceneFxDestroy() {
+    const gl = this.gl;
+    if (this._sceneFxRt) {
+      gl.deleteFramebuffer(this._sceneFxRt.fbo);
+      gl.deleteTexture(this._sceneFxRt.tex);
+      this._sceneFxRt = null;
+    }
+    if (this._sceneFxProg) {
+      gl.deleteProgram(this._sceneFxProg);
+      this._sceneFxProg = null;
+      this._sceneFxU = null;
     }
   }
 
@@ -3817,6 +3962,21 @@ export class WebGL2Renderer extends RendererBase {
                    S.causticTintG ?? 1.35,
                    S.causticTintB ?? 0.5);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    } else if (this._scenePostProc === 'sceneFx' && this._sceneFxProg) {
+      gl.useProgram(this._sceneFxProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._sceneFxRt.tex);
+      gl.uniform1i(this._sceneFxU.scene, 0);
+      gl.uniform2f(this._sceneFxU.res, this.canvas.width, this.canvas.height);
+      gl.uniform1f(this._sceneFxU.blurOn,       S.microscopeBlur ? 1 : 0);
+      gl.uniform1f(this._sceneFxU.focusRadius,  S.microscopeFocus ?? 0.35);
+      gl.uniform1f(this._sceneFxU.blurStrength, S.microscopeBlurStrength ?? 0.5);
+      gl.uniform1f(this._sceneFxU.falloff,      S.microscopeFalloff ?? 0.5);
+      gl.uniform1f(this._sceneFxU.gradeOn,      S.makeItReal ? 1 : 0);
+      gl.uniform1f(this._sceneFxU.hue1,         S.makeItRealHue1 ?? 0.30);
+      gl.uniform1f(this._sceneFxU.hue2,         S.makeItRealHue2 ?? 0.55);
+      gl.uniform1f(this._sceneFxU.saturation,   S.makeItRealSaturation ?? 0.55);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
   }
 
@@ -3860,6 +4020,7 @@ export class WebGL2Renderer extends RendererBase {
     this._metaDestroyPool();
     this._reactorDestroy();
     this._causticDestroy();
+    this._sceneFxDestroy();
     this.gl = null;
   }
 }

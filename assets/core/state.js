@@ -66,6 +66,24 @@ export const DEFAULTS = {
   vignetteIntensity: 0.6,
   vignetteBlend: 'additive',
   crosshair: false,              // small cyan + at viewport centre
+  // Microscope distortion: scene-wide variable-radius blur. Sharp
+  // center (focus zone) with progressively blurrier edges. Knobs:
+  // focus = sharp-zone radius as fraction of min(W,H)/2; strength =
+  // peak edge blur as fraction of min(W,H); falloff = transition
+  // hardness (0 soft, 1 abrupt). WebGL2 + WebGPU only.
+  microscopeBlur: false,
+  microscopeFocus: 0.35,
+  microscopeBlurStrength: 0.5,
+  microscopeFalloff: 0.5,
+  // "Make it real" microscope-photo color grade: maps scene luminance
+  // along a duotone gradient between hue1 (shadows) and hue2 (highlights),
+  // with a saturation knob. Hues are 0..1 around the wheel (0 red, 0.33
+  // green, 0.5 cyan, 0.67 blue). Defaults dial in the green→cyan look
+  // of the reference microbe-microscopy reference. WebGL2 + WebGPU only.
+  makeItReal: false,
+  makeItRealHue1: 0.30,
+  makeItRealHue2: 0.55,
+  makeItRealSaturation: 0.55,
   // Liquid-ripples knobs. All three are visible in the settings panel
   // only while S.liquidRipples is on. They feed straight into the
   // ripple shader's per-cell uniforms (see _rippleCollectCells + UBO).
@@ -231,6 +249,17 @@ export function loadSettings() {
     const validBlendModes = ['normal', 'multiply', 'additive'];
     if (!validBlendModes.includes(parsed.staticNoiseBlend)) parsed.staticNoiseBlend = DEFAULTS.staticNoiseBlend;
     if (!validBlendModes.includes(parsed.vignetteBlend))    parsed.vignetteBlend    = DEFAULTS.vignetteBlend;
+    // Microscope post-FX sliders all live on [0, 1].
+    const clamp01 = (v, fallback) => {
+      const n = typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+      return Math.max(0, Math.min(1, n));
+    };
+    parsed.microscopeFocus         = clamp01(parsed.microscopeFocus,         DEFAULTS.microscopeFocus);
+    parsed.microscopeBlurStrength  = clamp01(parsed.microscopeBlurStrength,  DEFAULTS.microscopeBlurStrength);
+    parsed.microscopeFalloff       = clamp01(parsed.microscopeFalloff,       DEFAULTS.microscopeFalloff);
+    parsed.makeItRealHue1          = clamp01(parsed.makeItRealHue1,          DEFAULTS.makeItRealHue1);
+    parsed.makeItRealHue2          = clamp01(parsed.makeItRealHue2,          DEFAULTS.makeItRealHue2);
+    parsed.makeItRealSaturation    = clamp01(parsed.makeItRealSaturation,    DEFAULTS.makeItRealSaturation);
     // bgLayers: array of { kind, opacity, blend, enabled, ...params }.
     // Missing / malformed → empty; renderers fall back to S.background.
     if (!Array.isArray(parsed.bgLayers)) {
@@ -342,6 +371,14 @@ export const LOCALES = {
     caustic_tint_r: 'Tint R',
     caustic_tint_g: 'Tint G',
     caustic_tint_b: 'Tint B',
+    microscope_blur: 'Microscope blur',
+    microscope_focus: 'Focus radius',
+    microscope_blur_strength: 'Blur strength',
+    microscope_falloff: 'Falloff',
+    make_it_real: 'Make it real',
+    make_it_real_hue1: 'Shadow hue',
+    make_it_real_hue2: 'Highlight hue',
+    make_it_real_saturation: 'Saturation',
     cell_type_overlay: 'Show cell types',
     counters_needed: 'Counters needed',
     counters_covered: 'Fully covered',
@@ -489,6 +526,14 @@ export const LOCALES = {
     ripple_density: 'Wellendichte',
     ripple_reach: 'Wellenreichweite',
     ripple_strength: 'Wellenstärke',
+    microscope_blur: 'Mikroskop-Unschärfe',
+    microscope_focus: 'Fokusradius',
+    microscope_blur_strength: 'Unschärfe-Stärke',
+    microscope_falloff: 'Übergangshärte',
+    make_it_real: 'Echt-Look',
+    make_it_real_hue1: 'Schatten-Farbton',
+    make_it_real_hue2: 'Licht-Farbton',
+    make_it_real_saturation: 'Sättigung',
     cell_type_overlay: 'Zelltypen anzeigen',
     counters_needed: 'Konter benötigt',
     counters_covered: 'Voll abgedeckt',
