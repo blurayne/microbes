@@ -11,6 +11,7 @@ import {
   bgLayerFromPreset, bgLayersFromPreset, makeBgLayerId,
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
+import { openColorPicker } from './ui/color-picker.js';
 import { Sim } from './core/sim.js';
 import { CELL_RELATIONS } from './core/cell-relations.js';
 import { defaultHp, getRule } from './core/sim-rules.js';
@@ -1321,11 +1322,12 @@ function populateBgSelect(el) {
 }
 populateBgSelect(bgSelect);
 populateBgSelect(bgSelectInline);
-// Picking a preset REPLACES the layer stack with a single-layer
+// Picking a preset REPLACES S.bgLayers with a single-layer
 // derivation of that preset. The legacy S.background string is kept
-// in sync because some code paths still read it (e.g., interface-
-// accent fallbacks, themes that reference bg.label) and the no-bgLayers
-// fallback in currentBgLayers().
+// in sync because some code paths still read it (interface-accent
+// fallbacks, themes that reference bg.label, the no-bgLayers
+// fallback in currentBgLayers()). Multi-layer composition was
+// removed — only one shader at a time now.
 function setBackground(v) {
   if (!BACKGROUNDS[v]) return;
   S.background = v;
@@ -1333,30 +1335,18 @@ function setBackground(v) {
   if (bgSelect)       bgSelect.value       = v;
   if (bgSelectInline) bgSelectInline.value = v;
   saveSettings();
-  renderBgLayerList();
+  renderBgConfig();
 }
 if (bgSelect)       bgSelect.addEventListener('change',       () => setBackground(bgSelect.value));
 if (bgSelectInline) bgSelectInline.addEventListener('change', () => setBackground(bgSelectInline.value));
 
-// ── Background layer list (plan #10 PR B) ──
-// Each S.bgLayers entry is one row: drag handle + enabled checkbox +
-// kind label + opacity slider + blend dropdown + delete button.
-// Reorder via HTML5 drag-and-drop; no library. Rebuilds the panel
-// from scratch on every change — simpler than diffing, and the list
-// rarely has more than a handful of rows so re-render cost is trivial.
-const bgLayerListEl = document.getElementById('bgLayerList');
-const bgAddLayerKindEl = document.getElementById('bgAddLayerKind');
-const bgAddLayerBtnEl = document.getElementById('bgAddLayerBtn');
-
-// Populate the "kind" picker for Add-layer with every BACKGROUNDS entry.
-if (bgAddLayerKindEl) {
-  for (const [key, b] of Object.entries(BACKGROUNDS)) {
-    const opt = document.createElement('option');
-    opt.value = key;
-    opt.textContent = T('bg_' + key) || b.label || key;
-    bgAddLayerKindEl.appendChild(opt);
-  }
-}
+// ── Background config (single-shader; per-kind sliders + pickers) ──
+// Single-layer model. Renders a small set of editable controls under
+// the bg dropdown based on what fields the current bg blob uses
+// (base / topColor / botColor / spotColor + ringColor + gridColor
+// pickers; spotCount + vignette + gridStep sliders). Uses the HSV
+// gamut popover from assets/ui/color-picker.js for colour fields.
+const bgConfigEl = document.getElementById('bgConfig');
 
 function ensureBgLayersPopulated() {
   if (!Array.isArray(S.bgLayers) || S.bgLayers.length === 0) {
@@ -1365,146 +1355,56 @@ function ensureBgLayersPopulated() {
   }
 }
 
-function renderBgLayerList() {
-  if (!bgLayerListEl) return;
+function renderBgConfig() {
+  if (!bgConfigEl) return;
   ensureBgLayersPopulated();
-  bgLayerListEl.innerHTML = '';
-  S.bgLayers.forEach((layer, index) => {
-    const row = document.createElement('div');
-    row.className = 'bg-layer-card';
-    row.draggable = true;
-    row.dataset.index = String(index);
-
-    const handle = document.createElement('span');
-    handle.className = 'drag-handle';
-    handle.textContent = '☰';
-    handle.title = T('bg_layer_drag');
-    row.appendChild(handle);
-
-    const enabled = document.createElement('input');
-    enabled.type = 'checkbox';
-    enabled.checked = layer.enabled !== false;
-    enabled.title = T('bg_layer_enabled');
-    enabled.addEventListener('change', () => {
-      layer.enabled = enabled.checked;
-      saveSettings();
-    });
-    row.appendChild(enabled);
-
-    const kindLabel = document.createElement('span');
-    kindLabel.className = 'kind-label';
-    kindLabel.textContent = bgKindLabel(layer);
-    row.appendChild(kindLabel);
-
-    const opacity = document.createElement('input');
-    opacity.type = 'range';
-    opacity.min = '0'; opacity.max = '1'; opacity.step = '0.01';
-    opacity.value = String(typeof layer.opacity === 'number' ? layer.opacity : 1);
-    opacity.title = T('bg_layer_opacity');
-    opacity.addEventListener('input', () => {
-      layer.opacity = parseFloat(opacity.value);
-      saveSettings();
-    });
-    row.appendChild(opacity);
-
-    const blend = document.createElement('select');
-    blend.title = T('bg_layer_blend');
-    for (const m of ['normal', 'multiply', 'additive']) {
-      const o = document.createElement('option');
-      o.value = m;
-      o.textContent = T('blend_' + m) || m;
-      blend.appendChild(o);
-    }
-    blend.value = layer.blend || 'normal';
-    blend.addEventListener('change', () => {
-      layer.blend = blend.value;
-      saveSettings();
-    });
-    row.appendChild(blend);
-
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'delete-btn';
-    del.textContent = '×';
-    del.title = T('bg_layer_delete');
-    del.addEventListener('click', () => {
-      S.bgLayers.splice(index, 1);
-      saveSettings();
-      renderBgLayerList();
-    });
-    row.appendChild(del);
-
-    // Drag-drop reorder. Use the row's dataset.index captured at
-    // render time as the source; the drop target reads its own
-    // dataset.index, so the swap is just array-shuffle.
-    row.addEventListener('dragstart', (e) => {
-      _bgDragFromIndex = index;
-      row.classList.add('dragging');
-      try { e.dataTransfer.setData('text/plain', String(index)); } catch {}
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    row.addEventListener('dragend', () => {
-      row.classList.remove('dragging');
-      _bgDragFromIndex = -1;
-      document.querySelectorAll('.bg-layer-card.drag-over').forEach(el => el.classList.remove('drag-over'));
-    });
-    row.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      row.classList.add('drag-over');
-    });
-    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
-    row.addEventListener('drop', (e) => {
-      e.preventDefault();
-      row.classList.remove('drag-over');
-      const from = _bgDragFromIndex;
-      const to = index;
-      if (from < 0 || from === to) return;
-      const moved = S.bgLayers.splice(from, 1)[0];
-      S.bgLayers.splice(to, 0, moved);
-      saveSettings();
-      renderBgLayerList();
-    });
-
-    bgLayerListEl.appendChild(row);
-
-    // Per-kind config: surfaces the most-tweakable params for this
-    // layer kind (color pickers, vignette / spotCount sliders). Only
-    // appears for fields the kind actually uses — so a flat layer
-    // doesn't get a topColor picker, etc. Plan #10 PR C.
-    const configEl = renderBgLayerConfig(layer);
-    if (configEl) bgLayerListEl.appendChild(configEl);
-  });
-}
-let _bgDragFromIndex = -1;
-
-function renderBgLayerConfig(layer) {
-  const wrap = document.createElement('div');
-  wrap.className = 'bg-layer-config';
-  let hasAnything = false;
+  bgConfigEl.innerHTML = '';
+  const layer = S.bgLayers[0];
 
   const addColor = (key, labelKey, fallback) => {
     if (typeof layer[key] !== 'string') return;
     const v = String(layer[key]);
-    // Native color input only handles #rrggbb. If the value isn't
-    // 7-char hex (e.g. rgba(...) for spotColor), skip it — PR D will
-    // add proper rgba pickers.
-    if (!/^#[0-9a-fA-F]{6}$/.test(v)) return;
+    const isHex = /^#[0-9a-fA-F]{6}$/.test(v);
+    const isRgba = /^rgba?\(/i.test(v);
+    if (!isHex && !isRgba) return;
     const row = document.createElement('label');
     row.className = 'bg-config-row';
     const span = document.createElement('span');
     span.textContent = T(labelKey) || fallback || labelKey;
     row.appendChild(span);
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.value = v;
-    input.addEventListener('input', () => {
-      layer[key] = input.value;
-      saveSettings();
+    const swatch = document.createElement('button');
+    swatch.type = 'button';
+    swatch.className = 'bg-color-swatch';
+    swatch.style.background = v;
+    swatch.title = v;
+    swatch.addEventListener('click', () => {
+      const before = layer[key];
+      openColorPicker({
+        initial: before,
+        allowAlpha: isRgba,
+        anchor: swatch,
+        onChange: (newVal) => {
+          layer[key] = newVal;
+          swatch.style.background = newVal;
+          swatch.title = newVal;
+          saveSettings();
+        },
+        onCommit: (newVal) => {
+          layer[key] = newVal;
+          swatch.style.background = newVal;
+          swatch.title = newVal;
+          saveSettings();
+        },
+        onCancel: () => {
+          layer[key] = before;
+          swatch.style.background = before;
+          swatch.title = before;
+          saveSettings();
+        },
+      });
     });
-    row.appendChild(input);
-    wrap.appendChild(row);
-    hasAnything = true;
+    row.appendChild(swatch);
+    bgConfigEl.appendChild(row);
   };
   const addRange = (key, labelKey, min, max, step, fallback) => {
     if (typeof layer[key] !== 'number') return;
@@ -1527,43 +1427,21 @@ function renderBgLayerConfig(layer) {
     });
     row.appendChild(input);
     row.appendChild(val);
-    wrap.appendChild(row);
-    hasAnything = true;
+    bgConfigEl.appendChild(row);
   };
 
-  addColor('base',      'bg_layer_base',      'Base');
-  addColor('topColor',  'bg_layer_top',       'Top');
-  addColor('botColor',  'bg_layer_bot',       'Bottom');
-  addRange('spotCount', 'bg_layer_spot_count', 0, 16, 1, 'Spots');
-  addRange('vignette',  'bg_layer_vignette',   0, 1,  0.01, 'Vignette');
-
-  return hasAnything ? wrap : null;
+  addColor('base',       'bg_layer_base',       'Base');
+  addColor('topColor',   'bg_layer_top',        'Top');
+  addColor('botColor',   'bg_layer_bot',        'Bottom');
+  addColor('spotColor',  'bg_layer_spot_color', 'Spot color');
+  addColor('ringColor',  'bg_layer_ring_color', 'Ring color');
+  addColor('gridColor',  'bg_layer_grid_color', 'Grid color');
+  addRange('spotCount',  'bg_layer_spot_count', 0, 16,   1,    'Spots');
+  addRange('gridStep',   'bg_layer_grid_step',  16, 200, 4,    'Grid step');
+  addRange('vignette',   'bg_layer_vignette',   0, 1,    0.01, 'Vignette');
 }
+renderBgConfig();
 
-function bgKindLabel(layer) {
-  // Find the BACKGROUNDS entry whose kind matches; fall back to the
-  // raw kind string. Kind is renderer-facing ('gradient', 'agar', …)
-  // so the user-visible label is the localised preset name.
-  for (const [key, b] of Object.entries(BACKGROUNDS)) {
-    if (b.kind === layer.kind && (b.label === layer.label || !layer.label)) {
-      return T('bg_' + key) || b.label || layer.kind;
-    }
-  }
-  return layer.kind || '?';
-}
-
-if (bgAddLayerBtnEl && bgAddLayerKindEl) {
-  bgAddLayerBtnEl.addEventListener('click', () => {
-    const key = bgAddLayerKindEl.value;
-    if (!BACKGROUNDS[key]) return;
-    ensureBgLayersPopulated();
-    S.bgLayers.push(bgLayerFromPreset(key));
-    saveSettings();
-    renderBgLayerList();
-  });
-}
-
-renderBgLayerList();
 
 function applyUpscaleMode() {
   canvas.classList.toggle('pixel', S.upscaleMode === 'pixel');

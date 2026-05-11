@@ -347,64 +347,112 @@ body.is-paused #aboutDialog {
 }
 .settings-panel .sub-controls[hidden] { display: none; }
 
-/* Background-layer stack UI (see .claude/plan/10-bg-layer-stack.md PR B). */
-.bg-layer-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 6px; }
-.bg-layer-card {
-  display: grid;
-  grid-template-columns: auto auto 1fr auto auto;
-  gap: 6px;
-  align-items: center;
-  padding: 6px 8px;
-  background: #00000033;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-}
-.bg-layer-card.dragging { opacity: 0.4; }
-.bg-layer-card.drag-over { border-color: var(--accent); }
-.bg-layer-card .drag-handle {
-  cursor: grab; padding: 2px 4px; user-select: none; opacity: 0.5;
-  font-family: monospace;
-}
-.bg-layer-card .drag-handle:active { cursor: grabbing; }
-.bg-layer-card .kind-label {
-  font-size: 0.85em; color: var(--ink-dim, var(--ink)); min-width: 80px;
-}
-.bg-layer-card input[type=range] { flex: 1 1 auto; min-width: 60px; }
-.bg-layer-card select { width: auto; padding: 4px 6px; font-size: 0.85em; }
-.bg-layer-card .delete-btn {
-  background: none; border: 1px solid var(--line); color: #f88;
-  width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
-  padding: 0; line-height: 1; font-size: 14px;
-}
-.bg-layer-card .delete-btn:hover { background: #f885; color: #fff; }
-
-/* Per-kind config sub-panel (PR C). Sibling of .bg-layer-card; one
- * row per editable field. */
-.bg-layer-config {
+/* Background single-shader config (per-kind sliders + colour swatches).
+ * Replaces the drag-drop layer-list UI from the original plan #10 PR B —
+ * only one bg shader at a time now, but the same set of per-kind
+ * editable fields (PR C) is preserved. */
+.bg-config-rows {
   display: flex; flex-direction: column; gap: 4px;
-  margin: -2px 0 4px 16px; padding: 6px 8px 6px 10px;
+  margin: 8px 0 4px 0; padding: 6px 8px 6px 10px;
   background: #00000022; border-left: 2px solid var(--line);
   border-radius: 0 4px 4px 0;
   font-size: 0.85em;
 }
-.bg-layer-config .bg-config-row {
+.bg-config-rows .bg-config-row {
   display: grid;
-  grid-template-columns: 80px 1fr auto;
+  grid-template-columns: 90px 1fr auto;
   gap: 6px; align-items: center;
 }
-.bg-layer-config input[type=color] {
-  width: 36px; height: 22px; border: 1px solid var(--line);
-  background: transparent; padding: 0; cursor: pointer;
+.bg-config-rows input[type=range] { width: 100%; }
+.bg-config-rows .val { font-family: monospace; opacity: 0.7; }
+.bg-color-swatch {
+  width: 36px; height: 22px;
+  border: 1px solid var(--line); border-radius: 4px;
+  cursor: pointer; padding: 0;
+  /* Checkerboard for alpha visibility. */
+  background-image:
+    linear-gradient(45deg, #555 25%, transparent 25%),
+    linear-gradient(-45deg, #555 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #555 75%),
+    linear-gradient(-45deg, transparent 75%, #555 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
 }
-.bg-layer-config input[type=range] { width: 100%; }
-.bg-layer-config .val { font-family: monospace; opacity: 0.7; }
-.bg-add-layer-row { display: flex; gap: 6px; margin-top: 6px; }
-.bg-add-layer-row select { flex: 1 1 auto; }
-.bg-add-layer-row button {
-  background: #00000044; color: var(--ink); border: 1px solid var(--line);
-  border-radius: 6px; padding: 6px 10px; cursor: pointer;
+.bg-color-swatch:hover { border-color: var(--accent); }
+
+/* HSV gamut popover (see assets/ui/color-picker.js). */
+.cp-popover {
+  position: fixed; z-index: 9999;
+  display: grid; gap: 8px;
+  padding: 10px;
+  background: #181222ee;
+  border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.5);
+  width: 240px;
+  font-family: system-ui, sans-serif; font-size: 12px; color: var(--ink);
 }
-.bg-add-layer-row button:hover { border-color: var(--accent); }
+.cp-popover .cp-sv {
+  width: 200px; height: 160px;
+  border-radius: 4px; cursor: crosshair;
+  display: block; margin: 0 auto;
+}
+.cp-popover .cp-hue {
+  position: relative;
+  width: 100%; height: 16px;
+  border-radius: 4px;
+  background: linear-gradient(to bottom,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+  cursor: ns-resize;
+}
+.cp-popover .cp-hue-thumb {
+  position: absolute; left: -2px; right: -2px;
+  height: 4px; top: 0;
+  border: 1px solid #fff; background: #0008; border-radius: 1px;
+  pointer-events: none;
+  transform: translateY(-2px);
+}
+.cp-popover .cp-alpha {
+  position: relative;
+  width: 100%; height: 16px;
+  border-radius: 4px;
+  background:
+    repeating-conic-gradient(#444 0% 25%, #888 0% 50%) 50%/8px 8px;
+  cursor: ew-resize;
+}
+.cp-popover .cp-alpha-thumb {
+  position: absolute; top: -2px; bottom: -2px;
+  width: 4px;
+  border: 1px solid #fff; background: #0008; border-radius: 1px;
+  pointer-events: none;
+  transform: translateX(-2px);
+}
+.cp-popover .cp-input-row {
+  display: grid; grid-template-columns: auto 1fr; gap: 6px; align-items: center;
+}
+.cp-popover .cp-swatch {
+  width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 4px;
+  background-image:
+    linear-gradient(45deg, #555 25%, transparent 25%),
+    linear-gradient(-45deg, #555 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #555 75%),
+    linear-gradient(-45deg, transparent 75%, #555 75%);
+  background-size: 8px 8px;
+}
+.cp-popover .cp-text {
+  background: #00000055; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 4px 6px; font-family: monospace; font-size: 12px;
+}
+.cp-popover .cp-btn-row {
+  display: flex; gap: 6px; justify-content: flex-end;
+}
+.cp-popover .cp-btn {
+  background: #00000055; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 4px 10px; cursor: pointer; font-size: 12px;
+}
+.cp-popover .cp-btn:hover { border-color: var(--accent); }
+.cp-popover .cp-ok { background: color-mix(in srgb, var(--accent) 25%, transparent); }
 
 /* FX overlay order panel — sortable list of the three fixed-function
  * FX overlays (noise/vignette/crosshair). Each row: drag handle,
