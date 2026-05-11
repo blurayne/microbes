@@ -10,11 +10,7 @@ file in sync.
 
 ## Open
 
-_None — see Done. Day-to-day work for this project has moved to
-small standalone PRs (defaults / shaders / settings polish);
-they're tracked in the git log + PR descriptions rather than as
-numbered plan files. New non-trivial features should still drop a
-plan here per the Process section below._
+- [ ] **Background layer stack (drag-drop compositable bgs)** — [`.claude/plan/10-bg-layer-stack.md`](./.claude/plan/10-bg-layer-stack.md)
 
 ## Done
 

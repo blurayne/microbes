@@ -7,7 +7,7 @@
 
 import {
   S, FACE, CELL_TYPES, NUCLEUS_RATIO, WOBBLE_VERTS, THETA_TABLE,
-  cellColors, currentTheme, currentBackground, currentHighlightColor, hexToRgba, frac,
+  cellColors, currentTheme, currentBackground, currentBgLayers, currentHighlightColor, hexToRgba, frac,
 } from '../core/state.js';
 import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
@@ -100,8 +100,29 @@ export class Canvas2DRenderer extends RendererBase {
   drawBackground(ts) {
     const ctx = this.ctx;
     const W = this.W, H = this.H;
+    const layers = currentBgLayers();
+    if (layers.length === 0) {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+      return;
+    }
+    const blendMap = { normal: 'source-over', multiply: 'multiply', additive: 'lighter' };
+    for (let i = 0; i < layers.length; i++) {
+      const bg = layers[i];
+      ctx.save();
+      ctx.globalAlpha = (typeof bg.opacity === 'number') ? bg.opacity : 1;
+      // First layer always paints over the previous frame's pixels;
+      // additional layers composite onto the stack so far.
+      ctx.globalCompositeOperation = (i === 0) ? 'source-over' : (blendMap[bg.blend] || 'source-over');
+      this._drawBgLayer(ts, bg);
+      ctx.restore();
+    }
+  }
+
+  _drawBgLayer(ts, bg) {
+    const ctx = this.ctx;
+    const W = this.W, H = this.H;
     const cam = this.camera;
-    const bg = currentBackground();
 
     if (bg.kind === 'gradient') {
       const g = ctx.createLinearGradient(0, 0, 0, H);
