@@ -1,5 +1,16 @@
 name: Visual tests (Playwright)
 
+# Gates renderer + cell-port changes on PRs only. We do NOT run on
+# `push: main` — main is what the PR was merged INTO; running again
+# adds no signal and historically caused two-stage failures (push
+# fails AFTER the merge succeeded, leaving a red badge on main with
+# no fix-it path). The Pages-deploy workflow handles main-push CI.
+#
+# The visual suite is currently advisory: the baseline set lives at
+# tests/visual/baselines/ and is populated incrementally by per-cell
+# port PRs (Plan 13 — see .claude/plan/13-shader-test-visuals.md).
+# Until the baseline set is non-empty, `continue-on-error: true`
+# keeps the CI badge informational so unrelated PRs aren't blocked.
 on:
   pull_request:
     paths:
@@ -10,10 +21,8 @@ on:
       - 'index.html'
       - 'playwright.config.js'
       - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/visual-test.yml'
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -23,6 +32,9 @@ jobs:
   visual:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # Advisory until baselines exist. Flip to `false` (default) once
+    # the first per-cell port PR lands `tests/visual/baselines/*.png`.
+    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -31,27 +43,40 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
 
-      # Install JS deps. package-lock.json isn't committed yet —
-      # `npm ci` would fail without it, so use `npm install` (still
-      # cheap; only @playwright/test is in devDependencies).
+      # `npm ci` is faster + deterministic now that package-lock.json
+      # ships from PR #193. Falls back to `npm install` if no lock.
       - name: Install deps
-        run: npm install
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
 
-      # Playwright's `--with-deps` step pulls the right libs for
-      # the chosen browser (Chromium → libnss3, fonts, etc.) so
-      # the ubuntu-latest runner has everything it needs.
       - name: Install Chromium + system deps
         run: npx playwright install --with-deps chromium
 
+      - name: Count baselines
+        id: baselines
+        run: |
+          n=$(find tests/visual/baselines -type f -name '*.png' 2>/dev/null | wc -l)
+          echo "count=$n" >> "$GITHUB_OUTPUT"
+          echo "Baseline count: $n"
+
+      # If baselines is empty, skip the full Playwright run — there's
+      # nothing to diff yet. Just smoke-test that the harness wires
+      # up (config + spec parse) and exit clean.
+      - name: Smoke (no baselines yet)
+        if: steps.baselines.outputs.count == '0'
+        run: |
+          echo "No baselines committed — skipping pixel diffs."
+          echo "Verifying Playwright config + spec parse only."
+          npx playwright test --list
+
       - name: Run visual tests
+        if: steps.baselines.outputs.count != '0'
         env:
           CI: true
         run: npm run test:visual
 
-      # On any failure: capture the HTML report + per-test traces
-      # (diff images live inside) so reviewers can sanity-check
-      # which cell × theme regressed.
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@v4

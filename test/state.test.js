@@ -54,10 +54,25 @@ test('cellLabel / cellDesc cover all 19 cell types', () => {
 });
 
 test('CELL_TYPES has the 12 good (immune + RBC) + 8 pathogen entries', () => {
-  const good = Object.values(CELL_TYPES).filter(t => t.category === 'good');
-  const bad  = Object.values(CELL_TYPES).filter(t => t.category === 'bad');
+  // Spielrelevant cells only — `extended: true` entries (e.g. the
+  // eukaryote shader-test specimen added for visual-port tests in
+  // PR #194) are gated by S.extendedCells and don't count toward
+  // game balance. A separate assertion below covers the extended
+  // tier so a missing-eukaryote regression is still caught.
+  const good = Object.values(CELL_TYPES).filter(t => t.category === 'good' && !t.extended);
+  const bad  = Object.values(CELL_TYPES).filter(t => t.category === 'bad'  && !t.extended);
   assert.equal(good.length, 12);
   assert.equal(bad.length, 8);
+
+  // Extended (non-game) tier sanity-check: at least the eukaryote
+  // worked-example from Plan 13 PR B should be present + flagged
+  // properly. If you remove eukaryote, update the skill at
+  // .claude/skills/import-shader-test-cell/SKILL.md too.
+  const extended = Object.values(CELL_TYPES).filter(t => t.extended);
+  assert.ok(extended.length >= 1, 'expected at least one extended cell (eukaryote)');
+  for (const t of extended) {
+    assert.equal(typeof t.category, 'string', 'extended cell missing category');
+  }
 });
 
 test('every CELL_TYPE entry has the schema the renderer expects', () => {
