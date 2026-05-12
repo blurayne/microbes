@@ -1729,8 +1729,8 @@ struct VsOut {
 //   0=none, 1=smile, 2=frown, 3=snarl, 4=fangs, 5=tongue, 6=drool.
 const FACE_WGSL = /* wgsl */ `
 struct FaceU {
-  cam: vec4<f32>,        // (scale, tx, ty, _)
-  vp_time: vec4<f32>,    // (viewportW, viewportH, time, _)
+  cam: vec4<f32>,        // (scale, tx, ty, rotation-radians)
+  vp_time: vec4<f32>,    // (viewportW, viewportH, time, faceScale)
 };
 @group(0) @binding(0) var<uniform> u: FaceU;
 
@@ -1806,7 +1806,11 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
 }
 
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
-  let FACE_SCALE: f32 = 1.2;
+  // vp_time.w carries S.faceScale (uniform multiplier on every face
+  // dimension: eye R, pupil R, eye-X spread, mouth half-width). Default
+  // 1.0 keeps the legacy look; 0 hides faces; up to 3 fills the cell.
+  let faceScale = u.vp_time.w;
+  let FACE_SCALE: f32 = 1.2 * faceScale;
   let PI: f32 = 3.14159;
   let time = u.vp_time.z;
   let mouthKind = i32(in.cfg0.x + 0.5);
@@ -1815,7 +1819,7 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
   let eyeY = in.cfg0.w;
   let pupilRBase = in.cfg1.x;
   let look = vec2<f32>(in.cfg1.y, in.cfg1.z);
-  let mouthW = in.cfg1.w;
+  let mouthW = in.cfg1.w * faceScale;
   let blink = in.cfg2.x;
   let mouthY = in.cfg2.y;
   let phase = in.cfg2.z;
@@ -4193,7 +4197,7 @@ export class WebGPURenderer extends RendererBase {
     const cam = this.camera;
     device.queue.writeBuffer(this._faceUniformBuffer, 0, new Float32Array([
       cam.scale, cam.tx, cam.ty, cam.rotation || 0,
-      this.W, this.H, time, 0,
+      this.W, this.H, time, (S.faceScale != null ? S.faceScale : 1),
     ]));
     const pass = this._frameEncoder.beginRenderPass({
       colorAttachments: [{ view: this._sceneView, loadOp: 'load', storeOp: 'store' }],

@@ -49,6 +49,12 @@
       <details class="settings-section">
         <summary data-i18n="background">Background</summary>
         <select id="bgSelect"></select>
+        <label><span data-i18n="bg_flow">Background flow</span> <span id="bgVal" class="val"></span>
+          <input type="range" id="bgFlowSpeed" min="0" max="2" step="0.05" />
+        </label>
+        <label><span data-i18n="bg_scale">Background size</span> <span id="bgScaleVal" class="val"></span>
+          <input type="range" id="bgScale" min="0" max="4" step="0.05" />
+        </label>
         <div id="bgConfig" class="bg-config-rows"></div>
       </details>
 
@@ -202,12 +208,6 @@
         <label><span data-i18n="wobble">Wobble</span> <span id="wobbleVal" class="val"></span>
           <input type="range" id="wobbleAmp" min="0" max="0.4" step="0.01" />
         </label>
-        <label><span data-i18n="bg_flow">Background flow</span> <span id="bgVal" class="val"></span>
-          <input type="range" id="bgFlowSpeed" min="0" max="2" step="0.05" />
-        </label>
-        <label><span data-i18n="bg_scale">Background size</span> <span id="bgScaleVal" class="val"></span>
-          <input type="range" id="bgScale" min="0" max="4" step="0.05" />
-        </label>
         <label><span data-i18n="outline_px">Outline px</span> <span id="outVal" class="val"></span>
           <input type="range" id="outlinePx" min="1" max="10" step="1" />
         </label>
@@ -219,6 +219,9 @@
         </label>
         <label><span data-i18n="cell_size">Cell size</span> <span id="cellSizeVal" class="val"></span>
           <input type="range" id="cellSizeMul" min="0.4" max="2.0" step="0.05" />
+        </label>
+        <label><span data-i18n="face_size">Face size</span> <span id="faceScaleVal" class="val"></span>
+          <input type="range" id="faceScale" min="0" max="3.0" step="0.05" />
         </label>
         <label><input type="checkbox" id="useHighlight" /> <span data-i18n="use_highlight">Use highlight colour</span></label>
         <label><input type="checkbox" id="cartoon" /> <span data-i18n="cartoon_mode">Cartoon mode (faces)</span></label>
@@ -285,7 +288,7 @@
       </details>
 
       <details class="settings-section">
-        <summary data-i18n="about">About</summary>
+        <summary data-i18n="links">Links</summary>
         <p>
           <a href="book/index.html" target="_blank" rel="noopener noreferrer"
              data-i18n="game_design_doc">Game Design Document</a> ·
@@ -297,6 +300,10 @@
       <section class="actions">
         <button type="button" id="copyBuildBtn" class="about-btn" data-i18n="copy_build">Copy build SHA</button>
         <button type="button" id="aboutBtn" class="about-btn" data-i18n="about">About</button>
+        <a id="githubLink" class="about-btn"
+           href="https://github.com/blurayne/microbes"
+           target="_blank" rel="noopener noreferrer"
+           data-i18n="github">GitHub</a>
       </section>
     </aside>
   </div>
@@ -311,7 +318,6 @@
     <rect x="6.5" y="5" width="4" height="14" rx="1"/>
     <rect x="13.5" y="5" width="4" height="14" rx="1"/>
   </svg></button>
-  <button id="help" class="fab" type="button" aria-label="Help" title="Help" data-i18n-attr="aria-label=nav_help,title=nav_help">?</button>
   <!-- #paletteBad FAB removed (per user spec — pathogens spawn from
        the unified add-dialog opened by #palette). -->
   <button id="palette" class="fab" type="button" aria-label="Add" title="Add" data-i18n-attr="aria-label=nav_add_cell,title=nav_add_cell">+</button>
