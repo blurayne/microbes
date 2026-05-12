@@ -1397,28 +1397,30 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     col = mix(col, clamp(u.base.rgb * csIntensity, vec3<f32>(0.0), vec3<f32>(2.0)), vec3<f32>(0.95));
   }
   // ---- Aurora borealis: vertical green/violet ribbons (kind 5) ----
+  // Hue oscillates between u.top.rgb and u.bot.rgb over time —
+  // defaults match the previous hard-coded green (0.24,0.95,0.52) /
+  // violet (0.55,0.35,0.95).
   if (kind == 5) {
     let sky = vec2<f32>(worldPx.x * 0.0015, worldPx.y * 0.001 - time * 0.05);
     let warp = bgFbm(vec2<f32>(sky.x, time * 0.08));
     var ribbon = 0.5 + 0.5 * sin(sky.y * 6.2831 + warp * 6.2831);
     ribbon = pow(ribbon, 4.0);
     let bandH = exp(-pow((sky.y - 0.5) * 1.5, 2.0));
-    let green  = vec3<f32>(0.24, 0.95, 0.52);
-    let violet = vec3<f32>(0.55, 0.35, 0.95);
-    let hue = mix(green, violet, 0.5 + 0.5 * sin(warp * 3.14159 + time * 0.2));
-    col = mix(col, hue, ribbon * bandH * 0.85);
+    let hue = mix(u.top.rgb, u.bot.rgb, 0.5 + 0.5 * sin(warp * 3.14159 + time * 0.2));
+    col = mix(col, hue, vec3<f32>(ribbon * bandH * 0.85));
   }
 
   // ---- Underwater: caustic interference (kind 6) ----
+  // u.bot.rgb is the deep wash, u.top.rgb is the bright caustic
+  // peak — defaults match the previous hard-coded deep
+  // (0.04,0.16,0.30) / bright (0.60,0.95,1.00).
   if (kind == 6) {
     let p = worldPx * 0.04;
     let w1 = sin(p.x + time * 0.6 + sin(p.y * 0.75));
     let w2 = sin(p.y * 0.95 + time * 0.85 + sin(p.x * 0.85));
     let c = pow(max(0.0, (w1 + w2) * 0.5 + 0.5), 6.0);
-    let deep   = vec3<f32>(0.04, 0.16, 0.30);
-    let bright = vec3<f32>(0.60, 0.95, 1.00);
-    col = mix(col, deep, 0.70);
-    col = mix(col, bright, c * 0.55);
+    col = mix(col, u.bot.rgb, vec3<f32>(0.70));
+    col = mix(col, u.top.rgb, vec3<f32>(c * 0.55));
   }
 
   // ---- Lava / fire: boiling fbm (kind 7) ----
