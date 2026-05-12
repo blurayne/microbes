@@ -256,6 +256,26 @@
   }
   .cell-spec strong { color: var(--cell-color); }
 
+  /* Friends / Beute / Feinde — relationship lists per cell, derived
+     from the sim damage matrix (assets/core/sim-rules.js). The
+     data-friends / data-prey / data-foes attrs hold the canonical
+     cell-key lists so the future in-game start banner can read
+     them without re-parsing the visible text. */
+  .cell-relations, .pathogen-relations {
+    margin-top: 10px;
+    display: grid; gap: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--ink-dim); line-height: 1.45;
+  }
+  .rel-row { display: grid; grid-template-columns: 64px 1fr; gap: 8px; }
+  .rel-label {
+    color: var(--cell-color, var(--accent));
+    text-transform: uppercase; letter-spacing: 0.1em;
+  }
+  .rel-list { color: var(--ink); }
+  .rel-empty { color: var(--ink-dim); font-style: italic; }
+
   /* BADGES */
   .badge {
     display: inline-block; padding: 3px 10px; border-radius: 12px;
@@ -613,6 +633,31 @@
     .hud-bars { grid-template-columns: 1fr; }
     th, td { padding: 10px 8px; font-size: 11px; }
     .diagram-card { padding: 24px 12px; }
+
+    /* Mobile-specific bug fix: on narrow viewports the mkdocs default
+       theme (Bootstrap 5) ships a `.card` rule with display:flex +
+       min-width:0 + flex-grow:0 that combines badly with our grid
+       items, collapsing them to single-character min-content (the
+       "S/I/E/G" letter-stacked card seen at viewport ≤ 480px on
+       Ch08 / Ch10). Force our card boxes to fill the column. */
+    .grid-auto { min-width: 0; }
+    .grid-auto > *,
+    .grid-auto .card {
+      min-width: 0;
+      max-width: 100%;
+      width: auto;
+      display: block;
+    }
+    /* Tables in chapter content: let them scroll horizontally instead
+       of squeezing column text to single-character columns. */
+    .chapter table,
+    table.matrix-table,
+    .table-wrap > table {
+      display: block;
+      max-width: 100%;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
   }
 
 /* ============================================================
@@ -661,6 +706,98 @@
     border-color: var(--line) !important;
   }
   .navbar-toggler-icon { filter: invert(1); }
+
+  /* Search box (Bootstrap form-control inside the navbar). The mkdocs
+     default ships it white-on-white; tint to the GDD green accent so
+     it reads against the dark navbar. The `[search]` button gets the
+     same accent. */
+  .navbar input[type="text"],
+  .navbar input[type="search"],
+  .navbar .form-control,
+  input.search-query,
+  #mkdocs_search_modal input[type="text"] {
+    background-color: var(--bg-elev) !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--accent) !important;
+    box-shadow: 0 0 0 1px transparent;
+    transition: box-shadow 120ms ease, border-color 120ms ease;
+  }
+  .navbar input[type="text"]::placeholder,
+  .navbar input[type="search"]::placeholder,
+  .navbar .form-control::placeholder,
+  #mkdocs_search_modal input[type="text"]::placeholder {
+    color: var(--ink-dim) !important;
+    opacity: 0.7;
+  }
+  .navbar input[type="text"]:focus,
+  .navbar input[type="search"]:focus,
+  .navbar .form-control:focus,
+  #mkdocs_search_modal input[type="text"]:focus {
+    background-color: var(--bg-elev) !important;
+    color: var(--ink) !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 0 0 2px var(--accent) !important;
+    outline: none !important;
+  }
+
+  /* Search results modal/list. Match the dark panel and tint each hit
+     with the accent so the link/title reads as a clear interactive. */
+  #mkdocs_search_modal,
+  #mkdocs_search_modal .modal-content,
+  #mkdocs_search_modal .modal-header,
+  #mkdocs_search_modal .modal-body,
+  #mkdocs_search_modal .modal-footer {
+    background-color: var(--bg) !important;
+    color: var(--ink) !important;
+    border-color: var(--line) !important;
+  }
+  #mkdocs_search_modal .close,
+  #mkdocs_search_modal .btn-close {
+    filter: invert(1);
+  }
+  #mkdocs-search-results .search-result {
+    background: var(--bg-elev) !important;
+    color: var(--ink) !important;
+    border: 1px solid var(--line) !important;
+    border-left: 3px solid var(--accent) !important;
+    border-radius: 4px;
+    padding: 12px 14px;
+    margin: 8px 0;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  #mkdocs-search-results .search-result:hover {
+    background: var(--bg-card, var(--bg-elev)) !important;
+    border-color: var(--accent) !important;
+  }
+  #mkdocs-search-results .search-result a,
+  #mkdocs-search-results .search-result .search-result-title,
+  #mkdocs-search-results .search-result h1,
+  #mkdocs-search-results .search-result h2 {
+    color: var(--accent) !important;
+    text-decoration: none;
+    font-weight: 500;
+  }
+  #mkdocs-search-results .search-result a:hover {
+    text-decoration: underline;
+  }
+  #mkdocs-search-results .search-result-text,
+  #mkdocs-search-results .search-result p,
+  #mkdocs-search-results .search-result .context {
+    color: var(--ink-dim) !important;
+    font-size: 13px;
+    line-height: 1.45;
+    margin: 4px 0 0;
+  }
+  #mkdocs-search-results mark,
+  #mkdocs-search-results .search-result mark,
+  #mkdocs-search-results em {
+    background: rgba(157, 255, 110, 0.20) !important;
+    color: var(--accent) !important;
+    padding: 0 2px;
+    border-radius: 2px;
+    font-style: normal;
+    font-weight: 600;
+  }
 
   /* Mobile drawer card (the panel under the hamburger). */
   .navbar-collapse.bg-body-tertiary,
@@ -735,3 +872,79 @@
     color: var(--accent) !important;
   }
 }
+
+/* ──────────────────────────────────────────────────────────────
+   Sticky left-side TOC, injected by docs/assets/sidebar.js.
+   Hidden below 1024px so the inline chapter cards on Einleitung
+   stay the only nav on phones + tablets — same UX as today on
+   mobile, just adds a quick-jump column on desktop.
+   ────────────────────────────────────────────────────────────── */
+.docs-sidebar { display: none; }
+
+@media (min-width: 1024px) {
+  .docs-sidebar {
+    display: block;
+    position: fixed;
+    left: 24px;
+    top: 88px;
+    width: 220px;
+    max-height: calc(100vh - 120px);
+    overflow-y: auto;
+    padding: 18px 16px;
+    background: linear-gradient(180deg, rgba(26, 14, 58, 0.9), rgba(13, 7, 30, 0.9));
+    border: 1px solid var(--line, rgba(140, 110, 200, 0.18));
+    border-radius: 10px;
+    backdrop-filter: blur(8px);
+    z-index: 50;
+    font-family: var(--ui-font, 'JetBrains Mono', monospace);
+  }
+  .docs-sidebar ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .docs-sidebar li { margin: 0; }
+  .docs-sidebar a {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 8px;
+    border-radius: 6px;
+    color: var(--ink-dim, #8a83a0);
+    text-decoration: none;
+    font-size: 12.5px;
+    line-height: 1.35;
+    transition: background 0.12s, color 0.12s;
+  }
+  .docs-sidebar a:hover {
+    background: rgba(140, 110, 200, 0.08);
+    color: var(--ink, #ece6d6);
+  }
+  .docs-sidebar a[aria-current="page"] {
+    background: rgba(140, 110, 200, 0.16);
+    color: var(--accent, #6cf2ff);
+  }
+  .docs-sidebar .num {
+    flex: 0 0 22px;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    color: var(--accent, #6cf2ff);
+    opacity: 0.75;
+  }
+  .docs-sidebar a[aria-current="page"] .num { opacity: 1; }
+  .docs-sidebar .title { flex: 1; }
+
+  /* Push the main column right so the sidebar doesn't overlap the
+     chapter content. The default mkdocs theme wraps content in
+     <main class="container">; the project's chapter HTML uses
+     .frame as the inner column. */
+  .frame { margin-left: 240px; }
+
+  /* The mkdocs default theme's top navbar (.navbar.fixed-top) is
+     redundant once the sidebar covers chapter navigation — hide it
+     and reclaim the body's reserved top padding so the main column
+     sits flush at the viewport top. */
+  .navbar.fixed-top { display: none; }
+  body { padding-top: 0 !important; }
+}
+

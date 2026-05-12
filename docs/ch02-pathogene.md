@@ -45,6 +45,14 @@
               <span class="weakness-chip"><span class="dot" style="background: var(--c-nk);"></span>NK-Zelle</span>
             </div>
           </div>
+          <div class="pathogen-relations"
+               data-friends="corona,influenza,bacteriophage,retrovirus"
+               data-prey="rbc"
+               data-foes="nk,tcell,bcell,macrophage,monocyte,dendritic">
+            <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Andere Viren (Corona, Influenza, Phage, Retro)</span></div>
+            <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Erythrozyten (Membran-Hijacking)</span></div>
+            <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">NK, T-Killer, B-Zelle, Makrophage, Monozyt, Dendritische</span></div>
+          </div>
         </div>
 
         <div class="pathogen-card" style="--enemy-color: var(--p-corona);">
@@ -68,6 +76,14 @@
               <span class="weakness-chip"><span class="dot" style="background: var(--c-tk);"></span>T-Killer</span>
             </div>
           </div>
+          <div class="pathogen-relations"
+               data-friends="virus,influenza,bacteriophage,retrovirus"
+               data-prey="rbc"
+               data-foes="nk,tcell,bcell,macrophage,monocyte,dendritic">
+            <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Andere Viren</span></div>
+            <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Erythrozyten</span></div>
+            <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">NK, T-Killer, B-Zelle, Makrophage</span></div>
+          </div>
         </div>
 
         <div class="pathogen-card" style="--enemy-color: var(--p-flu);">
@@ -80,6 +96,14 @@
             <div><div class="stat-label">DMG</div><div class="stat-value">7</div></div>
           </div>
           <div class="pathogen-special">Mutiert ständig. Antikörper greifen nicht zuverlässig.</div>
+            <div class="pathogen-relations"
+                 data-friends="virus,corona,bacteriophage,retrovirus"
+                 data-prey="rbc"
+                 data-foes="nk,tcell,bcell,macrophage,monocyte,dendritic">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Andere Viren</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Erythrozyten</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">NK, T-Killer, B-Zelle, Makrophage</span></div>
+            </div>
           <div class="pathogen-ability">
             <strong>Mutation</strong>
             <span>Alle 8s neue Schwäche-Resistenz. Antikörper-Markierungen fallen ab.</span>
@@ -103,6 +127,14 @@
             <div><div class="stat-label">DMG</div><div class="stat-value">5</div></div>
           </div>
           <div class="pathogen-special">Greift Bakterien an, ist aber selbst ein Eindringling. Allianz-Mechanik!</div>
+            <div class="pathogen-relations"
+                 data-friends="virus,corona,influenza,retrovirus"
+                 data-prey=""
+                 data-foes="nk,tcell,bcell,macrophage">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Andere Viren</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list rel-empty">—</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">NK, T-Killer, B-Zelle, Makrophage</span></div>
+            </div>
           <div class="pathogen-ability">
             <strong>Symbiose</strong>
             <span>Ignoriert RBCs. Tötet andere Bakterien-Pathogene auf der Map. Optionaler Verbündeter — wenn du keine Bakterien hast.</span>
@@ -126,6 +158,14 @@
             <div><div class="stat-label">DMG</div><div class="stat-value">12</div></div>
           </div>
           <div class="pathogen-special">Versteckt sich in Körperzellen, lange Inkubation.</div>
+            <div class="pathogen-relations"
+                 data-friends="virus,corona,influenza,bacteriophage"
+                 data-prey="rbc"
+                 data-foes="nk,tcell,bcell,macrophage,monocyte,dendritic">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Andere Viren</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Erythrozyten · genom-Integration</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">NK, T-Killer, B-Zelle, Makrophage</span></div>
+            </div>
           <div class="pathogen-ability">
             <strong>Latenz</strong>
             <span>Wird unsichtbar für 5s nach RBC-Kontakt. Nur NK-Zellen können es während Latenz finden.</span>
@@ -175,6 +215,14 @@
               <span class="weakness-chip"><span class="dot" style="background: var(--c-mac);"></span>Makrophage</span>
             </div>
           </div>
+          <div class="pathogen-relations"
+               data-friends="bacterium"
+               data-prey=""
+               data-foes="neutrophil,macrophage,monocyte,bcell,dendritic">
+            <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Bakterium</span></div>
+            <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list rel-empty">—</span></div>
+            <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">Neutrophile, Makrophage, Monozyt, B-Zelle</span></div>
+          </div>
         </div>
 
         <div class="pathogen-card" style="--enemy-color: var(--p-bact);">
@@ -197,6 +245,14 @@
               <span class="weakness-chip"><span class="dot" style="background: var(--c-neu);"></span>Neutrophile</span>
               <span class="weakness-chip"><span class="dot" style="background: var(--c-bas);"></span>Basophil (Slow)</span>
             </div>
+          </div>
+          <div class="pathogen-relations"
+               data-friends="germ"
+               data-prey=""
+               data-foes="neutrophil,macrophage,monocyte,bcell,dendritic">
+            <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Keim</span></div>
+            <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list rel-empty">—</span></div>
+            <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">Neutrophile, Makrophage, Monozyt, B-Zelle</span></div>
           </div>
         </div>
 
@@ -225,6 +281,14 @@
             <div><div class="stat-label">DMG</div><div class="stat-value">15</div></div>
           </div>
           <div class="pathogen-special">Kriecht und engulft Gewebe. Zu groß zum Fressen für Phagozyten.</div>
+            <div class="pathogen-relations"
+                 data-friends="mite"
+                 data-prey="rbc"
+                 data-foes="nk,basophil,mast,eosinophil,tcell,bcell,macrophage,monocyte,dendritic">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Milbe</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Erythrozyten (DPS 6)</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">NK, Basophile, Mastzelle, Eosinophile, T-Killer, B-Zelle, Makrophage</span></div>
+            </div>
           <div class="pathogen-ability">
             <strong>Engulfen</strong>
             <span>Kann Neutrophile in 30px-Radius "verschlucken" — entfernt sie aus dem Spiel.</span>
@@ -258,6 +322,14 @@
               <span class="weakness-chip"><span class="dot" style="background: var(--c-eos);"></span>Eosinophil</span>
               <span class="weakness-chip"><span class="dot" style="background: var(--c-mast);"></span>Mast Cell (AoE)</span>
             </div>
+          </div>
+          <div class="pathogen-relations"
+               data-friends="amoebaP"
+               data-prey="rbc"
+               data-foes="nk,basophil,tcell,eosinophil,mast,bcell,macrophage,monocyte,dendritic">
+            <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Amöbe</span></div>
+            <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Erythrozyten (DPS 4)</span></div>
+            <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">Basophile (DPS 11), Eosinophile, NK, T-Killer, Mastzelle, B-Zelle, Makrophage</span></div>
           </div>
         </div>
 
@@ -297,6 +369,14 @@
               <span class="weakness-chip"><span class="dot" style="background: var(--c-mac);"></span>Makrophage</span>
             </div>
           </div>
+          <div class="pathogen-relations"
+               data-friends="spore"
+               data-prey=""
+               data-foes="neutrophil,macrophage,monocyte,bcell,dendritic">
+            <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Spore</span></div>
+            <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list rel-empty">—</span></div>
+            <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">Neutrophile (DPS 4), Makrophage, Monozyt, B-Zelle, Dendritische</span></div>
+          </div>
         </div>
 
         <div class="pathogen-card" style="--enemy-color: var(--p-spore);">
@@ -309,6 +389,14 @@
             <div><div class="stat-label">DMG</div><div class="stat-value">10</div></div>
           </div>
           <div class="pathogen-special">Driftet auf Strömungen; sät neue Wachstumspunkte.</div>
+            <div class="pathogen-relations"
+                 data-friends="slime"
+                 data-prey=""
+                 data-foes="neutrophil,macrophage,monocyte,bcell,dendritic">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Schleimpilz</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list rel-empty">—</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">Neutrophile (DPS 4), Makrophage, Monozyt, B-Zelle, Dendritische</span></div>
+            </div>
           <div class="pathogen-ability">
             <strong>Vermehrung</strong>
             <span>Spawnt alle 5s eine neue Spore. Aus 1 wird 2 → 4 → 8. Schnell handeln!</span>
@@ -347,6 +435,14 @@
             <div><div class="stat-label">DMG</div><div class="stat-value">3/Sek</div></div>
           </div>
           <div class="pathogen-special">Gezackter Toxin-Kristall driftet und brennt bei Kontakt.</div>
+            <div class="pathogen-relations"
+                 data-friends=""
+                 data-prey=""
+                 data-foes="bcell,mast,basophil">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">— (Sekretion, nicht Zelle)</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list rel-empty">—</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list">B-Zelle (Antikörper), Mastzelle, Basophile</span></div>
+            </div>
           <div class="pathogen-ability">
             <strong>Neutralisierung</strong>
             <span>Kann nicht "getötet" werden. Nur <strong>Mast Cell</strong> oder <strong>Basophil</strong> können Toxin per Histamin auflösen (3 Sek Kontakt).</span>

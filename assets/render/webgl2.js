@@ -12,9 +12,12 @@
 
 import {
   S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
-  currentBackground, currentTheme, currentHighlightColor, cellColors, frac,
+  currentBackground, currentBgLayers, currentTheme, currentHighlightColor, cellColors, frac,
+  overlayFxOrder, overlayKindRunsAfterScene,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
+import { effectiveMouthKind } from '../core/sim-faces.js';
+import { testKindFor } from '../core/cell-kinds.js';
 import { RendererBase } from './renderer.js';
 
 // Each cell is one instanced quad. The fragment shader computes the
@@ -31,8 +34,9 @@ layout(location=3) in vec3 a_cytoTop;
 layout(location=4) in vec3 a_cytoBot;
 layout(location=5) in vec3 a_nucleus;
 layout(location=6) in vec4 a_outline;        // .a = c.flash (0..1)
+layout(location=7) in float a_diskAlpha;     // per-instance fade-in (split-end)
 
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 
 out vec2 v_uv;
@@ -42,13 +46,20 @@ out vec3 v_cytoTop;
 out vec3 v_cytoBot;
 out vec3 v_nucleus;
 out vec4 v_outline;
+out float v_diskAlpha;
 
 void main() {
   // 1.70× r — covers wobbly body extents (up to ~1.30) plus the
   // selection ring (which extends to 1.30 × bodyR).
   float quadR = a_inst.z * 1.70;
   vec2 worldPos = a_inst.xy + a_corner * quadR;
-  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, then rotate by u_camera.w, then translate.
+  // Reduces to plain "worldPos * scale + (tx, ty)" when rotation == 0.
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -59,12 +70,14 @@ void main() {
   v_cytoBot = a_cytoBot;
   v_nucleus = a_nucleus;
   v_outline = a_outline;
+  v_diskAlpha = a_diskAlpha;
 }`;
 
 // Body-kind constants (must match TS-side encoding in drawCells).
 //   0=round  1=lobed  2=rippled  3=oblong  4=pseudopod  5=star
 const FRAG_DISK = `#version 300 es
 precision highp float;
+precision highp int;
 in vec2 v_uv;
 in float v_kind;
 in vec4 v_phase;        // (phase, seed, freq, wobbleMul)
@@ -72,19 +85,60 @@ in vec3 v_cytoTop;
 in vec3 v_cytoBot;
 in vec3 v_nucleus;
 in vec4 v_outline;
+in float v_diskAlpha;       // SPLITTING crossfade: 0..1 over p ∈ [0.5, 1.0]
 uniform float u_time;       // seconds
 uniform float u_wobbleAmp;  // S.wobbleAmp
 uniform vec3 u_highlight;   // S.highlightColor as rgb
 uniform float u_membraneIntensity; // S.membraneIntensity 0..1
 uniform float u_borderThickness;   // S.cellBorderThickness multiplier (~0.5..5)
+// Cell-shader theme. 0 legacy (default · today's look) · 1 microscope ·
+// 2 cartoon · 3 kurzgesagt · 4 classic. Set from S.theme each frame.
+// Float (with the existing precision highp float covering it) is more
+// portable than uniform int here — some GLSL ES 3.00 drivers refuse to
+// link an int uniform that lacks an explicit precision qualifier, even
+// with precision highp int set, returning a null uniform location and
+// silently turning the per-frame uniform writes into no-ops.
+uniform float u_theme;
 out vec4 outColor;
 
 // v_kind packs:
 //   body (0..5) + nucleus (0..5) * 16 + selected (0..1) * 256 + hollow (0..1) * 4096
 int bodyKind()    { return int(mod(v_kind + 0.5, 16.0)); }
 int nucKind()     { return int(mod((v_kind + 0.5) / 16.0, 16.0)); }
-int isSelected()  { return int(mod((v_kind + 0.5) / 256.0, 16.0)); }
-int isHollow()    { return int((v_kind + 0.5) / 4096.0); }
+int isSelected()  { return int(mod((v_kind + 0.5) / 256.0, 2.0)); }
+int isHollow()    { return int(mod((v_kind + 0.5) / 4096.0, 2.0)); }
+// Per-cell-type test-kind (0..20), ported from docs/shader-test.html.
+// 0 = eukaryote/generic. Read only when u_theme != 0; legacy theme
+// (default) ignores this and uses the existing bodyKind dispatch.
+int testKind()    { return int(mod((v_kind + 0.5) / 8192.0, 32.0)); }
+
+// Lightweight value-noise + 4-octave fbm for the cytoplasm grain
+// pass. Mirrors shader-test's fbm() in scale + octaves so the
+// non-legacy theme cyto matches what the playground shows.
+float cellHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+float cellNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(cellHash(i),                  cellHash(i + vec2(1.0, 0.0)), u.x),
+    mix(cellHash(i + vec2(0.0, 1.0)), cellHash(i + vec2(1.0, 1.0)), u.x),
+    u.y);
+}
+float cellFbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 4; i++) { v += a * cellNoise(p); p *= 2.03; a *= 0.5; }
+  return v;
+}
+// 2D rotated capsule SDF — used for mitochondria.
+float cellCapsule(vec2 p, vec2 a, vec2 b, float r) {
+  vec2 pa = p - a, ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
 
 float bodyScale(vec2 uv) {
   int kind = bodyKind();
@@ -125,9 +179,124 @@ float bodyScale(vec2 uv) {
   return scale;
 }
 
+// Per-test-kind body silhouette, ported from docs/shader-test.html.
+// Returns the membrane radius in body-radius units (~1.0 = nominal).
+// Active only when u_theme != 0; legacy theme uses bodyScale() above.
+// Test-shader UV constants (radius ~0.5..0.66 in its own frame) are
+// rescaled by ~1.7 so the membrane sits at length(v_uv) ≈ 1.0 in the
+// game's frame, preserving each cell's existing in-game size (cell.r).
+float testShape(vec2 uv, float t) {
+  int tk = testKind();
+  float ang = atan(uv.y, uv.x);
+  if (tk == 5) {
+    // virus — hex capsid (6-fold symmetry) + sharp spike modulation
+    return 1.0
+         + 0.10 * cos(ang * 6.0  + t * 0.30)
+         + 0.12 * pow(0.5 + 0.5 * cos(ang * 12.0 - t * 0.20), 6.0);
+  }
+  if (tk == 6) {
+    // bacterium — capsule along x. Approximate as ellipse so we can
+    // keep the simple radial scale-factor contract.
+    return 1.0 / sqrt(uv.x * uv.x * 0.42 + uv.y * uv.y * 1.55);
+  }
+  if (tk == 7) {
+    // amoeba — large, irregular pseudopod blob
+    return 1.10
+         + 0.20 * sin(ang * 3.0 + t * 0.40)
+         + 0.10 * sin(ang * 7.0 - t * 0.25);
+  }
+  if (tk == 8) {
+    // spore — small disc with a thin breath
+    return 0.85 + 0.025 * sin(t * 0.4);
+  }
+  if (tk == 9) {
+    // monocyte — high-frequency surface ripple
+    return 1.15
+         + 0.06 * sin(ang * 11.0 + t * 0.50)
+         + 0.03 * sin(ang * 23.0 - t * 0.30);
+  }
+  if (tk == 10) {
+    // mast cell — slightly oblong (taller than wide)
+    return 1.0 / sqrt(uv.x * uv.x * 0.72 + uv.y * uv.y * 1.21);
+  }
+  if (tk == 11) {
+    // dendritic — round body + 6 long thin tendrils
+    return 1.0 + 0.45 * pow(0.5 + 0.5 * cos(ang * 6.0 + t * 0.20), 14.0);
+  }
+  if (tk == 13) {
+    // platelet — small 10-point star
+    return 0.85 + 0.10 * cos(ang * 10.0);
+  }
+  if (tk == 17) {
+    // germ — small 3-lobe blob
+    return 0.95 + 0.16 * cos(ang * 3.0 + t * 0.40);
+  }
+  if (tk == 18) {
+    // slime mold — irregular lobed (chaotic)
+    return 1.10
+         + 0.18 * sin(ang * 4.0  + t * 0.30)
+         + 0.10 * sin(ang * 7.0  - t * 0.50)
+         + 0.08 * sin(ang * 11.0 + t * 0.80);
+  }
+  if (tk == 19) {
+    // mite — round with 4 small leg bumps
+    return 1.05 + 0.13 * pow(0.5 + 0.5 * cos(ang * 4.0 + 0.5), 8.0);
+  }
+  if (tk == 20) {
+    // toxin — sharp 10-point spike star
+    return 0.95 + 0.30 * pow(0.5 + 0.5 * cos(ang * 10.0 + t * 0.30), 4.0);
+  }
+  // Fallback (eukaryote, macrophage, neutrophil, nk, b-cell, basophil,
+  // t-cell, eosinophil, rbc) — keep round; their identity comes from
+  // colour + nucleus + the shared sin-based wobble overlay below.
+  return 1.0;
+}
+
 void main() {
   float d = length(v_uv);
-  float bodyR = bodyScale(v_uv);
+  // Pick the per-cell silhouette: legacy bodyScale (today's 5-kind
+  // dispatch on bodyKind) or the per-test-kind testShape with a small
+  // wobble overlay so themed cells still breathe.
+  // Decode the float u_theme uniform once per fragment.
+  int themeId = int(u_theme + 0.5);
+  float bodyR;
+  if (themeId == 0) {
+    bodyR = bodyScale(v_uv);
+  } else {
+    // Non-legacy themes: shader-test-style membrane. Per-blob-kind
+    // amplitude (matches the amp table in shader-test's
+    // membraneFor) + a 3-term Fourier wobble that the amp scales.
+    float ang = atan(v_uv.y, v_uv.x);
+    int tk = testKind();
+    float kAmp = 1.0;                  // default eukaryote
+    if      (tk == 1)  kAmp = 1.60;    // macrophage
+    else if (tk == 2)  kAmp = 0.50;    // neutrophil
+    else if (tk == 3)  kAmp = 0.40;    // nk-cell
+    else if (tk == 4)  kAmp = 0.60;    // b-cell
+    else if (tk == 12) kAmp = 0.30;    // basophil
+    else if (tk == 14) kAmp = 0.25;    // t-cell
+    else if (tk == 15) kAmp = 0.35;    // eosinophil
+    // Wobble + testShape pick up the per-cell freq sign so split-
+    // children inheriting the parent's seed+phase visibly diverge
+    // (wobble runs the opposite direction on one sibling). The
+    // legacy bodyScale path already responded to freq sign; this
+    // adds the same behaviour to microscope / cartoon / kurzgesagt /
+    // classic. The phase offset v_phase.x rides into each sin too
+    // so even at t = 0 siblings don't start exactly aligned.
+    float dir   = sign(v_phase.z + 1e-6);
+    float tt    = u_time * dir;
+    float phi   = v_phase.x;
+    float wob = kAmp * (
+      0.045 * sin(ang * 5.0  + tt * 0.60 + phi) +
+      0.025 * sin(ang * 9.0  - tt * 0.40 + phi * 1.31) +
+      0.015 * sin(ang * 17.0 + tt * 1.10 + phi * 0.71)
+    );
+    // Pull through u_wobbleAmp + per-cell wobbleMul so the user's
+    // settings slider + per-cell variation (Sim.makeCell) still
+    // dampen / amplify on top of the kind-specific amp.
+    wob *= max(0.001, u_wobbleAmp * v_phase.w);
+    bodyR = testShape(v_uv, tt) + wob;
+  }
   float sdf = d - bodyR;
   int sel = isSelected();
 
@@ -138,7 +307,7 @@ void main() {
     if (ringT >= 1.0) discard;
     // Peak around ringT=0.5; smooth fade at both ends.
     float ringA = smoothstep(0.0, 0.20, ringT) * (1.0 - smoothstep(0.65, 1.0, ringT));
-    outColor = vec4(u_highlight, ringA);
+    outColor = vec4(u_highlight, ringA * v_diskAlpha);
     return;
   }
 
@@ -151,6 +320,30 @@ void main() {
   vec3 cyto = mix(v_cytoTop, v_cytoBot, gradT);
   float topLift = max(0.0, 0.55 - distance(v_uv, vec2(-0.30, -0.40))) * 0.65;
   cyto = mix(cyto, v_cytoTop, topLift);
+
+  // Non-legacy themes: shader-test cytoplasm texturing — fine
+  // granular fbm subtracted (cell-grain feel) + slow sheets fbm
+  // added (organelle-density variation). B-cell rough ER stripes
+  // when testKind == 4. Identical numerical formula to shader-
+  // test's fs_main; kAmp / wobble already match by PR-B.1.
+  // The per-cell seed (v_phase.y) and phase (v_phase.x) shift the
+  // fbm domain + ER phase so every cell of the same type renders a
+  // distinct cyto pattern (instead of all looking identical).
+  if (themeId != 0) {
+    vec2 cellOff = vec2(v_phase.y * 1.31, v_phase.y * 0.83 + v_phase.x);
+    float granular = cellFbm(v_uv * 22.0 + cellOff * 7.0
+                             + vec2(u_time * 0.02, 0.0));
+    cyto -= vec3(0.10, 0.07, 0.08) * granular;
+    float sheets = cellFbm(v_uv * 6.0 + cellOff * 2.5
+                           - vec2(u_time * 0.03, u_time * 0.02));
+    cyto += vec3(0.08, 0.04, 0.05) * (sheets - 0.5);
+    if (testKind() == 4) {
+      // b-cell — diagonal rough-ER striping
+      float er = sin(v_uv.x * 14.0 + v_uv.y * 6.0
+                     + u_time * 0.4 + v_phase.x) * 0.5 + 0.5;
+      cyto += vec3(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
+    }
+  }
 
   // Donut-hole darkening for cells flagged bodyHollow (RBCs).
   if (isHollow() == 1) {
@@ -200,11 +393,220 @@ void main() {
   float nucGlint = max(0.0, 0.18 - distance(v_uv, vec2(-0.10, -0.13))) * 4.0;
   vec3 nucColor = mix(v_nucleus, vec3(1.0), clamp(nucGlint, 0.0, 0.35));
 
-  vec3 col = cyto;
+  // Non-legacy themes — per-theme compose. PR #117 collapsed all four
+  // non-legacy themes (microscope/cartoon/kurzgesagt/classic) into a
+  // single branch; this restores the test-shader's distinct per-theme
+  // treatments (cyto modulation, highlight, outline colour + opacity,
+  // kurzgesagt's neon halo). Cell organelles (nucleus / mito /
+  // vesicles) stay visible in EVERY theme so dense fights stay
+  // readable — that's the deviation from test-shader's classic, which
+  // strips them entirely.
+  vec3 themedCyto = cyto;
+  vec3 themedOutline = v_cytoBot * 0.55;
+  float outlineOp = 1.0;
+  float haloAdd = 0.0;
+  if (themeId == 1) {
+    // microscope — keep cyto unchanged; soft brown outline at 0.85
+    themedOutline = vec3(0.16, 0.06, 0.18);
+    outlineOp = 0.85;
+  } else if (themeId == 2) {
+    // cartoon — saturated cyto + soft top-left highlight + thick black outline
+    themedCyto = clamp(cyto * 1.30, 0.0, 1.0);
+    float hi = smoothstep(0.16, 0.0, distance(v_uv, vec2(-0.30, -0.40)));
+    themedCyto += vec3(0.32, 0.30, 0.28) * hi;
+    themedOutline = vec3(0.0);
+    outlineOp = 1.0;
+  } else if (themeId == 3) {
+    // kurzgesagt — flat cyto + thin pale outline + neon halo
+    themedOutline = vec3(0.95, 0.92, 0.85);
+    outlineOp = 0.4;
+    haloAdd = pow(smoothstep(0.55, 0.42, length(v_uv)), 2.0);
+  } else if (themeId == 4) {
+    // classic — lightened/saturated cyto + hard radial highlight + dark purple outline
+    themedCyto = clamp(cyto * 1.35 + vec3(0.05), 0.0, 1.0);
+    float hi = smoothstep(0.7, 0.0, distance(v_uv, vec2(-0.30, -0.40))) * 0.4;
+    themedCyto = mix(themedCyto, v_cytoTop, hi);
+    themedOutline = vec3(0.04, 0.02, 0.08);
+    outlineOp = 1.0;
+  }
+  vec3 col = themedCyto;
   col = mix(col, nucColor, nucleusMask);
-  // Border colour: 0.55 × cytoBot — darker than the previous 0.80 so a
-  // bolder rim reads with more contrast against the body fill.
-  col = mix(col, v_cytoBot * 0.55, clamp(outlineMask, 0.0, 1.0));
+  col = mix(col, themedOutline, clamp(outlineMask * outlineOp, 0.0, 1.0));
+  // kurzgesagt neon halo — additive cyto wash inside the membrane.
+  if (themeId == 3 && d < bodyR) {
+    col += cyto * 1.6 * haloAdd;
+  }
+
+  // Per-test-kind compose overlays. Active only for non-legacy themes;
+  // each is gated on the corresponding test kind so the cost stays
+  // constant for every other cell. Ported from docs/shader-test.html
+  // (rbc biconcave, virus capsid lattice, dendritic tendrils, slime
+  // hyphal threads, toxin glow). All work inside v_uv (cell-local).
+  if (themeId != 0 && d < bodyR) {
+    int tk = testKind();
+    float insideMask = 1.0 - smoothstep(-0.005, 0.015, sdf);
+    if (tk == 16) {
+      // rbc — biconcave depression: darken disc centre.
+      float bicon = smoothstep(0.45, 0.10, d);
+      col = mix(col, col * 0.45, bicon * insideMask);
+    } else if (tk == 5) {
+      // virus — bright hex lattice tinted on the body. Per-cell
+      // phase rotates the lattice so adjacent virions don't tile.
+      float ca = cos(v_phase.x), sa = sin(v_phase.x);
+      vec2 latUv = vec2(ca * v_uv.x - sa * v_uv.y,
+                        sa * v_uv.x + ca * v_uv.y);
+      float h = 0.5 + 0.5 * cos(latUv.x * 16.0) * cos(latUv.y * 16.0);
+      col += vec3(0.30, 0.20, 0.45) * pow(h, 6.0) * insideMask;
+    } else if (tk == 11) {
+      // dendritic — accentuate the tendril rim with a faint cyto glow.
+      // Rotation direction follows sign(freq) so siblings from a split
+      // rotate opposite ways.
+      float dirT = sign(v_phase.z + 1e-6);
+      float ang = atan(v_uv.y, v_uv.x);
+      float t6  = pow(0.5 + 0.5 * cos(ang * 6.0 + u_time * 0.20 * dirT + v_phase.x), 14.0);
+      col += v_cytoBot * t6 * 0.25 * insideMask;
+    } else if (tk == 18) {
+      // slime — faint dark hyphal threads at the rim. Phase
+      // direction follows sign(freq).
+      float dirH = sign(v_phase.z + 1e-6);
+      float ang = atan(v_uv.y, v_uv.x);
+      float lines = pow(abs(cos(ang * 1.5 + u_time * 0.10 * dirH + v_phase.x)), 50.0);
+      float ring  = smoothstep(1.05, 0.80, d) * smoothstep(0.45, 0.65, d);
+      col = mix(col, vec3(0.20, 0.30, 0.05), lines * ring * 0.7);
+    } else if (tk == 20) {
+      // toxin — bright violet glow inside the membrane.
+      float glow = pow(smoothstep(1.05, 0.80, d), 2.0) * smoothstep(0.55, 0.85, d);
+      col += vec3(0.55, 0.30, 0.85) * glow;
+    }
+  }
+
+  // ── Mitochondria orbits ── 8 capsules drifting around the
+  // nucleus on a slow rotation. Skipped for prokaryotes / virus /
+  // spore / anucleate / toxin (matches shader-test's nMito gate).
+  if (themeId != 0 && d < bodyR) {
+    int tk3 = testKind();
+    bool noMito = (tk3 == 5 || tk3 == 6 || tk3 == 8 || tk3 == 13 ||
+                   tk3 == 16 || tk3 == 17 || tk3 == 20);
+    if (!noMito) {
+      float mito = 1e9;
+      // Orbit direction = sign(freq): split-children inherit the
+      // parent's phase + seed but their freqs have opposite signs, so
+      // their mito orbits spin opposite ways from the same starting
+      // arrangement — visibly readable as mitotic siblings.
+      float orbitDir = sign(v_phase.z + 1e-6);
+      for (int i = 0; i < 8; i++) {
+        float fi = float(i);
+        // Per-cell phase rotates the orbit; per-cell seed jitters
+        // each capsule's radius + jitter phase so two same-type
+        // cells don't show identical mito layouts.
+        float baseA = fi * 0.7853 + u_time * 0.08 * orbitDir + v_phase.x;
+        float radM  = 0.40 + 0.05 * sin(fi * 1.7 + v_phase.y * 0.21);
+        vec2 centre = vec2(cos(baseA), sin(baseA)) * radM
+                    + vec2(0.015 * sin(u_time * 1.3 + fi + v_phase.y),
+                           0.015 * cos(u_time * 1.1 + fi * 2.0 + v_phase.y * 0.7));
+        vec2 dir = vec2(cos(baseA + 1.5708), sin(baseA + 1.5708));
+        float capLen = 0.045;
+        float dCap = cellCapsule(v_uv, centre - dir * capLen,
+                                       centre + dir * capLen, 0.018);
+        mito = min(mito, dCap);
+      }
+      float mitoMask = smoothstep(0.004, -0.004, mito);
+      col = mix(col, vec3(0.95, 0.55, 0.30), mitoMask * 0.55);
+    }
+  }
+
+  // ── Vesicles / granules ── per-kind scattered dots inside the
+  // cytoplasm. Count + radius + colour vary by kind (matches the
+  // table in shader-test). Hard-capped at 16 here for fragment
+  // cost; shader-test's mast (60) is the only kind that's
+  // visibly denser there — comes through as plenty-dense at 16.
+  if (themeId != 0 && d < bodyR) {
+    int tk4 = testKind();
+    int vesCount = 14;
+    if      (tk4 == 1)  { vesCount = 16; }   // macrophage lysosomes (cap)
+    else if (tk4 == 2)  { vesCount = 16; }   // neutrophil
+    else if (tk4 == 3)  { vesCount = 6;  }   // nk
+    else if (tk4 == 4)  { vesCount = 8;  }   // b-cell
+    else if (tk4 == 5)  { vesCount = 0;  }   // virus
+    else if (tk4 == 6)  { vesCount = 16; }   // bacterium
+    else if (tk4 == 7)  { vesCount = 10; }   // amoeba
+    else if (tk4 == 8)  { vesCount = 4;  }   // spore
+    else if (tk4 == 9)  { vesCount = 14; }   // monocyte
+    else if (tk4 == 10) { vesCount = 16; }   // mast (cap)
+    else if (tk4 == 11) { vesCount = 6;  }   // dendritic
+    else if (tk4 == 12) { vesCount = 16; }   // basophil (cap)
+    else if (tk4 == 13) { vesCount = 4;  }   // platelet
+    else if (tk4 == 14) { vesCount = 0;  }   // t-cell
+    else if (tk4 == 15) { vesCount = 16; }   // eosinophil
+    else if (tk4 == 16) { vesCount = 0;  }   // rbc
+    else if (tk4 == 17) { vesCount = 8;  }
+    else if (tk4 == 18) { vesCount = 12; }
+    else if (tk4 == 19) { vesCount = 10; }
+    else if (tk4 == 20) { vesCount = 8;  }
+    float vesRadius = 0.012;
+    if      (tk4 == 2)  vesRadius = 0.008;
+    else if (tk4 == 3)  vesRadius = 0.020;
+    else if (tk4 == 7)  vesRadius = 0.022;
+    else if (tk4 == 10) vesRadius = 0.006;
+    else if (tk4 == 12) vesRadius = 0.010;
+    else if (tk4 == 13) vesRadius = 0.014;
+    else if (tk4 == 15) vesRadius = 0.020;
+    else if (tk4 == 20) vesRadius = 0.014;
+    vec3 vesCol = vec3(1.0, 0.92, 0.65);
+    if      (tk4 == 3)  vesCol = vec3(0.75, 0.85, 1.00);
+    else if (tk4 == 6)  vesCol = vec3(0.80, 0.90, 0.55);
+    else if (tk4 == 7)  vesCol = vec3(0.55, 0.45, 0.30);
+    else if (tk4 == 10) vesCol = vec3(0.12, 0.40, 0.25);
+    else if (tk4 == 12) vesCol = vec3(0.20, 0.10, 0.55);
+    else if (tk4 == 13) vesCol = vec3(0.55, 0.40, 0.10);
+    else if (tk4 == 15) vesCol = vec3(1.00, 0.55, 0.30);
+    else if (tk4 == 17) vesCol = vec3(0.70, 0.85, 0.45);
+    else if (tk4 == 18) vesCol = vec3(0.60, 0.75, 0.20);
+    else if (tk4 == 19) vesCol = vec3(0.90, 0.60, 0.20);
+    else if (tk4 == 20) vesCol = vec3(1.00, 0.90, 1.00);
+    if (vesCount > 0) {
+      float ves = 1e9;
+      // Per-cell seed shifts the angular phase + drift speed of every
+      // vesicle so each cell's granule arrangement is unique. Drift
+      // direction follows sign(freq) so split-siblings' granules
+      // diverge in opposite rotational senses.
+      float vSeed = v_phase.y;
+      float vDir  = sign(v_phase.z + 1e-6);
+      for (int j = 0; j < 16; j++) {
+        if (j >= vesCount) break;
+        float fj = float(j);
+        vec2 pos = vec2(
+          0.42 * sin(fj * 1.91 + vSeed * 0.71 + u_time * (0.18 + 0.03 * fj) * vDir),
+          0.42 * cos(fj * 2.37 + vSeed * 0.93 + u_time * (0.21 + 0.02 * fj) * vDir)
+        );
+        vec2 jit = vec2(0.008 * sin(u_time * 3.0 * vDir + fj * 7.0 + vSeed),
+                        0.008 * cos(u_time * 2.6 * vDir + fj * 5.0 + vSeed * 1.3));
+        ves = min(ves, length(v_uv - pos - jit) - vesRadius);
+      }
+      float vesMask = smoothstep(0.003, -0.003, ves);
+      col = mix(col, vesCol, vesMask * 0.85);
+    }
+  }
+
+  // Microscope brownian dots — 18 tan specks drifting inside the cell.
+  // Per-cell seed (v_phase.y) shifts the constellation so siblings
+  // don't show identical dust. Mirrors the test-shader microscope
+  // post-effect; film grain + chromatic limb stay out of scope here.
+  if (themeId == 1 && d < bodyR) {
+    vec3 dustCol = vec3(0.18, 0.14, 0.10);
+    float dSeed = v_phase.y * 0.013;
+    for (int i = 0; i < 18; i++) {
+      float fi = float(i);
+      float sx = fract(sin((fi + dSeed) * 12.9898) * 43758.5453);
+      float sy = fract(sin((fi + dSeed) * 78.2330) * 43758.5453);
+      vec2 base = vec2(sx, sy) * 1.4 - 0.7;
+      vec2 drift = vec2(0.04 * sin(u_time * 0.6 + fi * 1.7),
+                        0.04 * cos(u_time * 0.5 + fi * 2.3));
+      float dst = length(v_uv - base - drift);
+      float dotA = (1.0 - smoothstep(0.012, 0.018, dst)) * 0.55;
+      col = mix(col, dustCol, dotA);
+    }
+  }
 
   // Tap flash overlay — c.flash decays in Sim.update(); fade out across 200 ms.
   float flashA = clamp(v_outline.a / 0.2, 0.0, 1.0) * 0.6;
@@ -222,7 +624,7 @@ void main() {
     // parity ignores the brief 200ms tap flash for the WebGL backend.
   }
 
-  outColor = vec4(col, bodyA);
+  outColor = vec4(col, bodyA * v_diskAlpha);
 }`;
 
 // Full-screen quad: uses gl_VertexID to fabricate the four corners.
@@ -235,7 +637,13 @@ const vec2 POS[4] = vec2[4](
 );
 void main() {
   vec2 p = POS[gl_VertexID];
-  v_uv = p * 0.5 + 0.5;
+  // v_uv in canvas convention: v=0 at top, v=1 at bottom. Cells render
+  // in canvas coords (y=0 at top); the bg shader's worldPx reconstruction
+  // multiplies v_uv by the viewport, so v_uv must use the same y direction
+  // as the cell shader or the bg pans opposite to cells in y. Flip is
+  // free here; downstream code (worldPx, gradient mix, spots, RBC) all
+  // inherit the canvas convention.
+  v_uv = vec2(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
   gl_Position = vec4(p, 0.0, 1.0);
 }`;
 
@@ -250,7 +658,8 @@ const FRAG_BG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 
-uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid
+uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid, 4 lung (smoke), 5 aurora, 6 underwater, 7 lava, 8 reactor, 9 bloodflow, 10 cell-shadow
+uniform sampler2D u_reactorTex;  // bound when u_kind == 8 (Gray-Scott RT)
 uniform vec3 u_base;
 uniform vec3 u_top;
 uniform vec3 u_bot;
@@ -258,7 +667,7 @@ uniform vec3 u_ringColor;
 uniform vec3 u_gridColor;
 uniform float u_gridStep;
 uniform float u_vignette;
-uniform vec3 u_camera;       // (scale, tx, ty)
+uniform vec4 u_camera;       // (scale, tx, ty, rotation-radians)
 uniform vec2 u_viewport;     // (W, H)
 uniform float u_time;        // seconds
 uniform int u_spotCount;
@@ -266,8 +675,29 @@ uniform vec4 u_spots[${MAX_SPOTS}];      // (cx, cy, r, _) screen 0..1
 uniform vec3 u_spotCols[${MAX_SPOTS}];
 uniform int u_rbc;                        // 0=off, 1=draw drifting RBC silhouettes
 uniform float u_bgScale;                  // S.bgScale — uniform multiplier on every bg feature size (rings stride, grid step, spot radii, RBC silhouettes). Floored at 0.05 below.
+uniform float u_opacity;                  // per-layer opacity (0..1), folded into output alpha + premultiplied RGB
 
 out vec4 outColor;
+
+// ---------- Helper noise for procedural bgs (kinds 4-7) ----------
+float bgHash(vec2 p) {
+  p = fract(p * vec2(123.34, 345.45));
+  p += dot(p, p + 34.345);
+  return fract(p.x * p.y);
+}
+float bgNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(bgHash(i),                  bgHash(i + vec2(1.0, 0.0)), u.x),
+             mix(bgHash(i + vec2(0.0, 1.0)), bgHash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+float bgFbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 3; i++) { v += a * bgNoise(p); p *= 2.0; a *= 0.5; }
+  return v;
+}
 
 void main() {
   // Base.
@@ -276,7 +706,11 @@ void main() {
 
   // World-space pixel — screen px → world px through camera.
   vec2 screenPx = v_uv * u_viewport;
-  vec2 worldPx = (screenPx - u_camera.yz) / u_camera.x;
+  // Inverse camera transform (screen → world): un-translate, un-rotate, un-scale.
+  vec2 dCam = screenPx - u_camera.yz;
+  float ccwBg = cos(u_camera.w), scwBg = sin(u_camera.w);
+  vec2 worldPx = vec2(ccwBg * dCam.x + scwBg * dCam.y,
+                      -scwBg * dCam.x + ccwBg * dCam.y) / u_camera.x;
 
   // Background-size slider. Every bg-pattern stride / feature
   // radius below is multiplied by bgS, so a single uniform makes
@@ -311,6 +745,134 @@ void main() {
     col = mix(col, u_gridColor, line * 0.30);
   }
 
+  // ---- Lung: alveolar foam (kind 4) ----
+  // Tile worldPx into ~80 unit cells; each tile holds a soft circular
+  // bubble with a slightly randomised radius (per-tile hash). Subtle
+  // breath pulse from sin(u_time).
+  if (u_kind == 4) {
+    // Lung — "Smoke" FBM by Roman Bobniev / FatumR (Apache 2.0,
+    // https://www.shadertoy.com/view/ldBSDd). Self-referential
+    // value-noise FBM with a breathing-rhythm sine in lieu of the
+    // original's audio-reactive amplitude. Octaves trimmed 6→4
+    // for in-game cost; visuals stay close. Domain-warped in
+    // worldPx so the pattern tiles seamlessly with the camera.
+    // 0.00714 — user re-tuned the lung to 0.7× current (was 0.0050
+    // after the original "0.2× scale" step). Features visibly bigger
+    // than the prior tweak, still finer than the initial 0.0010.
+    // hot/cool ramp reads u_top / u_bot so the picker actually drives
+    // the smoke palette. Default state colours match the previous
+    // hard-coded stops (0.510,0.204,0.016) / (0.529,0.808,0.980).
+    vec2 plungP = worldPx * 0.00714 + vec2(0.0, u_time * 0.08);
+    float breath = 0.55 + 0.20 * sin(u_time * 0.6);
+    float n0 = bgFbm(plungP * 0.5);
+    float n1 = bgFbm(plungP + 2.0 * n0);
+    float n2 = bgFbm(plungP + n1);
+    float n3 = bgFbm(plungP + vec2(u_time * 0.04, 0.0) + n2);
+    float v = breath * n3;
+    col = mix(col, mix(u_top, u_bot, clamp(v, 0.0, 1.0)), 0.85);
+  }
+
+  // ---- Bloodflow (kind 9): port of shader-test's 'bloodflow ·
+  //      default' — fbm tint over deep red + drifting RBC ovals.
+  //      Distinct from the game's gradient+tile bloodstream (kind
+  //      0 path), this one keeps the shader-test aesthetic. ----
+  if (u_kind == 9) {
+    // 0.012 — user spec "scale bloodflow by 0.1x" (features 10x
+    // smaller than original 0.0012; far denser pattern across the
+    // viewport).
+    // Colour ramp reads u_bot → u_top → 1.5×u_top so the in-app
+    // picker actually drives the look. Default state colours are
+    // calibrated to match the previous hard-coded ramp.
+    vec2 bf_p = worldPx * 0.012 + vec2(u_time * 0.04, u_time * 0.03);
+    float bf_n = bgFbm(bf_p);
+    float bf_rbc = bgFbm(worldPx * 0.0030 + vec2(0.0, u_time * 0.15));
+    vec3 bf_hi = clamp(u_top * 1.5, vec3(0.0), vec3(1.0));
+    vec3 bf_base = mix(u_bot, u_top, bf_n);
+    bf_base = mix(bf_base, bf_hi, smoothstep(0.55, 0.75, bf_rbc) * 0.5);
+    col = mix(col, bf_base, 0.85);
+  }
+  // ---- Cell shadow (kind 10): port of shader-test's voronoi ---
+  //      Smooth-min Voronoi field over 3×3 cell neighbourhood,
+  //      animated point positions. CC BY-NC-SA 3.0 (see About).
+  if (u_kind == 10) {
+    vec2 cs_st = worldPx * 0.005;
+    vec2 cs_cellPos   = floor(cs_st);
+    vec2 cs_cellCoord = fract(cs_st);
+    float cs_sum = 0.0;
+    for (int ix = -1; ix <= 1; ix++) {
+      for (int iy = -1; iy <= 1; iy++) {
+        vec2 nb = vec2(float(ix), float(iy));
+        float h0 = bgHash(cs_cellPos + nb);
+        float h1 = bgHash(cs_cellPos + nb + vec2(17.3, 41.7));
+        vec2 nb_pos = 0.5 + 0.5 * sin(u_time * 0.4 + vec2(h0, h1) * 6.0);
+        vec2 diff = (nb + nb_pos) - cs_cellCoord;
+        cs_sum += exp(-32.0 * dot(diff, diff));
+      }
+    }
+    float cs_v = -(1.0 / 32.0) * log(max(cs_sum, 1e-6));
+    float cs_intensity = 0.03 / pow(max(1.2 - sqrt(max(cs_v, 0.0)), 0.05), 3.0);
+    // cs_baseCol reads u_base so the picker drives the voronoi tint.
+    // Default state base (#c83245) matches the previous hard-coded
+    // colour vec3(200/255, 50/255, 69/255).
+    col = mix(col, clamp(u_base * cs_intensity, 0.0, 2.0), 0.95);
+  }
+  // ---- Aurora borealis: vertical ribbons of green/violet (kind 5) ----
+  // Ribbon density driven by domain-warped fbm; brightness peaks in
+  // a horizontal band (the "sky strip"). Hue oscillates between
+  // topColor and botColor over time — defaults match the previous
+  // hard-coded green (0.24,0.95,0.52) / violet (0.55,0.35,0.95).
+  if (u_kind == 5) {
+    vec2 sky = vec2(worldPx.x * 0.0015, worldPx.y * 0.001 - u_time * 0.05);
+    float warp = bgFbm(vec2(sky.x, u_time * 0.08));
+    float ribbon = 0.5 + 0.5 * sin(sky.y * 6.2831 + warp * 6.2831);
+    ribbon = pow(ribbon, 4.0);
+    float bandH = exp(-pow((sky.y - 0.5) * 1.5, 2.0));
+    vec3 hue = mix(u_top, u_bot, 0.5 + 0.5 * sin(warp * 3.14159 + u_time * 0.2));
+    col = mix(col, hue, ribbon * bandH * 0.85);
+  }
+
+  // ---- Underwater: caustic interference (kind 6) ----
+  // Two interleaved sine systems modulated by each other; raised to a
+  // high power to spike the bright caustic ridges. botColor is the
+  // deep wash, topColor is the bright caustic peak — defaults match
+  // the previous hard-coded deep (0.04,0.16,0.30) / bright (0.60,0.95,1.00).
+  if (u_kind == 6) {
+    vec2 p = worldPx * 0.04;
+    float w1 = sin(p.x + u_time * 0.6 + sin(p.y * 0.75));
+    float w2 = sin(p.y * 0.95 + u_time * 0.85 + sin(p.x * 0.85));
+    float c = pow(max(0.0, (w1 + w2) * 0.5 + 0.5), 6.0);
+    col = mix(col, u_bot, 0.70);
+    col = mix(col, u_top, c * 0.55);
+  }
+
+  // ---- Lava / fire: boiling 3-octave fbm (kind 7) ----
+  // Domain warp (fbm-of-fbm) for organic motion; rising drift via the
+  // -u_time*1.2 offset on Y. Hot gradient: base → bot → top → peak,
+  // where peak is a clamped 2×u_top so the picker actually drives the
+  // hot tendrils. Default state colours are calibrated to match the
+  // previous hard-coded ramp.
+  if (u_kind == 7) {
+    vec2 p = worldPx * 0.005;
+    p.y -= u_time * 1.2;
+    float n = bgFbm(p + bgFbm(p * 0.5 + u_time * 0.05));
+    vec3 peak = clamp(u_top * 2.0, vec3(0.0), vec3(1.0));
+    vec3 hot = mix(u_base, u_bot, smoothstep(0.20, 0.45, n));
+    hot     = mix(hot,    u_top,  smoothstep(0.45, 0.70, n));
+    hot     = mix(hot,    peak,   smoothstep(0.70, 0.95, n));
+    col = mix(col, hot, 0.85);
+  }
+
+  // Ambient drifting wash for the otherwise-static kinds (flat,
+  // gradient, agar, cybergrid). A faint domain-warped fbm tinted
+  // toward the existing colour — keeps every theme visibly "alive"
+  // without overpowering the design. Skipped for kinds that already
+  // animate (lung/aurora/underwater/lava/reactor/bloodflow/cellShadow).
+  if (u_kind <= 3) {
+    vec2 ambP = worldPx * 0.0009 + vec2(u_time * 0.025, u_time * 0.012);
+    float amb = bgFbm(ambP + bgFbm(ambP * 0.5)) - 0.5;
+    col += amb * 0.06;
+  }
+
   // Drifting light spots — additive, screen-space coords. Each spot
   // colour was pre-multiplied by its source alpha on the JS side, so
   // we just add directly without re-scaling. Radius scales with bgS.
@@ -322,33 +884,113 @@ void main() {
     col += u_spotCols[i] * a;
   }
 
-  // Drifting red-blood-cell silhouettes — bloodstream theme flair.
-  // 22 ellipses with darker centre dot, drift on screen UV with u_time.
-  // Ellipse radii multiplied by bgS.
+  // Bloodstream theme: directional plasma flow beneath the RBC
+  // silhouettes. Flow vector points downward (top → bottom) so the
+  // wash reads as a stream of blood draining vertically; streamer
+  // ribbons appear as horizontal bands sliding downward. Pattern
+  // wavelength scales with bgS — dividing worldPx by bgS is
+  // equivalent to multiplying the fbm wavelength by bgS.
   if (u_rbc == 1) {
-    for (int i = 0; i < 22; i++) {
-      float seed = float(i) * 1.31;
-      float fx = mod(float(i) / 22.0 + 0.06 * sin(u_time * 0.25 + seed), 1.0);
-      float fy = mod(fract(seed * 0.7) + u_time * 0.15 + float(i) * 0.13, 1.0);
-      vec2 c = vec2(fx, fy);
-      float r = (0.018 + 0.016 * fract(seed * 0.21)) * bgS;
-      vec2 dEll = (v_uv - c) / vec2(r, r * 0.78);
-      float ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
-      col = mix(col, vec3(1.0, 0.35, 0.35), ellA);
-      float dDot = length(v_uv - c) / (r * 0.32);
-      float dotA = (1.0 - smoothstep(0.88, 1.0, dDot)) * 0.18;
-      col = mix(col, vec3(0.47, 0.08, 0.08), dotA);
+    vec2 bgWorldPx = worldPx / bgS;
+    vec2 flow = vec2(0.10, 1.0);    // mostly downward, slight rightward
+    vec2 plasmaP = bgWorldPx * 0.0015 + flow * (u_time * 0.20);
+    float plasma = bgFbm(plasmaP + bgFbm(plasmaP * 0.5));
+    vec3 plasmaCol = mix(vec3(0.30, 0.05, 0.07), vec3(0.62, 0.12, 0.16),
+                         smoothstep(0.30, 0.85, plasma));
+    col = mix(col, plasmaCol, 0.55);
+    // Streamer ribbons — narrow horizontal bands (perpendicular to
+    // the vertical flow) of brighter tint that scroll downward.
+    float ribbon = sin(bgWorldPx.x * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
+                       + u_time * 0.6);
+    ribbon = pow(max(0.0, ribbon), 6.0);
+    col = mix(col, vec3(0.88, 0.22, 0.25), ribbon * 0.18);
+  }
+
+  // RBC donuts — biconcave-disc silhouettes flowing top → bottom
+  // with per-cell rotation. World-tiled (3×3 × 4 cells per tile) so
+  // density stays camera-independent. Each donut renders as a soft
+  // pink rim with a darker red dimple in the centre (the biconcave
+  // depression seen face-on); a slight aspect ratio (0.92) makes the
+  // per-cell spin visually readable. Tile size + disc radius scale
+  // with bgS so a single slider grows / shrinks the whole pattern;
+  // time-driven motion stays in unscaled world units so RBCs move at
+  // the same on-screen speed regardless of bgS.
+  if (u_rbc == 1) {
+    float TS = 600.0 * bgS;            // world px per tile
+    vec2 tIdx = floor(worldPx / TS);
+    for (int oy = -1; oy <= 1; oy++) {
+      for (int ox = -1; ox <= 1; ox++) {
+        vec2 cell = tIdx + vec2(float(ox), float(oy));
+        float h0 = bgHash(cell);
+        for (int k = 0; k < 4; k++) {
+          float kSeed = h0 * 6.28 + float(k) * 1.31;
+          vec2 inTile = vec2(fract(kSeed * 1.7), fract(kSeed * 2.3)) * TS;
+          // Top-bottom flow + small per-cell wobble on the side axis.
+          vec2 cWorld = cell * TS + inTile
+                      + vec2(28.0 * sin(u_time * 0.30 + kSeed), 0.0)
+                      + vec2(9.0, 110.0) * u_time;
+          float rWorld = (24.0 + 18.0 * fract(kSeed * 0.41)) * bgS;
+
+          // Per-cell rotation: angle = seed phase + slow spin rate.
+          float spin = 0.6 + 0.7 * fract(kSeed * 0.71);   // 0.6..1.3 rad/s
+          float ang  = kSeed + u_time * spin;
+          float ca   = cos(ang), sa = sin(ang);
+          vec2  d    = worldPx - cWorld;
+          vec2  rd   = vec2(ca * d.x + sa * d.y, -sa * d.x + ca * d.y);
+          // Slight oblate so rotation is visible on the round shape.
+          vec2  dE   = rd / vec2(rWorld, rWorld * 0.92);
+          float L    = length(dE);
+
+          // Disc body — soft AA edge at L = 1.
+          float bodyA = (1.0 - smoothstep(0.95, 1.05, L)) * 0.65;
+          // Biconcave depression: rim stays bright, centre darkens.
+          float dimple = smoothstep(0.55, 0.0, L);
+          vec3 rbcCol = mix(vec3(0.96, 0.32, 0.34),    // rim pink
+                            vec3(0.50, 0.10, 0.12),    // central dimple
+                            dimple);
+          col = mix(col, rbcCol, bodyA);
+          // Thin dark outline at the membrane edge.
+          float rim = smoothstep(0.92, 0.99, L) * (1.0 - smoothstep(1.00, 1.04, L));
+          col = mix(col, vec3(0.22, 0.04, 0.06), rim * 0.45);
+        }
+      }
     }
   }
 
-  // Vignette: darken the corners.
+  // ---- Reactor: Gray-Scott reaction-diffusion display (kind 8) ----
+  // Reads the front ping-pong RT (set up by drawBackground before this
+  // pass). The RT stores (A * 0.05, B, 0, 1); calculate_concentrations
+  // is the inverse mapping. Acid-green palette ramped on B; subtle dark
+  // tint where A ≈ 1 stays untouched. Step + seed shaders run in their
+  // own off-screen passes — see _reactorStep / _reactorSeed.
+  if (u_kind == 8) {
+    // dark/mid/hot ramp reads u_base / u_bot / u_top so the picker
+    // actually drives the acid-green palette. Default state colours
+    // match the previous hard-coded stops (0.02,0.06,0.04) /
+    // (0.10,0.40,0.20) / (0.49,1.00,0.54 = panel accent #7eff8a).
+    vec4 rxColor = texture(u_reactorTex, v_uv);
+    vec2 rxConc = rxColor.rg / vec2(0.05, 1.0);
+    float bN = clamp(rxConc.y * 1.6, 0.0, 1.0);
+    col = mix(mix(u_base, u_bot, smoothstep(0.0, 0.45, bN)),
+              u_top, smoothstep(0.45, 0.92, bN));
+  }
+
+  // Vignette: darken the corners. Aspect-corrected so the falloff
+  // is a true 1:1 circle in screen pixels (matches the crosshair
+  // overlay circle) instead of stretching to an ellipse on
+  // widescreen.
   if (u_vignette > 0.0) {
-    float v = length(v_uv - 0.5) * 1.4;
+    vec2 d = v_uv - 0.5;
+    float aspect = u_viewport.x / max(1.0, u_viewport.y);
+    if (aspect > 1.0) d.x *= aspect; else d.y /= aspect;
+    float v = length(d) * 1.4;
     float vAmt = u_vignette * smoothstep(0.4, 1.0, v);
     col *= 1.0 - vAmt;
   }
 
-  outColor = vec4(col, 1.0);
+  // Premultiplied output so the bg pass composites correctly when
+  // u_opacity < 1 with the standard blend funcs the layer loop sets.
+  outColor = vec4(col * u_opacity, u_opacity);
 }`;
 
 // ---------- metaSplit (S.metaSplit) — per-pair metaball pass ----------
@@ -362,11 +1004,391 @@ void main() {
 //                   (matches canvas2d). Lowest GPU memory; reallocates as
 //                   pair sizes change. Sizes are rounded up to a 64-px grid
 //                   so the pool churn stays modest.
-//   'fullCanvas'  — pool of full-canvas RTs, one per active pair index
-//                   (matches Pixi's _pairPool). Highest GPU memory; zero
-//                   per-pair allocation after warmup.
+//   'fullCanvas'  — pool of full-canvas RTs, one per active pair index.
+//                   Highest GPU memory; zero per-pair allocation after
+//                   warmup.
 //   'sharedMax'   — single shared RT, sized to the largest active pair
 //                   this frame. Middle ground.
+// ---- Reactor (Gray-Scott) shaders ---------------------------------
+// Two off-screen RGBA8 textures (`_reactorRtA` + `_reactorRtB`) ping-
+// pong each visible frame. Encoding: the texel stores
+// `(A * 0.05, B, 0, 1)` so both concentrations fit cleanly in 0..1.
+// Caustics overlay post-process: samples the bg texture (rendered
+// in a previous pass to an offscreen FBO) at uv displaced by an
+// animated water-turbulence pattern, then multiplies by a
+// green/teal tint — reads as light dancing through water on top of
+// whatever bg theme is selected.
+//
+// Adapted from "Tileable Water Caustic" by David Hoskins (modified
+// joltz0r 2013) — https://www.shadertoy.com/view/ltSczG · Shadertoy
+// default licence (CC BY-NC-SA 3.0). Same caustic math as the
+// shader-test page's PR #73 implementation.
+const FRAG_CAUSTIC_BG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_bg;
+uniform float u_time;
+uniform vec2 u_resolution;       // canvas drawing-buffer (W, H)
+uniform vec3 u_tint;             // additive cast on top of the per-pixel shade
+out vec4 outColor;
+
+void main() {
+  vec2 uv = v_uv;
+  float TAU = 6.28318530718;
+  // Tile the caustic pattern across the screen, aspect-corrected so
+  // each "cell" of the pattern stays roughly square instead of being
+  // stretched horizontally on widescreen. Tile factor 3 ⇒ ~3 cells
+  // tall, 3*aspect cells wide.
+  float aspect = u_resolution.x / max(1.0, u_resolution.y);
+  vec2 cuv = uv * vec2(aspect, 1.0) * 3.0;
+  float time2 = u_time * 0.5 + 23.0;
+  vec2 p0 = mod(cuv * TAU, TAU) - 150.0;
+  vec2 i = p0;
+  float c = 1.0;
+  float inten = 0.005;
+  for (int n = 0; n < 5; n++) {
+    float tn = time2 * (1.0 - (3.5 / float(n + 1)));
+    i = p0 + vec2(cos(tn - i.x) + sin(tn + i.y),
+                  sin(tn - i.y) + cos(tn + i.x));
+    vec2 denom = vec2(p0.x / (sin(i.x + tn) / inten),
+                      p0.y / (cos(i.y + tn) / inten));
+    c += 1.0 / max(length(denom), 1e-4);
+  }
+  c /= 5.0;
+  c = 1.17 - pow(c, 1.4);
+  float shade = pow(abs(c), 8.0);
+  vec3 tint = clamp((vec3(shade) + u_tint) * 2.0, 0.0, 1.0);
+  vec2 off = vec2(cos(c) - 0.75, sin(c) - 0.75) * 0.04;
+  vec2 sampleUv = clamp(uv + off, 0.0, 1.0);
+  vec3 bg = texture(u_bg, sampleUv).rgb;
+  outColor = vec4(bg * tint, 1.0);
+}
+`;
+
+// Microscope FX post-pass: combines microscope blur (variable-radius
+// bokeh-style blur — sharp center, blurry edges) with "make it real"
+// gradient-mapped color grade + chromatic aberration. Both effects
+// gated independently by uniforms so the user can enable either / both
+// / neither. Single fullscreen quad. Mutually exclusive with scene-
+// wide ripples + caustics — only one scene-wide post-pass owns the
+// scene RT.
+//
+// The grade math switched from HSV-duotone (PR #147, didn't look
+// like microscopy) to a 2-stop RGB gradient between user-chosen
+// anchor colors derived from (hue1, hue2, saturation). RGB
+// interpolation is what every shipped duotone shader uses; HSV
+// interpolation produces hue-wheel banding and ignores perceptual
+// luminance, which is why the original looked wrong. See
+// https://agatedragon.blog/2024/01/01/creating-a-duotone-effect-in-a-glsl-shader/
+// for the reference pattern.
+const FRAG_SCENE_FX = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_scene;
+uniform vec2 u_resolution;
+uniform float u_blurOn;        // 0 / 1
+uniform float u_focusRadius;   // 0..1, fraction of the half-diagonal that stays sharp
+uniform float u_blurStrength;  // 0..1, peak edge blur as fraction of min(W,H)
+uniform float u_falloff;       // 0..1, transition hardness (0 soft → 1 abrupt)
+uniform float u_gradeOn;       // 0 / 1
+uniform float u_hue1;          // 0..1, shadow hue
+uniform float u_hue2;          // 0..1, highlight hue
+uniform float u_saturation;    // 0..1, anchor-color saturation
+out vec4 outColor;
+
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+// 16-tap Poisson disk for softer bokeh than a single 8-tap ring.
+// Coords pre-normalized to ±1; the shader scales by the per-pixel
+// blur radius. Pattern from Bart Wronski's "Optimized Spatial Blur"
+// reference set (CC0).
+const vec2 POISSON16[16] = vec2[16](
+  vec2( 0.0, 0.0),
+  vec2( 0.50, 0.0),
+  vec2(-0.50, 0.0),
+  vec2( 0.0,  0.50),
+  vec2( 0.0, -0.50),
+  vec2( 0.92,  0.39),
+  vec2(-0.92,  0.39),
+  vec2( 0.92, -0.39),
+  vec2(-0.92, -0.39),
+  vec2( 0.39,  0.92),
+  vec2(-0.39,  0.92),
+  vec2( 0.39, -0.92),
+  vec2(-0.39, -0.92),
+  vec2( 0.68,  0.68),
+  vec2(-0.68,  0.68),
+  vec2( 0.68, -0.68)
+);
+
+void main() {
+  // v_uv arrives in canvas convention (v=0 at top) — see
+  // VERT_FULLSCREEN — but u_scene is a framebuffer-backed texture in
+  // GL convention (v=0 at bottom). Sampling with v_uv directly reads
+  // the scene flipped upside-down. Use gl_FragCoord (already in GL
+  // bottom-up viewport coords) for texture lookup so the duotone
+  // grade composites with the right pixel.
+  vec2 uv = gl_FragCoord.xy / u_resolution;
+  // Aspect-correct radial distance so the focus zone stays circular.
+  vec2 ndc = uv * 2.0 - 1.0;
+  float aspect = u_resolution.x / max(1.0, u_resolution.y);
+  vec2 nd = ndc;
+  if (aspect > 1.0) nd.x *= aspect; else nd.y /= aspect;
+  float r = length(nd);
+
+  // Variable-radius blur (or straight sample). The radius is what
+  // drives the visible defocus — bumped 2× from the PR #147 baseline
+  // so the user can actually see the effect at default sliders.
+  vec3 col;
+  if (u_blurOn > 0.5 && u_blurStrength > 0.001) {
+    float beyond = clamp((r - u_focusRadius) / max(1e-3, 1.0 - u_focusRadius), 0.0, 1.0);
+    float curve = mix(1.2, 5.0, u_falloff);
+    float blurAmt = pow(beyond, curve);
+    float minDim = min(u_resolution.x, u_resolution.y);
+    float blurRadius = u_blurStrength * 0.12 * minDim * blurAmt;
+    if (blurRadius < 0.5) {
+      col = texture(u_scene, uv).rgb;
+    } else {
+      vec2 px = vec2(blurRadius) / u_resolution;
+      vec3 sum = vec3(0.0);
+      for (int i = 0; i < 16; i++) {
+        sum += texture(u_scene, uv + POISSON16[i] * px).rgb;
+      }
+      col = sum / 16.0;
+    }
+  } else {
+    col = texture(u_scene, uv).rgb;
+  }
+
+  if (u_gradeOn > 0.5) {
+    // Chromatic aberration: radial offset on R/B channels. Strength
+    // ramps with distance² from screen center, so the corners get a
+    // visible pink/cyan fringe and the focus zone stays clean.
+    vec2 toCtr = uv - 0.5;
+    float caAmt = 0.006 * dot(toCtr, toCtr) * 4.0;
+    float Rc = texture(u_scene, uv - toCtr * caAmt).r;
+    float Bc = texture(u_scene, uv + toCtr * caAmt).b;
+    // If blur is on we already lost the sharp sample — use the
+    // blurred col.g, but pull fresh R/B taps from the scene RT for
+    // the aberration look.
+    vec3 src = vec3(Rc, col.g, Bc);
+
+    // Anchor colors: shadow at low V, highlight at high V, both
+    // tinted by the user-chosen hues and shared saturation. The two
+    // anchors are NOT V=0 and V=1 because that would crush blacks
+    // and blow out whites; 0.18 / 0.92 leaves headroom.
+    vec3 shadowAnchor    = hsv2rgb(vec3(u_hue1, u_saturation, 0.18));
+    vec3 highlightAnchor = hsv2rgb(vec3(u_hue2, u_saturation, 0.92));
+
+    // Map perceptual luminance along the anchor gradient. The
+    // smoothstep gives a Photoshop-style gentle contrast curve.
+    float Y = clamp(dot(src, LUMA), 0.0, 1.0);
+    float t = smoothstep(0.05, 0.95, Y);
+    vec3 graded = mix(shadowAnchor, highlightAnchor, t);
+
+    // Blend 15% of the original chroma back so cell colours don't
+    // collapse entirely into the gradient (microscopy preserves
+    // some local hue — pure duotone looks plasticky).
+    col = mix(graded, src, 0.15);
+  }
+
+  outColor = vec4(col, 1.0);
+}
+`;
+
+// Liquid-ripples overlay: each on-screen cell radiates concentric
+// ripples that distort the bg sample UV. Reads as cells moving
+// through liquid. Cells render on top normally; only the bg layer
+// is distorted, so the pass is cheap (one fullscreen quad with an
+// inner loop bounded by the cap).
+const RIPPLE_MAX = 24;
+const FRAG_RIPPLE_BG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_bg;
+uniform float u_time;
+uniform vec2 u_resolution;       // canvas drawing-buffer (W, H)
+uniform int u_cellCount;
+uniform vec3 u_cells[${RIPPLE_MAX}];   // (uvX, uvY, uvR_minAxis)
+uniform vec3 u_rippleParams;     // (density, reach, strength)
+out vec4 outColor;
+
+void main() {
+  vec2 uv = v_uv;
+  vec2 disp = vec2(0.0);
+  float minAx = min(u_resolution.x, u_resolution.y);
+  float density  = max(u_rippleParams.x, 0.001);
+  float reach    = max(u_rippleParams.y, 0.001);
+  float strength = u_rippleParams.z;
+  for (int i = 0; i < ${RIPPLE_MAX}; i++) {
+    if (i >= u_cellCount) break;
+    vec3 c = u_cells[i];
+    vec2 dvUv = uv - c.xy;
+    vec2 dvPx = dvUv * u_resolution;
+    float dPx  = length(dvPx);
+    float rPx  = max(c.z * minAx, 4.0);
+    // Cull radius scales with reach so high-reach values still pass.
+    if (dPx > rPx * 8.0 * reach) continue;
+    // density > 1 ⇒ shorter wavelength ⇒ more rings per cell radius.
+    float wavelen = rPx * 0.7 / density;
+    float k = 6.28318 / wavelen;
+    float wave = sin(dPx * k - u_time * (wavelen * 1.5) * k);
+    // reach < 1 ⇒ ripples decay closer to the cell.
+    float falloff = exp(-dPx / (rPx * 4.0 * reach));
+    vec2 dirUv = dvUv / max(1e-4, length(dvUv));
+    disp += dirUv * wave * falloff;
+  }
+  vec2 uvDisp = disp * (6.0 / minAx) * strength;
+  vec3 bg = texture(u_bg, clamp(uv + uvDisp, 0.0, 1.0)).rgb;
+  outColor = vec4(bg, 1.0);
+}
+`;
+
+// Single fullscreen overlay shader for the three new post-effects.
+// Output formula chosen per blend mode so the same shader can be
+// composited via additive / multiply / normal GPU blendFunc.
+//
+//   normal   blendFunc(SRC_ALPHA, ONE_MINUS_SRC_ALPHA) — outputs
+//            (effectCol, intensity*mask); dst becomes a mix of
+//            scene and effect color weighted by alpha.
+//   multiply blendFunc(DST_COLOR, ZERO) — outputs
+//            (1 - effectCol*intensity*mask, 1); dst becomes
+//            dst*out, i.e. darkens proportional to effect strength.
+//   additive blendFunc(ONE, ONE) — outputs (effectCol*intensity*mask,
+//            1); dst becomes dst + effect, brightening towards
+//            the effect colour.
+//
+// Crosshair ignores u_mode and always renders with normal alpha
+// blend so the line stays opaque against any background.
+const FRAG_FX_OVERLAY = `#version 300 es
+precision highp float;
+uniform vec2 u_resolution;
+uniform float u_time;
+uniform int u_effect;     // 1 = static noise · 2 = vignette · 3 = crosshair
+uniform int u_mode;       // 1 = normal · 2 = multiply · 3 = additive
+uniform float u_intensity;
+out vec4 outColor;
+
+float fxHash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+void main() {
+  vec3 effectCol = vec3(0.0);
+  float effectMask = 1.0;
+  if (u_effect == 1) {
+    float g = fxHash(gl_FragCoord.xy + vec2(u_time * 31.7, u_time * 17.3));
+    effectCol  = vec3(g);
+    effectMask = 1.0;
+  } else if (u_effect == 2) {
+    // Aspect-corrected radial distance — true 1:1 circle, matches
+    // the crosshair overlay circle (PR #144). Without the
+    // correction the falloff was elliptical on widescreen.
+    vec2 uv  = gl_FragCoord.xy / u_resolution;
+    vec2 ndc = uv * 2.0 - 1.0;
+    float aspect = u_resolution.x / max(1.0, u_resolution.y);
+    if (aspect > 1.0) ndc.x *= aspect; else ndc.y /= aspect;
+    float r  = length(ndc);
+    effectCol  = vec3(0.05, 0.10, 0.20);
+    effectMask = pow(smoothstep(0.6, 1.0, r), 2.0);
+  } else {
+    // Crosshair — cyan ring + cross. Pure normal-blend output;
+    // u_mode is ignored to keep the line legible against any scene.
+    // Ring fits the shorter viewport axis with 5% padding (radius =
+    // min(W,H) * 0.475) so it scales with the canvas while staying
+    // circular at any aspect ratio.
+    vec2 px = gl_FragCoord.xy - u_resolution * 0.5;
+    float armLen   = 14.0;
+    float thick    = 1.0;
+    float ringR    = min(u_resolution.x, u_resolution.y) * 0.475;
+    float horiz = (abs(px.y) < thick && abs(px.x) < armLen) ? 1.0 : 0.0;
+    float vert  = (abs(px.x) < thick && abs(px.y) < armLen) ? 1.0 : 0.0;
+    float ring  = (abs(length(px) - ringR) < thick) ? 0.6 : 0.0;
+    float a = max(max(horiz, vert), ring);
+    outColor = vec4(vec3(0.42, 0.95, 1.0), a * 0.6);
+    return;
+  }
+
+  float s = u_intensity * effectMask;
+  if (u_mode == 1) {
+    outColor = vec4(effectCol, s);
+  } else if (u_mode == 2) {
+    outColor = vec4(vec3(1.0) - effectCol * s, 1.0);
+  } else {
+    outColor = vec4(effectCol * s, 1.0);
+  }
+}
+`;
+
+// Step shader runs N iterations per visible frame; seed shader writes
+// fresh B-discs every ~10 s so the pattern keeps regrowing.
+const FRAG_REACTOR_STEP = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_texture;
+uniform vec2 u_resolution;
+out vec4 outColor;
+
+vec2 readConc(vec2 uv)        { return texture(u_texture, uv).rg / vec2(0.05, 1.0); }
+vec4 packConc(vec2 c)         { return vec4(c * vec2(0.05, 1.0), 0.0, 1.0); }
+
+vec2 lapConc(vec2 uv) {
+  float du = 1.0 / u_resolution.x;
+  float dv = 1.0 / u_resolution.y;
+  vec2 lap = -readConc(uv);
+  lap += 0.20 * readConc(uv + vec2(-du, 0.0));
+  lap += 0.20 * readConc(uv + vec2( du, 0.0));
+  lap += 0.20 * readConc(uv + vec2(0.0, -dv));
+  lap += 0.20 * readConc(uv + vec2(0.0,  dv));
+  lap += 0.05 * readConc(uv + vec2(-du, -dv));
+  lap += 0.05 * readConc(uv + vec2( du, -dv));
+  lap += 0.05 * readConc(uv + vec2( du,  dv));
+  lap += 0.05 * readConc(uv + vec2(-du,  dv));
+  return lap;
+}
+
+void main() {
+  float D_A = 0.8;
+  float D_B = 0.4;
+  float feed = 0.06 * v_uv.x;
+  float kill = 0.035 + 0.03 * v_uv.x + (0.022 - 0.015 * v_uv.x) * v_uv.y;
+  vec2 c   = readConc(v_uv);
+  vec2 lap = lapConc(v_uv);
+  float dA = D_A * lap.x - c.x * c.y * c.y + feed * (1.0 - c.x);
+  float dB = D_B * lap.y + c.x * c.y * c.y - (kill + feed) * c.y;
+  c += vec2(dA, dB);
+  outColor = packConc(c);
+}`;
+
+// Seed shader — copies the front RT and stamps up to 8 fresh B-discs
+// at uniform-random UV positions. Discs raise B to 0.9 inside their
+// radius without touching A (so the existing pattern keeps living).
+const REACTOR_MAX_SEEDS = 8;
+const FRAG_REACTOR_SEED = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_texture;
+uniform int u_seedCount;
+uniform vec3 u_seeds[${REACTOR_MAX_SEEDS}];   // (cx, cy, r) in UV
+out vec4 outColor;
+
+void main() {
+  vec4 src = texture(u_texture, v_uv);
+  vec2 c = src.rg / vec2(0.05, 1.0);
+  for (int i = 0; i < ${REACTOR_MAX_SEEDS}; i++) {
+    if (i >= u_seedCount) break;
+    vec3 seed = u_seeds[i];
+    if (length(v_uv - seed.xy) < seed.z) c.y = max(c.y, 0.9);
+  }
+  outColor = vec4(c * vec2(0.05, 1.0), 0.0, 1.0);
+}`;
+
 const VERT_META_POLY = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_pos;   // physical px from top-left of the RT
@@ -469,7 +1491,7 @@ void main() {
   outColor = vec4(finalRGB, finalA);
 }`;
 
-const INSTANCE_FLOATS = 21; // see _diskVao layout in init()
+const INSTANCE_FLOATS = 22; // see _diskVao layout in init()
 
 // Body and nucleus kinds packed into a single float per instance:
 //   packedKind = bodyKind + nucKind * 16
@@ -489,11 +1511,16 @@ const VERT_DECOR = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_pos;
 layout(location=1) in vec4 a_col;
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 out vec4 v_col;
 void main() {
-  vec2 screenPos = a_pos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, rotate by u_camera.w, then translate.
+  vec2 a_posScaled = a_pos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * a_posScaled.x - scw * a_posScaled.y,
+                        scw * a_posScaled.x + ccw * a_posScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -511,11 +1538,16 @@ const VERT_DASH = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_pos;
 layout(location=1) in float a_dist;
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 out float v_dist;
 void main() {
-  vec2 screenPos = a_pos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, rotate by u_camera.w, then translate.
+  vec2 a_posScaled = a_pos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * a_posScaled.x - scw * a_posScaled.y,
+                        scw * a_posScaled.x + ccw * a_posScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -537,13 +1569,19 @@ void main() {
 const VERT_MARKER = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_corner;
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 uniform vec3 u_marker;       // (x, y, scaledRadius_world)
 out vec2 v_uv;
 void main() {
   vec2 worldPos = u_marker.xy + a_corner * u_marker.z;
-  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, then rotate by u_camera.w, then translate.
+  // Reduces to plain "worldPos * scale + (tx, ty)" when rotation == 0.
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -574,18 +1612,32 @@ void main() {
 // alpha) + (R, G, B, _pad). Soft-disc fragment shader anti-aliases
 // the rim. Mirrors the WebGPU PARTICLE_WGSL pipeline 1:1.
 const PARTICLE_INSTANCE_FLOATS = 8;
+const ANTIBODY_INSTANCE_FLOATS = 8;            // (x, y, angle, alpha, R, G, B, scale)
+// Unit Y in local coords. Three line segments → 6 vertices, drawn
+// as gl.LINES. Stem points back along -x; arms fan forward along +x.
+const ANTIBODY_UNIT_Y = new Float32Array([
+  -2.4, 0,    0, 0,             // stem
+   0, 0,    1.6, -1.2,           // left arm
+   0, 0,    1.6,  1.2,           // right arm
+]);
 const VERT_PARTICLE = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_corner;
 layout(location=1) in vec4 a_inst;        // (x, y, r, alpha)
 layout(location=2) in vec4 a_rgb;         // (R, G, B, _)
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 out vec2 v_uv;
 out vec4 v_col;
 void main() {
   vec2 worldPos = a_inst.xy + a_corner * a_inst.z;
-  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, then rotate by u_camera.w, then translate.
+  // Reduces to plain "worldPos * scale + (tx, ty)" when rotation == 0.
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -602,6 +1654,43 @@ void main() {
   float a = (1.0 - smoothstep(0.85, 1.0, d)) * v_col.a;
   if (a <= 0.0) discard;
   outColor = vec4(v_col.rgb, a);
+}`;
+
+// ---------- Antibody Y-sprite pass --------------------------------
+// Six-vertex unit Y in local space, drawn as gl.LINES with three
+// segments (stem + two arms). Per-instance: (x, y, angle, alpha,
+// R, G, B, scale). Vertex shader rotates+scales the local Y, then
+// the same camera transform every other pass uses.
+const VERT_ANTIBODY = `#version 300 es
+precision highp float;
+layout(location=0) in vec2 a_local;       // unit-Y vertex (-2.4..1.6, -1.2..1.2)
+layout(location=1) in vec4 a_inst;        // (x, y, angle, alpha)
+layout(location=2) in vec4 a_rgbScale;    // (R, G, B, scale)
+uniform vec4 u_camera;
+uniform vec2 u_viewport;
+out vec4 v_col;
+void main() {
+  float ca = cos(a_inst.z), sa = sin(a_inst.z);
+  vec2 rotated = vec2(ca * a_local.x - sa * a_local.y,
+                      sa * a_local.x + ca * a_local.y);
+  vec2 worldPos = a_inst.xy + rotated * a_rgbScale.w;
+  // Camera: scale, rotate, translate (matches every other pass).
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
+  vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
+  clipPos.y = -clipPos.y;
+  gl_Position = vec4(clipPos, 0.0, 1.0);
+  v_col = vec4(a_rgbScale.rgb, a_inst.w);
+}`;
+const FRAG_ANTIBODY = `#version 300 es
+precision highp float;
+in vec4 v_col;
+out vec4 outColor;
+void main() {
+  outColor = v_col;
 }`;
 
 // ---------- Cartoon face pass (only drawn when S.cartoon = true) ----------
@@ -625,7 +1714,7 @@ layout(location=3) in vec4 a_face2;    // (lookX, lookY, mouthW, blink)
 layout(location=4) in vec4 a_face3;    // (mouthY, phase, blur, alphaMul)
 layout(location=5) in vec3 a_mouthCol; // RGB for mouth fill / stroke
 
-uniform vec3 u_camera;
+uniform vec4 u_camera;
 uniform vec2 u_viewport;
 
 out vec2 v_uv;
@@ -639,7 +1728,13 @@ void main() {
   // Quad covers the body extent (no need for spike margins — faces sit
   // inside the cell). 1.0 × r is enough for any face-bearing cell.
   vec2 worldPos = a_inst.xy + a_corner * a_inst.z * 1.0;
-  vec2 screenPos = worldPos * u_camera.x + u_camera.yz;
+  // Camera transform: scale, then rotate by u_camera.w, then translate.
+  // Reduces to plain "worldPos * scale + (tx, ty)" when rotation == 0.
+  vec2 worldPosScaled = worldPos * u_camera.x;
+  float ccw = cos(u_camera.w), scw = sin(u_camera.w);
+  vec2 screenPos = vec2(ccw * worldPosScaled.x - scw * worldPosScaled.y,
+                        scw * worldPosScaled.x + ccw * worldPosScaled.y)
+                 + u_camera.yz;
   vec2 clipPos = (screenPos / u_viewport) * 2.0 - 1.0;
   clipPos.y = -clipPos.y;
   gl_Position = vec4(clipPos, 0.0, 1.0);
@@ -689,7 +1784,12 @@ float arcA(vec2 p, vec2 c, float r, float hw, float a0, float a1) {
   // Wrap into [-PI, PI].
   float lo = a0;
   float hi = a1;
-  float in_arc = step(lo, ang) * step(ang, hi);
+  // Soft angular endpoints (was hard step() — sub-pixel arc at
+  // small zoom aliased to dot-pairs at the extrema, user-visible
+  // on dendritic). 0.06 rad fade reads as a curve at any size.
+  float aFade = 0.06;
+  float in_arc = smoothstep(lo - aFade, lo + aFade, ang)
+               * (1.0 - smoothstep(hi - aFade, hi + aFade, ang));
   return band * in_arc;
 }
 
@@ -759,10 +1859,17 @@ void main() {
   vec2 d = v_uv - mc;
 
   if (mouthKind == 1 || mouthKind == 6) {
-    // SMILE (or DROOL — base smile)
-    float arc = arcA(v_uv, vec2(0.0, mouthY - mouthW * 0.3), mouthW, 0.04, 0.12 * 3.14159, 0.88 * 3.14159);
-    col = mix(col, v_mouthCol, arc);
-    a = max(a, arc);
+    // SMILE (or DROOL — base smile). Filled circular segment below
+    // the chord — reads as a solid "U" mouth at every zoom level
+    // (the previous thin-arc stroke aliased to dot-pairs at small
+    // sizes; user wants every cell/pathogen to draw a solid mouth).
+    vec2 sc = vec2(0.0, mouthY - mouthW * 0.3);
+    float chordY = sc.y + mouthW * sin(0.12 * 3.14159);
+    float discMask = 1.0 - sstep(mouthW * 0.95, mouthW, length(v_uv - sc));
+    float chordMask = sstep(chordY - 0.005, chordY + 0.005, v_uv.y);
+    float fill = discMask * chordMask;
+    col = mix(col, v_mouthCol, fill);
+    a = max(a, fill);
     if (mouthKind == 6) {
       // Drool drip — small ellipse below the smile, animates over time.
       float dripPhase = fract(u_time * 0.6 + phase);
@@ -773,22 +1880,35 @@ void main() {
       a = max(a, dripA);
     }
   } else if (mouthKind == 2) {
-    // FROWN
-    float arc = arcA(v_uv, vec2(0.0, mouthY + mouthW * 0.6), mouthW, 0.04, 1.12 * 3.14159, 1.88 * 3.14159);
-    col = mix(col, v_mouthCol, arc);
-    a = max(a, arc);
+    // FROWN — filled circular segment above the chord (mirror of smile).
+    vec2 fc = vec2(0.0, mouthY + mouthW * 0.6);
+    float chordY = fc.y - mouthW * sin(0.12 * 3.14159);
+    float discMask = 1.0 - sstep(mouthW * 0.95, mouthW, length(v_uv - fc));
+    float chordMask = 1.0 - sstep(chordY - 0.005, chordY + 0.005, v_uv.y);
+    float fill = discMask * chordMask;
+    col = mix(col, v_mouthCol, fill);
+    a = max(a, fill);
   } else if (mouthKind == 3) {
-    // SNARL — zig-zag teeth (5 segments)
-    // Distance from each segment, kept loose since GLSL line-segment SDF is verbose.
-    // Approximate with a thin band that follows y = mouthY + (i%2)*0.18*mouthW
-    float xrel = (v_uv.x - 0.0) / mouthW;
-    if (abs(xrel) < 1.0) {
-      float seg = floor((xrel + 1.0) * 2.5);
-      float yTarget = mouthY + (mod(seg, 2.0) < 0.5 ? 0.0 : mouthW * 0.18);
-      float dy = abs(v_uv.y - yTarget);
-      float zigA = 1.0 - sstep(0.02, 0.04, dy);
-      col = mix(col, v_mouthCol, zigA);
-      a = max(a, zigA);
+    // SNARL — 5 downward-pointing triangular teeth sharing their
+    // top edges. Solid filled (not a rectangle with sawtooth).
+    float topY = mouthY - mouthW * 0.05;
+    float toothH = mouthW * 0.30;
+    float halfStep = mouthW / 5.0;          // half-width of each tooth
+    float ly = v_uv.y - topY;
+    if (ly > 0.0 && ly < toothH) {
+      // Locate which tooth this fragment is over.
+      float xrel = (v_uv.x + mouthW) / (2.0 * mouthW);  // 0..1 across the band
+      if (xrel > 0.0 && xrel < 1.0) {
+        float idx = floor(xrel * 5.0);
+        float cx = -mouthW + (idx + 0.5) * (2.0 * mouthW / 5.0);
+        float t = ly / toothH;
+        float halfAtY = (1.0 - t) * halfStep;
+        // Soft tooth edge AA: ramp the boundary across ~0.005 uv.
+        float fill = 1.0 - smoothstep(halfAtY - 0.005, halfAtY + 0.005,
+                                       abs(v_uv.x - cx));
+        col = mix(col, v_mouthCol, fill);
+        a = max(a, fill);
+      }
     }
   } else if (mouthKind == 4) {
     // FANGS — open mouth ellipse + two white triangles
@@ -851,6 +1971,12 @@ function hexToVec3(hex) {
     parseInt(h.slice(4, 6), 16) / 255,
   ];
 }
+
+// Cell-shader theme key → integer for the FRAG_DISK u_theme uniform.
+// Mirrors KNOWN_THEME_KEYS in core/state.js. Unknown values fall back
+// to 0 (legacy) so a stale localStorage entry never breaks rendering.
+const _THEME_IDS = { legacy: 0, microscope: 1, cartoon: 2, kurzgesagt: 3, classic: 4 };
+function _themeId(key) { return _THEME_IDS[key] || 0; }
 
 // Theme `ringColor` / `spotColor` / `gridColor` strings, returning rgb +
 // optional alpha (defaulting to 1 for hex / no-alpha rgba).
@@ -979,6 +2105,7 @@ export class WebGL2Renderer extends RendererBase {
     this._diskU.highlight = gl.getUniformLocation(this._diskProg, 'u_highlight');
     this._diskU.membraneIntensity = gl.getUniformLocation(this._diskProg, 'u_membraneIntensity');
     this._diskU.borderThickness = gl.getUniformLocation(this._diskProg, 'u_borderThickness');
+    this._diskU.theme = gl.getUniformLocation(this._diskProg, 'u_theme');
 
     // Static unit-square corners (two triangles).
     const corners = new Float32Array([
@@ -1021,6 +2148,7 @@ export class WebGL2Renderer extends RendererBase {
     attr(4, 3); // a_cytoBot
     attr(5, 3); // a_nucleus
     attr(6, 4); // a_outline (rgba; .a = c.flash)
+    attr(7, 1); // a_diskAlpha (SPLITTING crossfade)
     gl.bindVertexArray(null);
 
     // ---- background program ----
@@ -1042,6 +2170,13 @@ export class WebGL2Renderer extends RendererBase {
     this._bgU.spotCols = bu('u_spotCols');
     this._bgU.rbc = bu('u_rbc');
     this._bgU.bgScale = bu('u_bgScale');
+    this._bgU.reactorTex = bu('u_reactorTex');
+    this._bgU.opacity = bu('u_opacity');
+
+    // Reactor (Gray-Scott) — programs compile lazily on first use,
+    // not at boot: most sessions never select the theme. See
+    // _reactorEnsure() for the FBO/program allocation.
+    this._reactorProgsReady = false;
 
     this._bgVao = gl.createVertexArray();
 
@@ -1149,6 +2284,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindVertexArray(null);
 
     this._buildParticlePipeline();
+    this._buildAntibodyPipeline();
     this._buildMetaballPipeline();
   }
 
@@ -1180,6 +2316,51 @@ export class WebGL2Renderer extends RendererBase {
       gl.vertexAttribDivisor(2, 1);
     }
     gl.bindVertexArray(null);
+  }
+
+  _buildAntibodyPipeline() {
+    const gl = this.gl;
+    this._antibodyProg = link(gl, VERT_ANTIBODY, FRAG_ANTIBODY);
+    this._antibodyU = {
+      camera:   gl.getUniformLocation(this._antibodyProg, 'u_camera'),
+      viewport: gl.getUniformLocation(this._antibodyProg, 'u_viewport'),
+    };
+    // Static unit-Y vertex buffer.
+    this._antibodyUnitVbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyUnitVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, ANTIBODY_UNIT_Y, gl.STATIC_DRAW);
+    // Dynamic per-instance buffer.
+    this._antibodyInstVbo = gl.createBuffer();
+    this._antibodyCapacity = 0;
+    this._antibodyData = new Float32Array(0);
+    this._growAntibodyBuffer(32);
+    // VAO with the unit-Y at location 0 + per-instance attrs at 1, 2.
+    this._antibodyVao = gl.createVertexArray();
+    gl.bindVertexArray(this._antibodyVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyUnitVbo);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyInstVbo);
+    {
+      const stride = ANTIBODY_INSTANCE_FLOATS * 4;
+      gl.enableVertexAttribArray(1);
+      gl.vertexAttribPointer(1, 4, gl.FLOAT, false, stride, 0);
+      gl.vertexAttribDivisor(1, 1);
+      gl.enableVertexAttribArray(2);
+      gl.vertexAttribPointer(2, 4, gl.FLOAT, false, stride, 16);
+      gl.vertexAttribDivisor(2, 1);
+    }
+    gl.bindVertexArray(null);
+  }
+
+  _growAntibodyBuffer(target) {
+    if (target <= this._antibodyCapacity) return;
+    const newCap = Math.max(32, Math.ceil(target * 1.5));
+    this._antibodyData = new Float32Array(newCap * ANTIBODY_INSTANCE_FLOATS);
+    this._antibodyCapacity = newCap;
+    const gl = this.gl;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyInstVbo);
+    gl.bufferData(gl.ARRAY_BUFFER, this._antibodyData.byteLength, gl.DYNAMIC_DRAW);
   }
 
   _growParticleBuffer(target) {
@@ -1335,20 +2516,561 @@ export class WebGL2Renderer extends RendererBase {
   beginFrame() {
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    // Build the post-pin chain of enabled FBO passes by walking
+    // S.overlayOrder from just-above-pin upward (= rendering order:
+    // first item is closest to the scene pin, runs first). The
+    // microscope-blur and duotone effects share one bundled shader
+    // ('sceneFx'), so they collapse to a single chain step.
+    const order = Array.isArray(S.overlayOrder) ? S.overlayOrder : [];
+    const pinIdx = order.indexOf('scene');
+    this._postChain = [];
+    if (pinIdx > 0) {
+      for (let i = pinIdx - 1; i >= 0; i--) {
+        const kind = order[i];
+        if (kind === 'ripples' && S.liquidRipples) {
+          this._postChain.push('ripples');
+        } else if (kind === 'caustics' && S.causticsOverlay) {
+          this._postChain.push('caustics');
+        } else if ((kind === 'microscope' || kind === 'duotone')
+                   && (S.microscopeBlur || S.makeItReal)) {
+          if (!this._postChain.includes('sceneFx')) this._postChain.push('sceneFx');
+        }
+      }
+    }
+    // Bg-only ripple mode: ripples is BELOW the scene pin. Bg pass
+    // writes to _rippleBgRt; ripple shader then writes to the scene
+    // target (either _postRtA if a scene-wide chain is on, or canvas).
+    const ripplesBgOnly = !!S.liquidRipples && !overlayKindRunsAfterScene('ripples');
+
+    // Ping-pong RTs for the scene-wide chain. Allocated lazily when
+    // any chain step is enabled; freed when none are.
+    this._sceneFbo = null;
+    if (this._postChain.length > 0) {
+      this._postEnsureRts();
+      for (const kind of this._postChain) {
+        if (kind === 'ripples')  this._rippleEnsureProg();
+        if (kind === 'caustics') this._causticEnsureProg();
+        if (kind === 'sceneFx')  this._sceneFxEnsureProg();
+      }
+      this._postSource = this._postRtA;
+      this._sceneFbo = this._postSource.fbo;
+    } else if (this._postRtA) {
+      this._postDestroyRts();
+    }
+    if (ripplesBgOnly) {
+      this._rippleBgEnsureRt();
+      this._rippleEnsureProg();
+    } else if (this._rippleBgRt) {
+      this._rippleBgDestroy();
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
+  }
+
+  // ---- Reactor (Gray-Scott) helpers --------------------------------
+  // The two RTs ping-pong: index 0 = front (display source), 1 = back
+  // (write target for the next step). After each step we swap.
+  // Sized to half the canvas (capped at 256×256) so a typical frame
+  // does ~64k pixel updates per step — ~5 steps * 64k = 320k texel
+  // ops per visible frame, well within budget.
+
+  _reactorEnsureProgs() {
+    if (this._reactorProgsReady) return;
+    const gl = this.gl;
+    this._reactorStepProg = link(gl, VERT_FULLSCREEN, FRAG_REACTOR_STEP);
+    this._reactorStepU = {
+      texture:    gl.getUniformLocation(this._reactorStepProg, 'u_texture'),
+      resolution: gl.getUniformLocation(this._reactorStepProg, 'u_resolution'),
+    };
+    this._reactorSeedProg = link(gl, VERT_FULLSCREEN, FRAG_REACTOR_SEED);
+    this._reactorSeedU = {
+      texture:   gl.getUniformLocation(this._reactorSeedProg, 'u_texture'),
+      seedCount: gl.getUniformLocation(this._reactorSeedProg, 'u_seedCount'),
+      seeds:     gl.getUniformLocation(this._reactorSeedProg, 'u_seeds'),
+    };
+    this._reactorRtA = null;
+    this._reactorRtB = null;
+    this._reactorFront = 0;     // 0 = A is the display source, 1 = B
+    this._reactorRtSize = { w: 0, h: 0 };
+    this._reactorLastSeedMs = -Infinity;   // -∞ → seed on the very first frame
+    this._reactorSeedBuf = new Float32Array(REACTOR_MAX_SEEDS * 3);
+    this._reactorProgsReady = true;
+  }
+
+  _reactorMakeRt(w, h) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    // NEAREST: the laplacian samples 9 specific texels — bilinear
+    // blending would smear concentrations across cells and ruin the
+    // numerical stability of the Gray-Scott step.
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    // Initial fill: pack(A=1, B=0) → (0.05, 0.0, 0, 1). The Gray-Scott
+    // equilibrium with no B present is uniform A; this is the
+    // pristine state from which seed discs grow Turing patterns.
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0.05, 0.0, 0.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    return { fbo, tex };
+  }
+
+  _reactorEnsureRts() {
+    const gl = this.gl;
+    const targetW = Math.max(64, Math.min(256, Math.floor(this.W * 0.5)));
+    const targetH = Math.max(64, Math.min(256, Math.floor(this.H * 0.5)));
+    if (this._reactorRtA && this._reactorRtSize.w === targetW && this._reactorRtSize.h === targetH) return;
+    if (this._reactorRtA) {
+      gl.deleteFramebuffer(this._reactorRtA.fbo); gl.deleteTexture(this._reactorRtA.tex);
+    }
+    if (this._reactorRtB) {
+      gl.deleteFramebuffer(this._reactorRtB.fbo); gl.deleteTexture(this._reactorRtB.tex);
+    }
+    this._reactorRtA = this._reactorMakeRt(targetW, targetH);
+    this._reactorRtB = this._reactorMakeRt(targetW, targetH);
+    this._reactorRtSize = { w: targetW, h: targetH };
+    this._reactorFront = 0;
+    this._reactorLastSeedMs = -Infinity;
+  }
+
+  _reactorRt(idx) { return idx === 0 ? this._reactorRtA : this._reactorRtB; }
+
+  _reactorSeed(seedCount) {
+    const gl = this.gl;
+    const front = this._reactorRt(this._reactorFront);
+    const back  = this._reactorRt(1 - this._reactorFront);
+    // Caller passes the desired count; fall back to a randomised 5..8
+    // when called without an argument (legacy path).
+    const count = (typeof seedCount === 'number' && seedCount > 0)
+      ? Math.max(1, Math.min(REACTOR_MAX_SEEDS, seedCount | 0))
+      : (5 + Math.floor(Math.random() * 4));
+    for (let i = 0; i < count; i++) {
+      this._reactorSeedBuf[i * 3]     = Math.random();
+      this._reactorSeedBuf[i * 3 + 1] = Math.random();
+      // Disc radius in UV space — small enough that seeds don't drown
+      // the whole RT in B; ~3% of the texture in radius works well.
+      this._reactorSeedBuf[i * 3 + 2] = 0.025 + Math.random() * 0.015;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, back.fbo);
+    gl.viewport(0, 0, this._reactorRtSize.w, this._reactorRtSize.h);
+    gl.useProgram(this._reactorSeedProg);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, front.tex);
+    gl.uniform1i(this._reactorSeedU.texture, 0);
+    gl.uniform1i(this._reactorSeedU.seedCount, count);
+    gl.uniform3fv(this._reactorSeedU.seeds, this._reactorSeedBuf);
+    gl.bindVertexArray(this._bgVao);
+    gl.disable(gl.BLEND);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.enable(gl.BLEND);
+    this._reactorFront = 1 - this._reactorFront;
+  }
+
+  _reactorStep(iters) {
+    const gl = this.gl;
+    gl.useProgram(this._reactorStepProg);
+    gl.uniform2f(this._reactorStepU.resolution, this._reactorRtSize.w, this._reactorRtSize.h);
+    gl.uniform1i(this._reactorStepU.texture, 0);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindVertexArray(this._bgVao);
+    gl.disable(gl.BLEND);
+    gl.viewport(0, 0, this._reactorRtSize.w, this._reactorRtSize.h);
+    for (let i = 0; i < iters; i++) {
+      const front = this._reactorRt(this._reactorFront);
+      const back  = this._reactorRt(1 - this._reactorFront);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, back.fbo);
+      gl.bindTexture(gl.TEXTURE_2D, front.tex);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      this._reactorFront = 1 - this._reactorFront;
+    }
+    gl.enable(gl.BLEND);
+  }
+
+  _reactorDestroy() {
+    const gl = this.gl;
+    if (this._reactorRtA) { gl.deleteFramebuffer(this._reactorRtA.fbo); gl.deleteTexture(this._reactorRtA.tex); this._reactorRtA = null; }
+    if (this._reactorRtB) { gl.deleteFramebuffer(this._reactorRtB.fbo); gl.deleteTexture(this._reactorRtB.tex); this._reactorRtB = null; }
+    if (this._reactorStepProg) { gl.deleteProgram(this._reactorStepProg); this._reactorStepProg = null; }
+    if (this._reactorSeedProg) { gl.deleteProgram(this._reactorSeedProg); this._reactorSeedProg = null; }
+    this._reactorProgsReady = false;
+  }
+
+  // ── Post-FX ping-pong RTs (shared) ──
+  // Two canvas-sized RGBA8 FBOs alternated between by every
+  // post-pin overlay. Each chain step reads from `_postSource`
+  // and writes to the other RT, then we swap. The last step
+  // writes straight to the default framebuffer.
+  _postMakeRt(w, h) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    return { fbo, tex, w, h };
+  }
+  _postEnsureRts() {
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
+    if (this._postRtA && this._postRtA.w === w && this._postRtA.h === h) return;
+    this._postDestroyRts();
+    this._postRtA = this._postMakeRt(w, h);
+    this._postRtB = this._postMakeRt(w, h);
+  }
+  _postDestroyRts() {
+    const gl = this.gl;
+    if (this._postRtA) { gl.deleteFramebuffer(this._postRtA.fbo); gl.deleteTexture(this._postRtA.tex); this._postRtA = null; }
+    if (this._postRtB) { gl.deleteFramebuffer(this._postRtB.fbo); gl.deleteTexture(this._postRtB.tex); this._postRtB = null; }
+    this._postSource = null;
+  }
+
+  // ── Caustics overlay (S.causticsOverlay) ──
+  // Shader-only helper. RT allocation lives in _postEnsureRts; the
+  // shader samples whichever ping-pong RT is currently the chain
+  // source and writes to the other (or to the default framebuffer
+  // for the last chain step).
+  _causticEnsureProg() {
+    if (this._causticProg) return;
+    const gl = this.gl;
+    const prog = link(gl, VERT_FULLSCREEN, FRAG_CAUSTIC_BG);
+    this._causticProg = prog;
+    this._causticU = {
+      bg:   gl.getUniformLocation(prog, 'u_bg'),
+      time: gl.getUniformLocation(prog, 'u_time'),
+      res:  gl.getUniformLocation(prog, 'u_resolution'),
+      tint: gl.getUniformLocation(prog, 'u_tint'),
+    };
+  }
+  _causticDestroy() {
+    const gl = this.gl;
+    if (this._causticProg) {
+      gl.deleteProgram(this._causticProg);
+      this._causticProg = null;
+      this._causticU = null;
+    }
+  }
+
+  // ── Microscope FX post-pass (S.microscopeBlur + S.makeItReal) ──
+  // Bundled shader for scene-wide blur + duotone color grade. Shares
+  // the ping-pong RTs with the rest of the post chain.
+  _sceneFxEnsureProg() {
+    if (this._sceneFxProg) return;
+    const gl = this.gl;
+    const prog = link(gl, VERT_FULLSCREEN, FRAG_SCENE_FX);
+    this._sceneFxProg = prog;
+    this._sceneFxU = {
+      scene:        gl.getUniformLocation(prog, 'u_scene'),
+      res:          gl.getUniformLocation(prog, 'u_resolution'),
+      blurOn:       gl.getUniformLocation(prog, 'u_blurOn'),
+      focusRadius:  gl.getUniformLocation(prog, 'u_focusRadius'),
+      blurStrength: gl.getUniformLocation(prog, 'u_blurStrength'),
+      falloff:      gl.getUniformLocation(prog, 'u_falloff'),
+      gradeOn:      gl.getUniformLocation(prog, 'u_gradeOn'),
+      hue1:         gl.getUniformLocation(prog, 'u_hue1'),
+      hue2:         gl.getUniformLocation(prog, 'u_hue2'),
+      saturation:   gl.getUniformLocation(prog, 'u_saturation'),
+    };
+  }
+  _sceneFxDestroy() {
+    const gl = this.gl;
+    if (this._sceneFxProg) {
+      gl.deleteProgram(this._sceneFxProg);
+      this._sceneFxProg = null;
+      this._sceneFxU = null;
+    }
+  }
+
+  // ── Liquid-ripples overlay (S.liquidRipples) ──
+  // Two code paths depending on ripples' position vs the scene pin
+  // in S.overlayOrder:
+  //   • Below pin → bg-only. drawBackground writes bg to _rippleBgRt
+  //     and the ripple shader writes to the active scene target
+  //     (either canvas or _postRtA when a scene-wide chain is on).
+  //     Cells then render on top.
+  //   • Above pin → joins the scene-wide post chain as a normal
+  //     ping-pong step using _postRtA/_postRtB (the shared chain RTs).
+  _rippleBgEnsureRt() {
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
+    if (this._rippleBgRt && this._rippleBgRt.w === w && this._rippleBgRt.h === h) return;
+    if (this._rippleBgRt) {
+      const gl = this.gl;
+      gl.deleteFramebuffer(this._rippleBgRt.fbo);
+      gl.deleteTexture(this._rippleBgRt.tex);
+    }
+    this._rippleBgRt = this._postMakeRt(w, h);
+  }
+  _rippleBgDestroy() {
+    const gl = this.gl;
+    if (this._rippleBgRt) {
+      gl.deleteFramebuffer(this._rippleBgRt.fbo);
+      gl.deleteTexture(this._rippleBgRt.tex);
+      this._rippleBgRt = null;
+    }
+  }
+  // FX overlay program (noise / vignette / crosshair). Single shader
+  // shared across all three effects; the JS driver sets `u_effect` +
+  // `u_mode` + `u_intensity` per draw and picks the GPU blendFunc to
+  // match the requested mode. Lazy-init: only built when the first
+  // FX overlay toggles on.
+  _fxOverlayEnsureProg() {
+    if (this._fxOverlayProg) return;
+    const gl = this.gl;
+    const prog = link(gl, VERT_FULLSCREEN, FRAG_FX_OVERLAY);
+    this._fxOverlayProg = prog;
+    this._fxOverlayU = {
+      res:       gl.getUniformLocation(prog, 'u_resolution'),
+      time:      gl.getUniformLocation(prog, 'u_time'),
+      effect:    gl.getUniformLocation(prog, 'u_effect'),
+      mode:      gl.getUniformLocation(prog, 'u_mode'),
+      intensity: gl.getUniformLocation(prog, 'u_intensity'),
+    };
+  }
+
+  // Apply the GPU blend func that matches a blend-mode setting.
+  // Crosshair always uses normal blending so it stays legible.
+  _fxOverlayBlend(mode) {
+    const gl = this.gl;
+    gl.enable(gl.BLEND);
+    if (mode === 'multiply') {
+      gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+    } else if (mode === 'additive') {
+      gl.blendFunc(gl.ONE, gl.ONE);
+    } else {
+      gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    }
+  }
+
+  // Draw the enabled FX overlays in order: noise → vignette →
+  // crosshair. Each enabled effect picks up its own blend mode +
+  // intensity; the shader branches internally on `u_effect`.
+  _fxOverlayDraw(t) {
+    // Three fixed-function FX overlays composited on top of the
+    // scene framebuffer. Order comes from overlayFxOrder() — the FX
+    // subset of S.overlayOrder — so the user can reorder via the
+    // sortable list (Settings → Overlays). Each entry checks its
+    // own enabled-toggle. Per-frame read of S.* means reorders +
+    // toggles take effect on the next draw with no pipeline reset
+    // needed. The list is reversed before iteration to honour the
+    // UI's "Stack (top runs last)" semantics: top-of-list FX
+    // composites last (= visually on top), matching the post-pin
+    // FBO chain's bottom-to-top walk.
+    const order = overlayFxOrder().slice().reverse();
+    const anyOn = order.some(k => {
+      if (k === 'noise')     return !!S.staticNoise;
+      if (k === 'vignette')  return !!S.vignette;
+      if (k === 'crosshair') return !!S.crosshair;
+      return false;
+    });
+    if (!anyOn) return;
+    const gl = this.gl;
+    this._fxOverlayEnsureProg();
+    gl.useProgram(this._fxOverlayProg);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    gl.bindVertexArray(this._bgVao);
+    gl.uniform2f(this._fxOverlayU.res, this.canvas.width, this.canvas.height);
+    gl.uniform1f(this._fxOverlayU.time, t);
+    const _MODES = { normal: 1, multiply: 2, additive: 3 };
+    for (const k of order) {
+      if (k === 'noise' && S.staticNoise) {
+        gl.uniform1i(this._fxOverlayU.effect, 1);
+        gl.uniform1i(this._fxOverlayU.mode, _MODES[S.staticNoiseBlend] || 3);
+        gl.uniform1f(this._fxOverlayU.intensity, S.staticNoiseIntensity ?? 0.4);
+        this._fxOverlayBlend(S.staticNoiseBlend);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      } else if (k === 'vignette' && S.vignette) {
+        gl.uniform1i(this._fxOverlayU.effect, 2);
+        gl.uniform1i(this._fxOverlayU.mode, _MODES[S.vignetteBlend] || 3);
+        gl.uniform1f(this._fxOverlayU.intensity, S.vignetteIntensity ?? 0.6);
+        this._fxOverlayBlend(S.vignetteBlend);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      } else if (k === 'crosshair' && S.crosshair) {
+        gl.uniform1i(this._fxOverlayU.effect, 3);
+        gl.uniform1i(this._fxOverlayU.mode, 1);
+        gl.uniform1f(this._fxOverlayU.intensity, 1.0);
+        this._fxOverlayBlend('normal');
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+    }
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindVertexArray(null);
+  }
+
+  _rippleEnsureProg() {
+    if (this._rippleProg) return;
+    const gl = this.gl;
+    const prog = link(gl, VERT_FULLSCREEN, FRAG_RIPPLE_BG);
+    this._rippleProg = prog;
+    this._rippleU = {
+      bg:        gl.getUniformLocation(prog, 'u_bg'),
+      time:      gl.getUniformLocation(prog, 'u_time'),
+      res:       gl.getUniformLocation(prog, 'u_resolution'),
+      cellCount: gl.getUniformLocation(prog, 'u_cellCount'),
+      cells:     gl.getUniformLocation(prog, 'u_cells'),
+      params:    gl.getUniformLocation(prog, 'u_rippleParams'),
+    };
+    this._rippleCellsBuf = new Float32Array(RIPPLE_MAX * 3);
+  }
+  _rippleDestroy() {
+    const gl = this.gl;
+    if (this._rippleProg) {
+      gl.deleteProgram(this._rippleProg);
+      this._rippleProg = null;
+      this._rippleU = null;
+    }
+  }
+  // Pack at most RIPPLE_MAX on-screen cells into _rippleCellsBuf as
+  // (uvX, uvY, uvR_minAxis) triplets. Returns the count actually used.
+  _rippleCollectCells() {
+    const buf = this._rippleCellsBuf;
+    const cells = (this.sim && this.sim.cells) || [];
+    const W = this.W, H = this.H;
+    const minAx = Math.max(1, Math.min(W, H));
+    let n = 0;
+    for (let i = 0; i < cells.length && n < RIPPLE_MAX; i++) {
+      const c = cells[i];
+      const s = this.sim.worldToScreen(c.x, c.y);
+      // Skip off-screen + a tiny margin so the post-pass cost stays
+      // proportional to visible cells rather than total population.
+      const m = c.r * 1.5;
+      if (s.x < -m || s.y < -m || s.x > W + m || s.y > H + m) continue;
+      buf[n * 3 + 0] = s.x / W;
+      buf[n * 3 + 1] = s.y / H;
+      buf[n * 3 + 2] = (c.r * this.camera.scale) / minAx;
+      n++;
+    }
+    // Zero out the unused tail so the GPU doesn't read stale data.
+    for (let i = n * 3; i < RIPPLE_MAX * 3; i++) buf[i] = 0;
+    return n;
   }
 
   drawBackground(timeMs) {
     const gl = this.gl;
-    const bg = currentBackground();
+    const layers = currentBgLayers();
     const t = timeMs * 0.001 * (S.bgFlowSpeed || 1);
+    this._lastFrameSec = t;     // endFrame's post-pass reads this
 
+    // Reactor (Gray-Scott) — run N step iterations + maybe seed before
+    // the display pass(es), so the FRAG_BG kind=8 branch can sample the
+    // up-to-date front RT. Update once per frame regardless of how many
+    // reactor layers reference it. Per-layer fields (seedCount,
+    // reseedSec, simSpeed) come from the first reactor layer; the rest
+    // tag along since they sample the same RT.
+    const reactorLayer = layers.find(l => l.kind === 'reactor');
+    const hasReactor = !!reactorLayer;
+    if (hasReactor) {
+      this._reactorEnsureProgs();
+      this._reactorEnsureRts();
+      const reseedSec = Math.max(0.1, +reactorLayer.reseedSec || 10);
+      if (timeMs - this._reactorLastSeedMs > reseedSec * 1000) {
+        const seedCount = Math.max(1, Math.min(REACTOR_MAX_SEEDS,
+          Math.round(+reactorLayer.seedCount || 6)));
+        this._reactorSeed(seedCount);
+        this._reactorLastSeedMs = timeMs;
+      }
+      const simSpeed = Math.max(0, Math.min(15,
+        Math.round(+reactorLayer.simSpeed ?? 5)));
+      if (simSpeed > 0) this._reactorStep(simSpeed);
+      // Restore the scene framebuffer + drawing-buffer viewport so
+      // the bg display pass renders into the same target as cells.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    } else if (this._reactorRtA) {
+      // No layer references reactor — release the RTs so we don't
+      // carry the GPU memory across the rest of the session.
+      this._reactorDestroy();
+    }
+
+    // Bg-only ripple mode (ripples positioned below the scene pin):
+    // redirect the entire bg stack into the bg-ripple RT, then run
+    // the ripple post-pass to the active scene target. Scene-wide
+    // mode (ripples above the pin) is handled in endFrame() instead.
+    const bgOnlyRipples = !!S.liquidRipples && !overlayKindRunsAfterScene('ripples');
+    if (bgOnlyRipples) {
+      this._rippleBgEnsureRt();
+      this._rippleEnsureProg();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._rippleBgRt.fbo);
+      gl.viewport(0, 0, this._rippleBgRt.w, this._rippleBgRt.h);
+    }
+
+    if (layers.length === 0) {
+      // No enabled layers — clear to black so cells aren't drawn over
+      // stale pixels.
+      gl.clearColor(0, 0, 0, 1);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    } else {
+      gl.useProgram(this._bgProg);
+      gl.bindVertexArray(this._bgVao);
+      gl.uniform4f(this._bgU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
+      gl.uniform2f(this._bgU.viewport, this.W, this.H);
+      gl.uniform1f(this._bgU.time, t);
+
+      for (let li = 0; li < layers.length; li++) {
+        const bg = layers[li];
+        this._setBgLayerUniforms(bg, t);
+        this._applyBgLayerBlend(li, bg);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
+    }
+
+    if (bgOnlyRipples && this._rippleProg) {
+      const cellCount = this._rippleCollectCells();
+      // Write the rippled bg to the active scene target — either
+      // the scene-wide chain head (_postRtA) or the default fb.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo || null);
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      gl.useProgram(this._rippleProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._rippleBgRt.tex);
+      gl.uniform1i(this._rippleU.bg, 0);
+      gl.uniform1f(this._rippleU.time, t);
+      gl.uniform2f(this._rippleU.res, this.canvas.width, this.canvas.height);
+      gl.uniform1i(this._rippleU.cellCount, cellCount);
+      gl.uniform3fv(this._rippleU.cells, this._rippleCellsBuf);
+      gl.uniform3f(this._rippleU.params,
+                   S.rippleDensity ?? 1.5,
+                   S.rippleReach ?? 0.7,
+                   S.rippleStrength ?? 1.0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.bindVertexArray(null);
+    // Decor (lobules, villi, neurons, …) intentionally not ported —
+    // background flair only visible in a handful of themes.
+  }
+
+  _setBgLayerUniforms(bg, t) {
+    const gl = this.gl;
     let kind = 0; // flat
     if (bg.kind === 'gradient') kind = 1;
     else if (bg.kind === 'agar') kind = 2;
     else if (bg.kind === 'cybergrid') kind = 3;
+    else if (bg.kind === 'lung') kind = 4;
+    else if (bg.kind === 'aurora') kind = 5;
+    else if (bg.kind === 'underwater') kind = 6;
+    else if (bg.kind === 'lava') kind = 7;
+    else if (bg.kind === 'reactor') kind = 8;
+    else if (bg.kind === 'bloodflow') kind = 9;
+    else if (bg.kind === 'cell-shadow') kind = 10;
     // 'flat' / 'navy-ghost' / unknown all fall through to flat.
 
-    // Compute drifting-spot positions in screen UV (matches Canvas2D).
     const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
     const spotCols = Array.isArray(bg.spotColors) ? bg.spotColors : null;
     const fallbackCol = bg.spotColor;
@@ -1362,13 +3084,11 @@ export class WebGL2Renderer extends RendererBase {
       this._spotsBuf[i * 4 + 3] = 0;
       const colSrc = spotCols ? spotCols[i % spotCols.length] : fallbackCol;
       const v4 = colSrc ? rgbaStringToVec4(colSrc) : [1, 1, 1, 0.10];
-      // Pre-multiply rgb by source alpha so the shader can add directly.
       this._spotColsBuf[i * 3]     = v4[0] * v4[3];
       this._spotColsBuf[i * 3 + 1] = v4[1] * v4[3];
       this._spotColsBuf[i * 3 + 2] = v4[2] * v4[3];
     }
 
-    gl.useProgram(this._bgProg);
     gl.uniform1i(this._bgU.kind, kind);
     gl.uniform3fv(this._bgU.base, hexToVec3(bg.base || '#000000'));
     gl.uniform3fv(this._bgU.top, hexToVec3(bg.topColor || bg.base || '#000000'));
@@ -1377,22 +3097,39 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform3fv(this._bgU.gridColor, rgbaStringToVec3(bg.gridColor || 'rgba(0,255,170,0.5)'));
     gl.uniform1f(this._bgU.gridStep, bg.gridStep || 48);
     gl.uniform1f(this._bgU.vignette, bg.vignette || 0);
-    gl.uniform3f(this._bgU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
-    gl.uniform2f(this._bgU.viewport, this.W, this.H);
-    gl.uniform1f(this._bgU.time, t);
     gl.uniform1i(this._bgU.spotCount, count);
     gl.uniform4fv(this._bgU.spots, this._spotsBuf);
     gl.uniform3fv(this._bgU.spotCols, this._spotColsBuf);
     gl.uniform1i(this._bgU.rbc, bg.rbcSilhouettes ? 1 : 0);
     gl.uniform1f(this._bgU.bgScale, S.bgScale || 1);
+    gl.uniform1f(this._bgU.opacity, (typeof bg.opacity === 'number') ? bg.opacity : 1);
+    if (kind === 8) {
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._reactorRt(this._reactorFront).tex);
+      gl.uniform1i(this._bgU.reactorTex, 0);
+    }
+  }
 
-    gl.bindVertexArray(this._bgVao);
-    gl.disable(gl.BLEND);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  _applyBgLayerBlend(index, bg) {
+    const gl = this.gl;
+    if (index === 0) {
+      // First layer overwrites whatever was in the framebuffer.
+      gl.disable(gl.BLEND);
+      return;
+    }
     gl.enable(gl.BLEND);
-    gl.bindVertexArray(null);
-    // Decor (lobules, villi, neurons, …) intentionally not ported —
-    // background flair only visible in a handful of themes.
+    const mode = bg.blend || 'normal';
+    if (mode === 'additive') {
+      gl.blendFunc(gl.ONE, gl.ONE);
+    } else if (mode === 'multiply') {
+      // True multiply: srcRGB * dstRGB. Source alpha is ignored, so
+      // opacity < 1 doesn't lerp toward identity here — acceptable for
+      // PR A; tighter control lands with the per-kind config in PR C.
+      gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+    } else {
+      // 'normal' — standard premultiplied alpha over.
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    }
   }
 
   _growInstanceBuffer(targetCount) {
@@ -1412,7 +3149,7 @@ export class WebGL2Renderer extends RendererBase {
     // Partition: when S.metaSplit is on, group both halves of any
     // SPLITTING cell by id and render them through the metaball pass.
     // Pairs where only one half is in view fall back to the singleton
-    // path (matches canvas2d / pixi). Singletons feed the disk pass
+    // path (matches canvas2d / webgpu). Singletons feed the disk pass
     // unchanged.
     const useMetaSplit = !!S.metaSplit;
     const splittingByCellId = useMetaSplit ? new Map() : null;
@@ -1423,6 +3160,14 @@ export class WebGL2Renderer extends RendererBase {
           let arr = splittingByCellId.get(s.cell.id);
           if (!arr) { arr = []; splittingByCellId.set(s.cell.id, arr); }
           arr.push(s);
+          // Disk-pass crossfade: re-include the half in the disk pass
+          // over p ∈ [0.5, 1.0] with alpha ramping 0 → 1, so by the time
+          // finishSplit fires the disk content is already at full
+          // opacity and there's no pop when the metaball pass stops.
+          if (s.cell.splitProgress > 0.5) {
+            s.diskAlpha = (s.cell.splitProgress - 0.5) * 2;
+            singletons.push(s);
+          }
         } else {
           singletons.push(s);
         }
@@ -1452,7 +3197,11 @@ export class WebGL2Renderer extends RendererBase {
         const nucK = NUC_KIND_FLOAT[(type.nucleus && type.nucleus.kind) || 'none'] || 0;
         const sel = this.sim.selectedCells.has(c) ? 1 : 0;
         const hollow = type.bodyHollow ? 1 : 0;
-        const kind = bodyK + nucK * 16 + sel * 256 + hollow * 4096;
+        // Pack the docs/shader-test "test kind" (0..20) at bit 13
+        // (multiplier 8192). Read as testKind() in FRAG_DISK; consumed
+        // only when u_theme != 0 (Phase 2 per-type SDF dispatch).
+        const tk = testKindFor(c.type);
+        const kind = bodyK + nucK * 16 + sel * 256 + hollow * 4096 + tk * 8192;
         const wobMul = (type.field && type.field.wobbleMul) || 1.0;
         const j = i * INSTANCE_FLOATS;
         data[j]     = s.x;
@@ -1468,12 +3217,13 @@ export class WebGL2Renderer extends RendererBase {
         data[j + 14] = nuc[0]; data[j + 15] = nuc[1]; data[j + 16] = nuc[2];
         data[j + 17] = outlineRgb[0]; data[j + 18] = outlineRgb[1]; data[j + 19] = outlineRgb[2];
         data[j + 20] = c.flash || 0;
+        data[j + 21] = (s.diskAlpha !== undefined) ? s.diskAlpha : 1;
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceVbo);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, singletons.length * INSTANCE_FLOATS);
 
       gl.useProgram(this._diskProg);
-      gl.uniform3f(this._diskU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+      gl.uniform4f(this._diskU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
       gl.uniform2f(this._diskU.viewport, this.W, this.H);
       gl.uniform1f(this._diskU.time, time);
       gl.uniform1f(this._diskU.wobbleAmp, S.wobbleAmp || 0);
@@ -1482,6 +3232,7 @@ export class WebGL2Renderer extends RendererBase {
         (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
       gl.uniform1f(this._diskU.borderThickness,
         (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0);
+      gl.uniform1f(this._diskU.theme, _themeId(S.theme));
       gl.bindVertexArray(this._diskVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, singletons.length);
       gl.bindVertexArray(null);
@@ -1637,8 +3388,8 @@ export class WebGL2Renderer extends RendererBase {
       gl.bindTexture(gl.TEXTURE_2D, rt.texB);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-      // ---- Pass 4: tint+threshold scratchA → main canvas (alpha blend) ----
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      // ---- Pass 4: tint+threshold scratchA → scene fb (alpha blend) ----
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
       // Convert bbox from canvas top-left to GL bottom-left for viewport.
       gl.viewport(bboxX, fbH - bboxY - bboxH, bboxW, bboxH);
       gl.enable(gl.BLEND);
@@ -1687,18 +3438,14 @@ export class WebGL2Renderer extends RendererBase {
       const c = s.cell;
       const cfg = FACE[c.type] || FACE.default;
       const eyesCount = cfg.eyes || 0;
-      const mouthName = (cfg.mouth || 'none');
+      const mouthName = effectiveMouthKind(c);
       const mouthKind = MOUTH_KIND_FLOAT[mouthName] || 0;
       if (eyesCount === 0 && mouthKind === 0) continue;
 
-      // Look direction → unit vector. Velocity-based, falls back to alarmTarget.
-      let lookX = c.vx, lookY = c.vy;
-      if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
-        lookX = c.alarmTarget.x - c.x;
-        lookY = c.alarmTarget.y - c.y;
-      }
-      const lm = Math.hypot(lookX, lookY) || 1;
-      lookX /= lm; lookY /= lm;
+      // Smoothed look-at unit vector — lerped per frame in sim.update.
+      // Renormalise here since the lerp may drift slightly off-circle.
+      const lm = Math.hypot(c.lookX, c.lookY) || 1;
+      const lookX = c.lookX / lm, lookY = c.lookY / lm;
 
       // Blink: when nextBlink fires the eyes squint for ~120ms, then
       // re-arm. Sim updates aren't aware of this, so we rearm here.
@@ -1753,7 +3500,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * FACE_INSTANCE_FLOATS);
 
     gl.useProgram(this._faceProg);
-    gl.uniform3f(this._faceU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform4f(this._faceU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._faceU.viewport, this.W, this.H);
     gl.uniform1f(this._faceU.time, time);
     gl.bindVertexArray(this._faceVao);
@@ -1858,7 +3605,7 @@ export class WebGL2Renderer extends RendererBase {
   _uploadAndDrawDecorations() {
     const gl = this.gl;
     gl.useProgram(this._decorProg);
-    gl.uniform3f(this._decorU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform4f(this._decorU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._decorU.viewport, this.W, this.H);
 
     if (this._decorLines.length > 0) {
@@ -2145,10 +3892,59 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindBuffer(gl.ARRAY_BUFFER, this._particleVbo);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * PARTICLE_INSTANCE_FLOATS);
     gl.useProgram(this._particleProg);
-    gl.uniform3f(this._particleU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform4f(this._particleU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._particleU.viewport, this.W, this.H);
     gl.bindVertexArray(this._particleVao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
+    gl.bindVertexArray(null);
+  }
+
+  // Y-shaped antibody sprites. Per-instance pack:
+  //   (x, y, angle, alpha) + (R, G, B, scale)
+  // Vertex shader rotates+scales the unit Y, applies the camera, and
+  // drops to clip space. Birth flash + expiry fade are computed JS-side
+  // from each antibody's life ratio (mirrors canvas2d.drawAntibodies).
+  drawAntibodies(antibodies, _t, ts) {
+    if (!antibodies || antibodies.length === 0) return;
+    const gl = this.gl;
+    this._growAntibodyBuffer(antibodies.length);
+    const data = this._antibodyData;
+    const now = (typeof ts === 'number' ? ts : performance.now()) * 0.001;
+    let n = 0;
+    for (let i = 0; i < antibodies.length; i++) {
+      const a = antibodies[i];
+      const age = a.maxLife - a.life;
+      const lifeRatio = a.life / Math.max(a.maxLife, 1e-3);
+      const birth = age < 0.15 ? (0.15 - age) / 0.15 : 0;
+      const scale = a.r * (1.0 + 0.6 * birth);
+      const alpha = lifeRatio < 0.2 ? lifeRatio / 0.2 : 1;
+      if (alpha <= 0) continue;
+      const baseAngle = Math.atan2(a.vy, a.vx);
+      const ambient = (now * 1.5 + (a.ownerId || 0) * 0.7);
+      const angle = baseAngle + Math.sin(ambient) * 0.15;
+      const rgb = hexToVec3(a.color || '#ffe14a');
+      const j = n * ANTIBODY_INSTANCE_FLOATS;
+      data[j]     = a.x;
+      data[j + 1] = a.y;
+      data[j + 2] = angle;
+      data[j + 3] = alpha;
+      data[j + 4] = rgb[0];
+      data[j + 5] = rgb[1];
+      data[j + 6] = rgb[2];
+      data[j + 7] = scale;
+      n++;
+    }
+    if (n === 0) return;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this._antibodyInstVbo);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, n * ANTIBODY_INSTANCE_FLOATS);
+    gl.useProgram(this._antibodyProg);
+    gl.uniform4f(this._antibodyU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
+    gl.uniform2f(this._antibodyU.viewport, this.W, this.H);
+    // Slight extra weight in screen space — line widths > 1.0 aren't
+    // guaranteed in core WebGL2, but most desktop drivers honour ≤2.
+    gl.lineWidth(2);
+    gl.bindVertexArray(this._antibodyVao);
+    gl.drawArraysInstanced(gl.LINES, 0, 6, n);
     gl.bindVertexArray(null);
   }
 
@@ -2190,7 +3986,7 @@ export class WebGL2Renderer extends RendererBase {
         gl.bindBuffer(gl.ARRAY_BUFFER, this._dashVbo);
         gl.bufferData(gl.ARRAY_BUFFER, arr, gl.DYNAMIC_DRAW);
         gl.useProgram(this._dashProg);
-        gl.uniform3f(this._dashU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+        gl.uniform4f(this._dashU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
         gl.uniform2f(this._dashU.viewport, this.W, this.H);
         gl.uniform1f(this._dashU.dashOffset, -now * 0.04);
         gl.uniform1f(this._dashU.alpha, fade);
@@ -2206,7 +4002,7 @@ export class WebGL2Renderer extends RendererBase {
     const innerWorld = 4 / camScale;
     const quadR = ringWorld + 6 / camScale;
     gl.useProgram(this._markerProg);
-    gl.uniform3f(this._markerU.camera, this.camera.scale, this.camera.tx, this.camera.ty);
+    gl.uniform4f(this._markerU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._markerU.viewport, this.W, this.H);
     gl.uniform3f(this._markerU.marker, m.x, m.y, quadR);
     gl.uniform1f(this._markerU.age, age);
@@ -2222,7 +4018,87 @@ export class WebGL2Renderer extends RendererBase {
     // TODO Phase 4 wrap-up: cell-radius circles + count overlay.
   }
 
-  endFrame() { /* default framebuffer is auto-swapped by the browser */ }
+  endFrame() {
+    // Walk the post-pin overlay chain (built in beginFrame): each
+    // enabled FBO pass reads from _postSource and writes to the
+    // other ping-pong RT, then we swap. The last step writes
+    // straight to the default framebuffer. Finally the cheap FX
+    // blends (noise / vignette / crosshair) composite on top via
+    // glBlendFunc — they're not part of the FBO chain.
+    const t = this._lastFrameSec || 0;
+    const gl = this.gl;
+    if (this._postChain && this._postChain.length > 0 && this._postSource) {
+      gl.disable(gl.BLEND);
+      gl.bindVertexArray(this._bgVao);
+      for (let i = 0; i < this._postChain.length; i++) {
+        const kind = this._postChain[i];
+        const isLast = (i === this._postChain.length - 1);
+        const dst = isLast ? null
+                           : (this._postSource === this._postRtA ? this._postRtB : this._postRtA);
+        const dstFbo = dst ? dst.fbo : null;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
+        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+        this._runPostPass(kind, this._postSource.tex, t);
+        if (!isLast) this._postSource = dst;
+      }
+      gl.enable(gl.BLEND);
+      gl.bindVertexArray(null);
+      this._postChain = [];
+      this._postSource = null;
+      this._sceneFbo = null;
+    }
+    this._fxOverlayDraw(t);
+  }
+
+  // Run a single post-pin chain step. Reads from `srcTex` (the
+  // ping-pong source RT bound by the caller); writes to whatever
+  // framebuffer is currently bound.
+  _runPostPass(kind, srcTex, t) {
+    const gl = this.gl;
+    if (kind === 'ripples' && this._rippleProg) {
+      const cellCount = this._rippleCollectCells();
+      gl.useProgram(this._rippleProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, srcTex);
+      gl.uniform1i(this._rippleU.bg, 0);
+      gl.uniform1f(this._rippleU.time, t);
+      gl.uniform2f(this._rippleU.res, this.canvas.width, this.canvas.height);
+      gl.uniform1i(this._rippleU.cellCount, cellCount);
+      gl.uniform3fv(this._rippleU.cells, this._rippleCellsBuf);
+      gl.uniform3f(this._rippleU.params,
+                   S.rippleDensity ?? 1.5,
+                   S.rippleReach ?? 0.7,
+                   S.rippleStrength ?? 1.0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    } else if (kind === 'caustics' && this._causticProg) {
+      gl.useProgram(this._causticProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, srcTex);
+      gl.uniform1i(this._causticU.bg, 0);
+      gl.uniform1f(this._causticU.time, t);
+      gl.uniform2f(this._causticU.res, this.canvas.width, this.canvas.height);
+      gl.uniform3f(this._causticU.tint,
+                   S.causticTintR ?? 0.0,
+                   S.causticTintG ?? 1.35,
+                   S.causticTintB ?? 0.5);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    } else if (kind === 'sceneFx' && this._sceneFxProg) {
+      gl.useProgram(this._sceneFxProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, srcTex);
+      gl.uniform1i(this._sceneFxU.scene, 0);
+      gl.uniform2f(this._sceneFxU.res, this.canvas.width, this.canvas.height);
+      gl.uniform1f(this._sceneFxU.blurOn,       S.microscopeBlur ? 1 : 0);
+      gl.uniform1f(this._sceneFxU.focusRadius,  S.microscopeFocus ?? 0.35);
+      gl.uniform1f(this._sceneFxU.blurStrength, S.microscopeBlurStrength ?? 0.5);
+      gl.uniform1f(this._sceneFxU.falloff,      S.microscopeFalloff ?? 0.5);
+      gl.uniform1f(this._sceneFxU.gradeOn,      S.makeItReal ? 1 : 0);
+      gl.uniform1f(this._sceneFxU.hue1,         S.makeItRealHue1 ?? 0.30);
+      gl.uniform1f(this._sceneFxU.hue2,         S.makeItRealHue2 ?? 0.55);
+      gl.uniform1f(this._sceneFxU.saturation,   S.makeItRealSaturation ?? 0.55);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    }
+  }
 
   /** Short identifier for the FPS overlay's renderer suffix. */
   get info() { return 'webgl2'; }
@@ -2252,12 +4128,19 @@ export class WebGL2Renderer extends RendererBase {
     if (this._particleProg) gl.deleteProgram(this._particleProg);
     if (this._particleVbo) gl.deleteBuffer(this._particleVbo);
     if (this._particleVao) gl.deleteVertexArray(this._particleVao);
+    if (this._antibodyProg) gl.deleteProgram(this._antibodyProg);
+    if (this._antibodyUnitVbo) gl.deleteBuffer(this._antibodyUnitVbo);
+    if (this._antibodyInstVbo) gl.deleteBuffer(this._antibodyInstVbo);
+    if (this._antibodyVao) gl.deleteVertexArray(this._antibodyVao);
     if (this._metaPolyProg) gl.deleteProgram(this._metaPolyProg);
     if (this._metaBlurProg) gl.deleteProgram(this._metaBlurProg);
     if (this._metaTintProg) gl.deleteProgram(this._metaTintProg);
     if (this._metaPolyVbo) gl.deleteBuffer(this._metaPolyVbo);
     if (this._metaPolyVao) gl.deleteVertexArray(this._metaPolyVao);
     this._metaDestroyPool();
+    this._reactorDestroy();
+    this._causticDestroy();
+    this._sceneFxDestroy();
     this.gl = null;
   }
 }

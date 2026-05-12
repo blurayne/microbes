@@ -7,9 +7,10 @@
 
 import {
   S, FACE, CELL_TYPES, NUCLEUS_RATIO, WOBBLE_VERTS, THETA_TABLE,
-  cellColors, currentTheme, currentBackground, currentHighlightColor, hexToRgba, frac,
+  cellColors, currentTheme, currentBackground, currentBgLayers, currentHighlightColor, hexToRgba, frac,
 } from '../core/state.js';
 import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
+import { effectiveMouthKind } from '../core/sim-faces.js';
 import { RendererBase } from './renderer.js';
 
 /**
@@ -66,8 +67,26 @@ export class Canvas2DRenderer extends RendererBase {
   withCameraCtx(fn) {
     const ctx = this.ctx;
     const cam = this.camera;
+    // resize() seeds the ctx with `setTransform(dpr*rs, 0, 0, dpr*rs, 0, 0)`
+    // — the DPR + renderScale baseline that drawBackground composes onto
+    // via `ctx.transform(...)`. Because `ctx.setTransform` REPLACES the
+    // matrix (vs. `ctx.transform` which multiplies), we must bake k = dpr*rs
+    // into every entry here or the cell pass loses DPR scaling — cells
+    // would shrink to 1/dpr and shift toward the top-left while the
+    // bg fills the canvas at full size. Forward transform:
+    //   screen = R(θ) · (world · scale) + (tx, ty)
+    // composed with DPR by left-multiplication.
+    const k = (this.dpr || 1) * (this.renderScale || 1);
     ctx.save();
-    ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+    if (cam.rotation === 0) {
+      ctx.setTransform(cam.scale * k, 0, 0, cam.scale * k, cam.tx * k, cam.ty * k);
+    } else {
+      const co = Math.cos(cam.rotation), si = Math.sin(cam.rotation);
+      ctx.setTransform(
+        cam.scale * co * k,  cam.scale * si * k,
+        -cam.scale * si * k, cam.scale * co * k,
+        cam.tx * k, cam.ty * k);
+    }
     try { fn(); } finally { ctx.restore(); }
   }
 
@@ -81,8 +100,29 @@ export class Canvas2DRenderer extends RendererBase {
   drawBackground(ts) {
     const ctx = this.ctx;
     const W = this.W, H = this.H;
+    const layers = currentBgLayers();
+    if (layers.length === 0) {
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, W, H);
+      return;
+    }
+    const blendMap = { normal: 'source-over', multiply: 'multiply', additive: 'lighter' };
+    for (let i = 0; i < layers.length; i++) {
+      const bg = layers[i];
+      ctx.save();
+      ctx.globalAlpha = (typeof bg.opacity === 'number') ? bg.opacity : 1;
+      // First layer always paints over the previous frame's pixels;
+      // additional layers composite onto the stack so far.
+      ctx.globalCompositeOperation = (i === 0) ? 'source-over' : (blendMap[bg.blend] || 'source-over');
+      this._drawBgLayer(ts, bg);
+      ctx.restore();
+    }
+  }
+
+  _drawBgLayer(ts, bg) {
+    const ctx = this.ctx;
+    const W = this.W, H = this.H;
     const cam = this.camera;
-    const bg = currentBackground();
 
     if (bg.kind === 'gradient') {
       const g = ctx.createLinearGradient(0, 0, 0, H);
@@ -107,7 +147,18 @@ export class Canvas2DRenderer extends RendererBase {
     const bgScale = Math.max(0.05, S.bgScale || 1);
     const bgEff = cam.scale * bgScale;
     ctx.save();
-    ctx.transform(bgEff, 0, 0, bgEff, cam.tx, cam.ty);
+    // Mirror the rotation-aware composition that `withCameraCtx` applies
+    // to the cell pass. Without this the bg only scales + translates, so
+    // when the camera rotates (pinchRotation on) the bg pattern stays
+    // axis-aligned while cells turn with the camera — they appear to
+    // move in opposite directions. Reduces to the original
+    // scale + translate matrix exactly when cam.rotation === 0.
+    if (cam.rotation === 0) {
+      ctx.transform(bgEff, 0, 0, bgEff, cam.tx, cam.ty);
+    } else {
+      const co = Math.cos(cam.rotation), si = Math.sin(cam.rotation);
+      ctx.transform(bgEff * co, bgEff * si, -bgEff * si, bgEff * co, cam.tx, cam.ty);
+    }
     const wx = -cam.tx / bgEff;
     const wy = -cam.ty / bgEff;
     const ww = W / bgEff;
@@ -128,27 +179,53 @@ export class Canvas2DRenderer extends RendererBase {
     }
 
     if (bg.rbcSilhouettes) {
+      // World-tiled RBC silhouettes — mirror of the WebGL2 / WebGPU
+      // tiled bg pass. As you zoom out, more tiles become visible
+      // and density stays constant. We iterate exactly the tile
+      // range that overlaps the visible world rectangle (computed
+      // above as wx/wy/ww/wh inside the camera-transformed ctx),
+      // expanded by one tile each side so RBCs that straddle the
+      // viewport edge still render.
       ctx.save();
       const t2 = ts * 0.00025 * S.bgFlowSpeed;
-      const N = 22;
+      const TS = 600;
+      const tx0 = Math.floor(wx / TS) - 1;
+      const ty0 = Math.floor(wy / TS) - 1;
+      const tx1 = Math.ceil((wx + ww) / TS) + 1;
+      const ty1 = Math.ceil((wy + wh) / TS) + 1;
       ctx.lineWidth = 1.4 / bgEff;
-      for (let i = 0; i < N; i++) {
-        const seed = i * 1.31;
-        const fx = ((i / N) + 0.06 * Math.sin(t2 + seed)) % 1;
-        const fy = (frac(seed * 0.7 + t2 * 0.6 + i * 0.13)) % 1;
-        const px = fx * W;
-        const py = fy * H;
-        const r = 18 + 16 * frac(seed * 0.21);
-        ctx.fillStyle = 'rgba(255,90,90,0.10)';
-        ctx.strokeStyle = 'rgba(255,140,140,0.18)';
-        ctx.beginPath();
-        ctx.ellipse(px, py, r, r * 0.78, seed, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = 'rgba(120,20,20,0.18)';
-        ctx.beginPath();
-        ctx.arc(px, py, r * 0.32, 0, Math.PI * 2);
-        ctx.fill();
+      // Same hash as bgHash() in the GPU shaders so the silhouette
+      // layout matches between renderers.
+      const bgHash = (x, y) => {
+        let px = (x * 123.34) - Math.floor(x * 123.34);
+        let py = (y * 345.45) - Math.floor(y * 345.45);
+        const dot = px * px + py * py + 34.345;
+        px += dot; py += dot;
+        const v = px * py;
+        return v - Math.floor(v);
+      };
+      for (let ty = ty0; ty <= ty1; ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          const h0 = bgHash(tx, ty) * 6.28;
+          for (let k = 0; k < 4; k++) {
+            const kSeed = h0 + k * 1.31;
+            const inX = frac(kSeed * 1.7) * TS;
+            const inY = frac(kSeed * 2.3) * TS;
+            const px = tx * TS + inX + 40 * Math.sin(t2 * 1000 * 0.00025 + kSeed);
+            const py = ty * TS + inY + 40 * Math.cos(t2 * 1000 * 0.00018 + kSeed);
+            const r = 18 + 16 * frac(kSeed * 0.41);
+            ctx.fillStyle = 'rgba(255,90,90,0.10)';
+            ctx.strokeStyle = 'rgba(255,140,140,0.18)';
+            ctx.beginPath();
+            ctx.ellipse(px, py, r, r * 0.78, kSeed, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(120,20,20,0.18)';
+            ctx.beginPath();
+            ctx.arc(px, py, r * 0.32, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
       }
       ctx.restore();
     }
@@ -375,7 +452,7 @@ export class Canvas2DRenderer extends RendererBase {
     this._drawGranules(shapes, theme, time);
     this._drawDecorations(shapes, theme, time);
     this._drawMembrane(shapes, time, theme);
-    this._drawNuclei(ts);
+    this._drawNuclei(shapes, ts);
     this._drawCartoonFaces(shapes, time);
   }
 
@@ -394,6 +471,16 @@ export class Canvas2DRenderer extends RendererBase {
         if (s.cell.state === 'SPLITTING') {
           if (!splittingByCellId.has(s.cell.id)) splittingByCellId.set(s.cell.id, []);
           splittingByCellId.get(s.cell.id).push(s);
+          // Disk-pass crossfade: over the second half of SPLITTING
+          // (p > 0.5), fade in the per-half disk content (nucleus,
+          // top-light, donut, decorations) so when finishSplit fires
+          // and the metaball pass stops, the disk pass is already at
+          // full opacity. Eliminates the visible pop at the SPLITTING
+          // → NORMAL transition.
+          if (s.cell.splitProgress > 0.5) {
+            s.diskAlpha = (s.cell.splitProgress - 0.5) * 2;
+            singletons.push(s);
+          }
         } else {
           singletons.push(s);
         }
@@ -426,6 +513,15 @@ export class Canvas2DRenderer extends RendererBase {
         const cc = cellColors(c);
         const cType = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
         const hollow = !!cType.bodyHollow;
+        // SPLITTING halves with p > 0.5 ride this loop with a fade-in
+        // alpha (s.diskAlpha set in the partition step above) so the
+        // disk-pass content reaches full opacity by the moment
+        // finishSplit fires and the metaball pass stops.
+        const fadingDisk = (s.diskAlpha !== undefined && s.diskAlpha < 1);
+        if (fadingDisk) {
+          ctx.save();
+          ctx.globalAlpha = s.diskAlpha;
+        }
 
         // Build the wobbly polygon path once and reuse it (Path2D would
         // be cleaner, but cytoplasm-fill path differs from clip path).
@@ -480,6 +576,7 @@ export class Canvas2DRenderer extends RendererBase {
         ctx.arc(hx, hy, hr, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
+        if (fadingDisk) ctx.restore();
       }
     });
   }
@@ -1016,7 +1113,8 @@ export class Canvas2DRenderer extends RendererBase {
       for (const s of shapes) {
         const c = s.cell;
         const cfg = FACE[c.type] || FACE.default;
-        if (!cfg.eyes && cfg.mouth === 'none') continue;
+        const mouthKind = effectiveMouthKind(c);
+        if (!cfg.eyes && mouthKind === 'none') continue;
 
         if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
         const blinking = (c.nextBlink - now) < 120 && (c.nextBlink - now) > 0;
@@ -1027,11 +1125,10 @@ export class Canvas2DRenderer extends RendererBase {
         const cx = s.x;
         const cy = s.y;
         const cr = s.r;
-        let lookX = c.vx, lookY = c.vy;
-        if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
-          lookX = c.alarmTarget.x - cx;
-          lookY = c.alarmTarget.y - cy;
-        }
+        // Smoothed look-at unit vector lerped per frame in sim.update
+        // (~0.15 s time constant). May drift slightly off the unit
+        // circle during transitions; the `lm` divisor renormalises.
+        const lookX = c.lookX, lookY = c.lookY;
         const lm = Math.hypot(lookX, lookY) || 1;
 
         ctx.save();
@@ -1084,32 +1181,44 @@ export class Canvas2DRenderer extends RendererBase {
           }
         }
 
-        if (cfg.mouth && cfg.mouth !== 'none') {
+        if (mouthKind && mouthKind !== 'none') {
           const mY = cy + cr * 0.18;
           const mW = cr * 0.34 * 1.2;
           const cc = cellColors(c);
           ctx.lineWidth = lw * 1.3;
+          ctx.lineCap = 'round';   // soft endpoints (matches GPU shader's smoothstep fix)
           ctx.strokeStyle = cc.nucleus;
           ctx.fillStyle = cc.nucleus;
-          if (cfg.mouth === 'smile') {
+          if (mouthKind === 'smile') {
+            // Solid filled circular segment below the chord (the
+            // arc + closePath connects the chord). Reads as a U.
             ctx.beginPath();
             ctx.arc(cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI);
-            ctx.stroke();
-          } else if (cfg.mouth === 'frown') {
+            ctx.closePath();
+            ctx.fill();
+          } else if (mouthKind === 'frown') {
+            // Solid filled segment above the chord (∩).
             ctx.beginPath();
             ctx.arc(cx, mY + mW * 0.6, mW, 1.12 * Math.PI, 1.88 * Math.PI);
-            ctx.stroke();
-          } else if (cfg.mouth === 'snarl') {
+            ctx.closePath();
+            ctx.fill();
+          } else if (mouthKind === 'snarl') {
+            // 5 downward-pointing triangular teeth sharing their top
+            // edges — solid filled (not a sawtooth-bottom rectangle).
             ctx.beginPath();
             const N = 5;
-            for (let i = 0; i <= N; i++) {
-              const x = cx - mW + (2 * mW) * (i / N);
-              const y = mY + (i % 2 === 0 ? 0 : mW * 0.18);
-              if (i === 0) ctx.moveTo(x, y);
-              else ctx.lineTo(x, y);
+            const topY = mY - mW * 0.05;
+            const toothH = mW * 0.30;
+            const step = (2 * mW) / N;
+            for (let i = 0; i < N; i++) {
+              const tCx = cx - mW + (i + 0.5) * step;
+              ctx.moveTo(tCx - step * 0.5, topY);
+              ctx.lineTo(tCx + step * 0.5, topY);
+              ctx.lineTo(tCx, topY + toothH);
+              ctx.closePath();
             }
-            ctx.stroke();
-          } else if (cfg.mouth === 'fangs') {
+            ctx.fill();
+          } else if (mouthKind === 'fangs') {
             ctx.beginPath();
             ctx.ellipse(cx, mY, mW, mW * 0.45, 0, 0, Math.PI * 2);
             ctx.fill();
@@ -1126,7 +1235,7 @@ export class Canvas2DRenderer extends RendererBase {
             ctx.lineTo(cx + mW * 0.55, mY - mW * 0.20);
             ctx.closePath();
             ctx.fill();
-          } else if (cfg.mouth === 'tongue') {
+          } else if (mouthKind === 'tongue') {
             ctx.beginPath();
             ctx.ellipse(cx, mY, mW, mW * 0.40, 0, 0, Math.PI * 2);
             ctx.fill();
@@ -1135,10 +1244,12 @@ export class Canvas2DRenderer extends RendererBase {
             ctx.beginPath();
             ctx.ellipse(cx + wag, mY + mW * 0.30, mW * 0.32, mW * 0.22, 0, 0, Math.PI * 2);
             ctx.fill();
-          } else if (cfg.mouth === 'drool') {
+          } else if (mouthKind === 'drool') {
+            // Solid base smile + drool drip below.
             ctx.beginPath();
             ctx.arc(cx, mY - mW * 0.3, mW, 0.12 * Math.PI, 0.88 * Math.PI);
-            ctx.stroke();
+            ctx.closePath();
+            ctx.fill();
             const dripPhase = ((t * 0.6 + c.phase) % 1);
             const dripY = mY + mW * 0.25 + dripPhase * mW * 0.8;
             const dripA = 1 - dripPhase;
@@ -1155,6 +1266,55 @@ export class Canvas2DRenderer extends RendererBase {
   }
 
   // ---------- Particles (kill-mode debris) ----------
+  // Y-shaped antibody sprites. Each antibody is rotated along its
+  // velocity vector so the stems trail behind. Birth flash scales the
+  // Y up briefly (1.6× → 1.0× over the first 150 ms); the last 20% of
+  // life fades alpha to 0 so misses dissolve instead of popping. A
+  // small ambient spin (~1.5 rad/s, phased per-owner) keeps cruising
+  // antibodies feeling alive without visible per-frame wagging.
+  drawAntibodies(antibodies, _t, ts) {
+    if (!antibodies || !antibodies.length) return;
+    const ctx = this.ctx;
+    this.withCameraCtx(() => {
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const now = (typeof ts === 'number' ? ts : performance.now()) * 0.001;
+      for (const a of antibodies) {
+        const age = a.maxLife - a.life;
+        const lifeRatio = a.life / a.maxLife;
+        // Birth flash: 1.6× → 1.0× over 150 ms.
+        const birth = age < 0.15 ? (0.15 - age) / 0.15 : 0;
+        const scale = a.r * (1.0 + 0.6 * birth);
+        // Expiry fade: ramp alpha to 0 in the last 20% of life.
+        const alpha = lifeRatio < 0.2 ? lifeRatio / 0.2 : 1;
+        const baseAngle = Math.atan2(a.vy, a.vx);
+        const ambient = (now * 1.5 + (a.ownerId || 0) * 0.7) % (Math.PI * 2);
+        // Ambient spin is small (±0.15 rad) so the Y stays oriented
+        // along the velocity but breathes a bit.
+        const angle = baseAngle + Math.sin(ambient) * 0.15;
+        ctx.save();
+        ctx.translate(a.x, a.y);
+        ctx.rotate(angle);
+        ctx.scale(scale, scale);
+        ctx.globalAlpha = alpha;
+        ctx.strokeStyle = a.color;
+        ctx.lineWidth = 1.0;        // in unit-Y space; scale=r → 1·r screen px
+        ctx.beginPath();
+        // Stem (behind the projectile).
+        ctx.moveTo(-2.4, 0);
+        ctx.lineTo(0, 0);
+        // Arms (ahead).
+        ctx.moveTo(0, 0);
+        ctx.lineTo(1.6, -1.2);
+        ctx.moveTo(0, 0);
+        ctx.lineTo(1.6,  1.2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      ctx.globalAlpha = 1;
+    });
+  }
+
   drawParticles(particles /* , t, ts */) {
     if (!particles || !particles.length) return;
     const ctx = this.ctx;
@@ -1271,18 +1431,28 @@ export class Canvas2DRenderer extends RendererBase {
   }
 
   // ---------- Nuclei ----------
-  _drawNuclei(ts) {
+  // `shapes` is the same culled list the body pass iterates. Gating the
+  // nucleus loop on it keeps body + nucleus visibility in lock-step:
+  // when inView (rotation-aware since PR #40) culls a cell, both passes
+  // skip it. WebGL2 + WebGPU's disk shader composites body + nucleus
+  // together so they don't have this asymmetry; canvas2d does because
+  // the nucleus is a separate pass with a blur filter.
+  _drawNuclei(shapes, ts) {
+    if (shapes.length === 0) return;
     const ctx = this.ctx;
     const t = ts * 0.001;
+    const visibleIds = new Set();
+    for (const s of shapes) visibleIds.add(s.cell.id);
     ctx.save();
     ctx.filter = 'blur(2px)';
     ctx.globalAlpha = 0.78;
-    this.withCameraCtx(() => this._drawNucleiInner(ts, t));
+    this.withCameraCtx(() => this._drawNucleiInner(visibleIds, ts, t));
     ctx.restore();
   }
 
-  _drawNucleiInner(ts, t) {
+  _drawNucleiInner(visibleIds, ts, t) {
     for (const c of this.sim.cells) {
+      if (!visibleIds.has(c.id)) continue;
       const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
       if (type.nucleus.kind === 'none') continue;
 

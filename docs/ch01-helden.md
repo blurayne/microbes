@@ -39,6 +39,14 @@
             </div>
             <div class="cell-desc">"Big eater" — langlebiger Phagozyt, frisst Pathogene und präsentiert Antigene an T-Zellen.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Patrouille · Spawnt Neutrophile · Aktiviert DC</div>
+            <div class="cell-relations"
+                 data-friends="dendritic,neutrophil,monocyte"
+                 data-prey="virus,germ,bacterium,amoebaP,slime,mite,spore,toxin"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Dendritische, Neutrophile, Monozyten</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Alle Pathogene (DPS 5)</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
           <div class="card cell-card" style="--cell-color: var(--c-neu);">
@@ -51,6 +59,14 @@
             </div>
             <div class="cell-desc">First Responder; engulft Bakterien per Phagozytose. Häufigste weiße Blutzelle.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Billig · Schwarm · Stirbt schnell</div>
+            <div class="cell-relations"
+                 data-friends="macrophage,monocyte,bcell"
+                 data-prey="germ,bacterium,slime,spore"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Makrophage, Monozyt, B-Zelle</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Bakterien (DPS 6) · Pilze (DPS 4)</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
           <div class="card cell-card" style="--cell-color: var(--c-dc);">
@@ -63,6 +79,14 @@
             </div>
             <div class="cell-desc">Antigen-präsentierender Kurier; sammelt Eindringlinge und zeigt sie T-Zellen im Lymphknoten.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Schaltet Phase 3 frei · Lymphknoten-Pull</div>
+            <div class="cell-relations"
+                 data-friends="macrophage,tcell,bcell"
+                 data-prey="virus,germ,bacterium,amoebaP,slime,mite,spore,toxin"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Makrophage, T-Zelle, B-Zelle</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Alle Pathogene (DPS 2) · markiert für T- und B-Zellen</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
           <div class="card cell-card" style="--cell-color: var(--c-th);">
@@ -75,6 +99,14 @@
             </div>
             <div class="cell-desc">Adaptiver Koordinator; aktiviert und befehligt andere Einheiten via Zytokine.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Buff-Aura +50% · Klont sich · Aktiviert TK/B</div>
+            <div class="cell-relations"
+                 data-friends="dendritic,bcell,tcell"
+                 data-prey="virus,amoebaP,mite"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Dendritische, B-Zelle, T-Killer</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Virus (DPS 12) · Viral &amp; Parasit. (DPS 8)</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
           <div class="card cell-card" style="--cell-color: var(--c-tk);">
@@ -87,6 +119,14 @@
             </div>
             <div class="cell-desc">Adaptiver Killer; erkennt spezifische Antigene und tötet infizierte Zellen gezielt.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Hoher DMG · Klont sich · Anti-Virus</div>
+            <div class="cell-relations"
+                 data-friends="dendritic,tcell,nk"
+                 data-prey="virus,amoebaP,mite"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Dendritische, T-Helfer, NK</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Virus (DPS 12) · Viral &amp; Parasit. (DPS 8)</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
           <div class="card cell-card" style="--cell-color: var(--c-bz);">
@@ -99,6 +139,14 @@
             </div>
             <div class="cell-desc">Adaptive Antikörper-Fabrik; produziert pathogen-spezifische Antikörper.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Markiert Pathogene +75% DMG · Differenziert zu Plasmazelle</div>
+            <div class="cell-relations"
+                 data-friends="tcell,macrophage,dendritic"
+                 data-prey="virus,germ,bacterium,amoebaP,slime,mite,spore,toxin"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">T-Helfer, Makrophage, Dendritische</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Alle Pathogene (Antikörper) · neutralisiert Toxine</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
         </div>
@@ -122,6 +170,14 @@
             </div>
             <div class="cell-desc">Patrouilliert für virus-infizierte und Tumor-Zellen; tötet bei Kontakt ohne Sensibilisierung.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Sofort verfügbar · Anti-Virus ohne Phase 3 · "Missing-Self"-Erkennung</div>
+            <div class="cell-relations"
+                 data-friends="macrophage,dendritic,tcell"
+                 data-prey="virus,amoebaP,mite"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Makrophage, Dendritische, T-Killer</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Virus &amp; Parasiten (DPS 10)</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
           <div class="card cell-card" style="--cell-color: var(--c-mast);">
@@ -134,6 +190,14 @@
             </div>
             <div class="cell-desc">Tissue-resident Sentinel; setzt Histamin frei zur Entzündung und allergischen Reaktion.</div>
             <div class="cell-spec"><strong>Spiel:</strong> AoE-Histamin · Neutralisiert Toxine · Boost für nahe Phagozyten</div>
+            <div class="cell-relations"
+                 data-friends="basophil,eosinophil"
+                 data-prey="amoebaP,mite"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Basophile, Eosinophile</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Parasiten (DPS 6) · Histamin-Burst</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
           <div class="card cell-card" style="--cell-color: var(--c-eos);">
@@ -146,6 +210,14 @@
             </div>
             <div class="cell-desc">Anti-Parasit-Spezialist; Schlüssel bei allergischen Reaktionen, setzt giftige Granula frei.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Massive DMG vs Parasiten/Mites · Schwach gegen alles andere</div>
+            <div class="cell-relations"
+                 data-friends="mast,basophil"
+                 data-prey="amoebaP,mite"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Mastzelle, Basophile</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Parasiten (DPS 12)</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
           <div class="card cell-card" style="--cell-color: var(--c-bas);">
@@ -158,6 +230,14 @@
             </div>
             <div class="cell-desc">Zirkulierender Granulozyt; setzt Histamin und Heparin frei zur Verstärkung der Entzündung.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Slow-Field (Pathogene 50% langsamer) · Anti-Allergen</div>
+            <div class="cell-relations"
+                 data-friends="mast,eosinophil"
+                 data-prey="amoebaP,mite"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Mastzelle, Eosinophile</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Parasiten (DPS 9) · Milbe (DPS 11)</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
         </div>
@@ -181,6 +261,14 @@
             </div>
             <div class="cell-desc">Zirkulierender Sentinel; reift im Gewebe zu Makrophagen oder Dendritischen Zellen.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Verwandelt sich nach 8s in MAC oder DC (Spielerwahl) · Günstige Investition</div>
+            <div class="cell-relations"
+                 data-friends="macrophage,neutrophil"
+                 data-prey="virus,germ,bacterium,amoebaP,slime,mite,spore,toxin"
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Makrophage, Neutrophile</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">Alle Pathogene (DPS 4) · reift zu Makrophagen</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
           <div class="card cell-card" style="--cell-color: var(--c-plt);">
@@ -193,6 +281,14 @@
             </div>
             <div class="cell-desc">Winziges Zellfragment; gerinnt Blut bei Verletzungen und rekrutiert Immunzellen.</div>
             <div class="cell-spec"><strong>Spiel:</strong> Baut Barrieren auf der Blutbahn · Verlangsamt durchkommende Pathogene · Heilt Organ-HP</div>
+            <div class="cell-relations"
+                 data-friends="rbc,neutrophil"
+                 data-prey=""
+                 data-foes="">
+              <div class="rel-row"><span class="rel-label">Freunde</span><span class="rel-list">Erythrozyt, Neutrophile</span></div>
+              <div class="rel-row"><span class="rel-label">Beute</span><span class="rel-list">kein Direktangriff · stoppt Blutungen</span></div>
+              <div class="rel-row"><span class="rel-label">Feinde</span><span class="rel-list rel-empty">—</span></div>
+            </div>
           </div>
 
         </div>
@@ -204,7 +300,7 @@
         <div class="section-num">1.2</div>
         <div>
           <div class="section-title">Filler: Red Blood Cell</div>
-          <div class="section-desc">Kein Tower, aber visuell und mechanisch wichtig. Sie machen die Blutbahn lebendig.</div>
+          <div class="section-desc">Passive Filler, visuell und mechanisch wichtig. Sie machen die Blutbahn lebendig.</div>
         </div>
       </div>
 
@@ -212,7 +308,7 @@
         <div class="filler-icon"></div>
         <div>
           <h4>Red Blood Cell <span class="badge badge-filler">FILLER</span></h4>
-          <p>Erythrozyten — bikonkave Scheiben voller Hämoglobin, transportieren Sauerstoff. <strong>Sie sind keine Tower</strong> — sie strömen passiv durch die Blutbahn als atmosphärische Hintergrund-Animation. Aber: <strong>Pathogene können sie infizieren</strong> (Viren) oder beschädigen (Toxine). Sichtbarer Schaden = Spielfeedback. Außerdem: jede tote RBC = +1 Energie für den Spieler (Hämoglobin-Boost).</p>
+          <p>Erythrozyten — bikonkave Scheiben voller Hämoglobin, transportieren Sauerstoff. Sie strömen <strong>passiv durch die Blutbahn</strong> als atmosphärische Hintergrund-Animation. Aber: <strong>Pathogene können sie infizieren</strong> (Viren) oder beschädigen (Toxine). Sichtbarer Schaden = Spielfeedback. Außerdem: jede tote RBC = +1 Energie für den Spieler (Hämoglobin-Boost).</p>
         </div>
       </div>
     </section>

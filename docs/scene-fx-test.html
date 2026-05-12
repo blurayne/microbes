@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Scene-FX shader test (microscope blur + make-it-real)</title>
+<style>
+  :root {
+    --bg: #0b0712;
+    --ink: #ece6d6;
+    --accent: #6cf2ff;
+    --line: rgba(236, 230, 214, 0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; background: var(--bg); color: var(--ink);
+    font-family: system-ui, sans-serif;
+  }
+  body { display: grid; grid-template-columns: 1fr 320px; height: 100vh; }
+  .stage {
+    display: grid;
+    grid-template-rows: auto 1fr auto 1fr;
+    align-items: stretch; padding: 12px; gap: 6px; overflow: hidden;
+  }
+  .stage h2 { margin: 0; font-size: 13px; font-weight: 500; opacity: 0.7; }
+  .stage canvas {
+    width: 100%; height: 100%;
+    background: #000;
+    border: 1px solid var(--line);
+    image-rendering: pixelated;
+    min-height: 0;
+  }
+  aside {
+    border-left: 1px solid var(--line);
+    padding: 16px;
+    overflow-y: auto;
+    font-size: 14px;
+  }
+  aside h1 { font-size: 14px; margin: 0 0 8px 0; opacity: 0.8; }
+  aside .group {
+    border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px; margin-bottom: 10px;
+    background: #00000033;
+  }
+  aside .group-title { font-weight: 500; margin-bottom: 6px; }
+  aside label { display: grid; grid-template-columns: 1fr auto; gap: 4px; margin: 4px 0; }
+  aside label span.val { font-family: monospace; opacity: 0.6; }
+  aside input[type=range] { grid-column: 1 / -1; width: 100%; }
+  aside .toggle { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  aside .status {
+    font-family: monospace; font-size: 12px;
+    background: #000a; padding: 8px; border-radius: 4px;
+    white-space: pre-wrap; margin-top: 10px;
+    max-height: 200px; overflow-y: auto;
+  }
+  aside .status.ok { color: #8f8; }
+  aside .status.err { color: #f88; }
+  aside button {
+    background: #00000044; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 6px 10px; cursor: pointer; margin-top: 8px;
+  }
+  aside button:hover { border-color: var(--accent); }
+  aside p.hint { font-size: 12px; opacity: 0.6; margin: 4px 0 0 0; }
+</style>
+</head>
+<body>
+<div class="stage">
+  <h2>Input scene (synthetic)</h2>
+  <canvas id="sceneCanvas"></canvas>
+  <h2>Output (after scene-FX shader)</h2>
+  <canvas id="outCanvas"></canvas>
+</div>
+<aside>
+  <h1>Scene-FX shader test</h1>
+  <p class="hint">If you see colour in the output canvas when "Make it real" is on,
+  the shader works in isolation. If the in-game effect is still invisible,
+  the bug is in the renderer's RT capture / dispatch, not the shader math.</p>
+
+  <div class="group">
+    <div class="group-title">Microscope blur</div>
+    <label class="toggle"><input type="checkbox" id="blurOn" /> Enabled</label>
+    <label>Focus radius <span class="val" id="focusVal">0.35</span>
+      <input type="range" id="focus" min="0" max="1" step="0.01" value="0.35" />
+    </label>
+    <label>Blur strength <span class="val" id="strengthVal">0.50</span>
+      <input type="range" id="strength" min="0" max="1" step="0.01" value="0.50" />
+    </label>
+    <label>Falloff <span class="val" id="falloffVal">0.50</span>
+      <input type="range" id="falloff" min="0" max="1" step="0.01" value="0.50" />
+    </label>
+  </div>
+
+  <div class="group">
+    <div class="group-title">Make it real (color grade)</div>
+    <label class="toggle"><input type="checkbox" id="gradeOn" checked /> Enabled</label>
+    <label>Shadow hue <span class="val" id="hue1Val">0.30</span>
+      <input type="range" id="hue1" min="0" max="1" step="0.01" value="0.30" />
+    </label>
+    <label>Highlight hue <span class="val" id="hue2Val">0.55</span>
+      <input type="range" id="hue2" min="0" max="1" step="0.01" value="0.55" />
+    </label>
+    <label>Saturation <span class="val" id="satVal">0.55</span>
+      <input type="range" id="sat" min="0" max="1" step="0.01" value="0.55" />
+    </label>
+  </div>
+
+  <button id="redraw">Redraw synthetic scene</button>
+  <div class="status" id="status">Initialising…</div>
+</aside>
+
+<script>
+// =============================================================
+// Scene-FX shader test — standalone diagnostic page.
+//
+// This page reproduces the make-it-real / microscope-blur shader
+// from assets/render/webgl2.js (FRAG_SCENE_FX) in isolation. If
+// the output canvas shows visibly different colours from the input
+// when "Make it real" is enabled, the shader works. Any in-game
+// bug must therefore live in the renderer's RT capture / dispatch
+// path, not in the shader math.
+//
+// The SCENE shader (FRAG_SYNTH_SCENE) generates a procedural test
+// image — gradient bg + several coloured circles — into an
+// offscreen RT, which the FX shader then samples. Same architecture
+// as the real game (scene → RT → post-pass → canvas).
+//
+// Shader sources are duplicated from webgl2.js verbatim. If you
+// change them in the renderer, mirror the change here too.
+// =============================================================
+
+const statusEl = document.getElementById('status');
+function log(msg, kind) {
+  statusEl.classList.toggle('ok',  kind === 'ok');
+  statusEl.classList.toggle('err', kind === 'err');
+  statusEl.textContent = msg;
+  console.log('[scene-fx-test]', msg);
+}
+
+const VERT_FULLSCREEN = `#version 300 es
+precision highp float;
+out vec2 v_uv;
+const vec2 POS[4] = vec2[4](
+  vec2(-1.0, -1.0), vec2( 1.0, -1.0),
+  vec2(-1.0,  1.0), vec2( 1.0,  1.0)
+);
+void main() {
+  vec2 p = POS[gl_VertexID];
+  v_uv = vec2(p.x * 0.5 + 0.5, 0.5 - p.y * 0.5);
+  gl_Position = vec4(p, 0.0, 1.0);
+}`;
+
+// Synthetic scene fragment shader: gradient background + 6 coloured
+// circles laid out in a microscope-photo-like arrangement. The
+// circles include warm-ish tones AND cool-ish tones so the
+// duotone grade has dynamic range to map across.
+const FRAG_SYNTH_SCENE = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform vec2 u_resolution;
+out vec4 outColor;
+void main() {
+  vec2 uv = v_uv;
+  vec2 px = uv * u_resolution;
+  // warm-gray gradient bg
+  vec3 col = mix(vec3(0.65, 0.62, 0.58), vec3(0.45, 0.43, 0.40), uv.y);
+  // 6 circles with hand-picked colours (the kind of things real
+  // microbe samples show — light cells with darker cores).
+  struct Cell { vec2 c; float r; vec3 col; };
+  Cell cells[6] = Cell[6](
+    Cell(vec2(0.25, 0.30) * u_resolution, 70.0, vec3(0.85, 0.95, 0.75)),
+    Cell(vec2(0.55, 0.45) * u_resolution, 90.0, vec3(0.92, 0.88, 0.72)),
+    Cell(vec2(0.75, 0.25) * u_resolution, 55.0, vec3(0.78, 0.92, 0.85)),
+    Cell(vec2(0.30, 0.70) * u_resolution, 65.0, vec3(0.95, 0.85, 0.78)),
+    Cell(vec2(0.70, 0.75) * u_resolution, 85.0, vec3(0.88, 0.92, 0.75)),
+    Cell(vec2(0.50, 0.55) * u_resolution, 50.0, vec3(0.75, 0.85, 0.92))
+  );
+  for (int i = 0; i < 6; i++) {
+    float d = length(px - cells[i].c);
+    float ring = smoothstep(cells[i].r, cells[i].r - 4.0, d);
+    float core = smoothstep(cells[i].r * 0.55, cells[i].r * 0.4, d);
+    vec3 cellCol = mix(cells[i].col, cells[i].col * 0.5, core);
+    col = mix(col, cellCol, ring);
+  }
+  outColor = vec4(col, 1.0);
+}`;
+
+// SCENE-FX shader — MUST be byte-identical to FRAG_SCENE_FX in
+// assets/render/webgl2.js. Copy verbatim so this test page exercises
+// the exact shader that ships.
+const FRAG_SCENE_FX = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_scene;
+uniform vec2 u_resolution;
+uniform float u_blurOn;
+uniform float u_focusRadius;
+uniform float u_blurStrength;
+uniform float u_falloff;
+uniform float u_gradeOn;
+uniform float u_hue1;
+uniform float u_hue2;
+uniform float u_saturation;
+out vec4 outColor;
+
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+
+vec3 hsv2rgb(vec3 c) {
+  vec4 K = vec4(1.0, 2.0 / 3.0, 1.0 / 3.0, 3.0);
+  vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+  return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
+}
+
+const vec2 POISSON16[16] = vec2[16](
+  vec2( 0.0, 0.0),
+  vec2( 0.50, 0.0),
+  vec2(-0.50, 0.0),
+  vec2( 0.0,  0.50),
+  vec2( 0.0, -0.50),
+  vec2( 0.92,  0.39),
+  vec2(-0.92,  0.39),
+  vec2( 0.92, -0.39),
+  vec2(-0.92, -0.39),
+  vec2( 0.39,  0.92),
+  vec2(-0.39,  0.92),
+  vec2( 0.39, -0.92),
+  vec2(-0.39, -0.92),
+  vec2( 0.68,  0.68),
+  vec2(-0.68,  0.68),
+  vec2( 0.68, -0.68)
+);
+
+void main() {
+  vec2 uv = v_uv;
+  vec2 ndc = uv * 2.0 - 1.0;
+  float aspect = u_resolution.x / max(1.0, u_resolution.y);
+  vec2 nd = ndc;
+  if (aspect > 1.0) nd.x *= aspect; else nd.y /= aspect;
+  float r = length(nd);
+
+  vec3 col;
+  if (u_blurOn > 0.5 && u_blurStrength > 0.001) {
+    float beyond = clamp((r - u_focusRadius) / max(1e-3, 1.0 - u_focusRadius), 0.0, 1.0);
+    float curve = mix(1.2, 5.0, u_falloff);
+    float blurAmt = pow(beyond, curve);
+    float minDim = min(u_resolution.x, u_resolution.y);
+    float blurRadius = u_blurStrength * 0.12 * minDim * blurAmt;
+    if (blurRadius < 0.5) {
+      col = texture(u_scene, uv).rgb;
+    } else {
+      vec2 px = vec2(blurRadius) / u_resolution;
+      vec3 sum = vec3(0.0);
+      for (int i = 0; i < 16; i++) {
+        sum += texture(u_scene, uv + POISSON16[i] * px).rgb;
+      }
+      col = sum / 16.0;
+    }
+  } else {
+    col = texture(u_scene, uv).rgb;
+  }
+
+  if (u_gradeOn > 0.5) {
+    vec2 toCtr = uv - 0.5;
+    float caAmt = 0.006 * dot(toCtr, toCtr) * 4.0;
+    float Rc = texture(u_scene, uv - toCtr * caAmt).r;
+    float Bc = texture(u_scene, uv + toCtr * caAmt).b;
+    vec3 src = vec3(Rc, col.g, Bc);
+    vec3 shadowAnchor    = hsv2rgb(vec3(u_hue1, u_saturation, 0.18));
+    vec3 highlightAnchor = hsv2rgb(vec3(u_hue2, u_saturation, 0.92));
+    float Y = clamp(dot(src, LUMA), 0.0, 1.0);
+    float t = smoothstep(0.05, 0.95, Y);
+    vec3 graded = mix(shadowAnchor, highlightAnchor, t);
+    col = mix(graded, src, 0.15);
+  }
+
+  outColor = vec4(col, 1.0);
+}`;
+
+// ---- WebGL2 boilerplate ----------------------------------------
+
+function compile(gl, type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+    throw new Error('compile: ' + gl.getShaderInfoLog(s));
+  }
+  return s;
+}
+function link(gl, vSrc, fSrc) {
+  const p = gl.createProgram();
+  gl.attachShader(p, compile(gl, gl.VERTEX_SHADER, vSrc));
+  gl.attachShader(p, compile(gl, gl.FRAGMENT_SHADER, fSrc));
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) {
+    throw new Error('link: ' + gl.getProgramInfoLog(p));
+  }
+  return p;
+}
+
+// Two canvases share one WebGL2 context via offscreen RT + readback
+// blits. Simpler: each canvas gets its own context, the scene canvas
+// renders the synthetic scene + reads back its pixels, the output
+// canvas uploads them as a texture and runs the FX shader.
+
+const sceneCanvas = document.getElementById('sceneCanvas');
+const outCanvas   = document.getElementById('outCanvas');
+
+let sceneGl, outGl;
+let synthProg, fxProg;
+let synthU = {}, fxU = {};
+let sceneVao, outVao;
+let sharedTex; // populated each frame by scene-canvas readback,
+               // uploaded to outGl as a 2D texture.
+let outTex, outTexW = 0, outTexH = 0;
+
+function init() {
+  try {
+    sceneGl = sceneCanvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true });
+    outGl = outCanvas.getContext('webgl2', { antialias: false });
+    if (!sceneGl) throw new Error('WebGL2 not available on scene canvas');
+    if (!outGl)   throw new Error('WebGL2 not available on output canvas');
+
+    synthProg = link(sceneGl, VERT_FULLSCREEN, FRAG_SYNTH_SCENE);
+    synthU.res = sceneGl.getUniformLocation(synthProg, 'u_resolution');
+
+    fxProg = link(outGl, VERT_FULLSCREEN, FRAG_SCENE_FX);
+    fxU.scene        = outGl.getUniformLocation(fxProg, 'u_scene');
+    fxU.res          = outGl.getUniformLocation(fxProg, 'u_resolution');
+    fxU.blurOn       = outGl.getUniformLocation(fxProg, 'u_blurOn');
+    fxU.focusRadius  = outGl.getUniformLocation(fxProg, 'u_focusRadius');
+    fxU.blurStrength = outGl.getUniformLocation(fxProg, 'u_blurStrength');
+    fxU.falloff      = outGl.getUniformLocation(fxProg, 'u_falloff');
+    fxU.gradeOn      = outGl.getUniformLocation(fxProg, 'u_gradeOn');
+    fxU.hue1         = outGl.getUniformLocation(fxProg, 'u_hue1');
+    fxU.hue2         = outGl.getUniformLocation(fxProg, 'u_hue2');
+    fxU.saturation   = outGl.getUniformLocation(fxProg, 'u_saturation');
+
+    // Empty VAOs — TRIANGLE_STRIP with gl_VertexID 0..3 inside the
+    // vertex shader's POS[] array. No vbo needed.
+    sceneVao = sceneGl.createVertexArray();
+    outVao = outGl.createVertexArray();
+
+    log('Shaders compiled OK. Drawing…', 'ok');
+    return true;
+  } catch (e) {
+    log('Init error: ' + (e && e.message ? e.message : e), 'err');
+    return false;
+  }
+}
+
+function resize() {
+  const dpr = window.devicePixelRatio || 1;
+  for (const c of [sceneCanvas, outCanvas]) {
+    const r = c.getBoundingClientRect();
+    const w = Math.max(2, Math.floor(r.width * dpr));
+    const h = Math.max(2, Math.floor(r.height * dpr));
+    if (c.width !== w || c.height !== h) {
+      c.width = w; c.height = h;
+    }
+  }
+}
+
+function drawScene() {
+  const gl = sceneGl;
+  gl.viewport(0, 0, sceneCanvas.width, sceneCanvas.height);
+  gl.useProgram(synthProg);
+  gl.bindVertexArray(sceneVao);
+  gl.uniform2f(synthU.res, sceneCanvas.width, sceneCanvas.height);
+  gl.disable(gl.BLEND);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindVertexArray(null);
+}
+
+function uploadSceneToOut() {
+  const w = sceneCanvas.width, h = sceneCanvas.height;
+  // Grab pixels off scene canvas. preserveDrawingBuffer=true keeps
+  // them available after the draw call finishes.
+  const pixels = new Uint8Array(w * h * 4);
+  sceneGl.bindFramebuffer(sceneGl.FRAMEBUFFER, null);
+  sceneGl.readPixels(0, 0, w, h, sceneGl.RGBA, sceneGl.UNSIGNED_BYTE, pixels);
+  // Upload to outGl as a 2D texture.
+  if (!outTex) outTex = outGl.createTexture();
+  outGl.bindTexture(outGl.TEXTURE_2D, outTex);
+  if (outTexW !== w || outTexH !== h) {
+    outGl.texImage2D(outGl.TEXTURE_2D, 0, outGl.RGBA8, w, h, 0, outGl.RGBA, outGl.UNSIGNED_BYTE, pixels);
+    outTexW = w; outTexH = h;
+  } else {
+    outGl.texSubImage2D(outGl.TEXTURE_2D, 0, 0, 0, w, h, outGl.RGBA, outGl.UNSIGNED_BYTE, pixels);
+  }
+  outGl.texParameteri(outGl.TEXTURE_2D, outGl.TEXTURE_MIN_FILTER, outGl.LINEAR);
+  outGl.texParameteri(outGl.TEXTURE_2D, outGl.TEXTURE_MAG_FILTER, outGl.LINEAR);
+  outGl.texParameteri(outGl.TEXTURE_2D, outGl.TEXTURE_WRAP_S, outGl.CLAMP_TO_EDGE);
+  outGl.texParameteri(outGl.TEXTURE_2D, outGl.TEXTURE_WRAP_T, outGl.CLAMP_TO_EDGE);
+}
+
+function drawOut() {
+  const gl = outGl;
+  gl.viewport(0, 0, outCanvas.width, outCanvas.height);
+  gl.useProgram(fxProg);
+  gl.bindVertexArray(outVao);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, outTex);
+  gl.uniform1i(fxU.scene, 0);
+  gl.uniform2f(fxU.res, outCanvas.width, outCanvas.height);
+  gl.uniform1f(fxU.blurOn,       document.getElementById('blurOn').checked ? 1 : 0);
+  gl.uniform1f(fxU.focusRadius,  parseFloat(document.getElementById('focus').value));
+  gl.uniform1f(fxU.blurStrength, parseFloat(document.getElementById('strength').value));
+  gl.uniform1f(fxU.falloff,      parseFloat(document.getElementById('falloff').value));
+  gl.uniform1f(fxU.gradeOn,      document.getElementById('gradeOn').checked ? 1 : 0);
+  gl.uniform1f(fxU.hue1,         parseFloat(document.getElementById('hue1').value));
+  gl.uniform1f(fxU.hue2,         parseFloat(document.getElementById('hue2').value));
+  gl.uniform1f(fxU.saturation,   parseFloat(document.getElementById('sat').value));
+  gl.disable(gl.BLEND);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  gl.bindVertexArray(null);
+}
+
+function frame() {
+  resize();
+  drawScene();
+  uploadSceneToOut();
+  drawOut();
+}
+
+// Slider sync + listeners. Each slider updates its readout span and
+// triggers a redraw on input.
+function bindSlider(id, valId, fmt) {
+  const el = document.getElementById(id);
+  const val = document.getElementById(valId);
+  const update = () => { val.textContent = fmt(parseFloat(el.value)); frame(); };
+  el.addEventListener('input', update);
+  update();
+}
+function bindToggle(id) {
+  document.getElementById(id).addEventListener('change', frame);
+}
+
+if (init()) {
+  bindSlider('focus',    'focusVal',    v => v.toFixed(2));
+  bindSlider('strength', 'strengthVal', v => v.toFixed(2));
+  bindSlider('falloff',  'falloffVal',  v => v.toFixed(2));
+  bindSlider('hue1',     'hue1Val',     v => v.toFixed(2));
+  bindSlider('hue2',     'hue2Val',     v => v.toFixed(2));
+  bindSlider('sat',      'satVal',      v => v.toFixed(2));
+  bindToggle('blurOn');
+  bindToggle('gradeOn');
+  document.getElementById('redraw').addEventListener('click', frame);
+  window.addEventListener('resize', () => requestAnimationFrame(frame));
+  frame();
+}
+</script>
+</body>
+</html>

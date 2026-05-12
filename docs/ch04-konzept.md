@@ -8,7 +8,7 @@
       <div class="chapter-num">04</div>
       <div class="chapter-title-block">
         <h2>Spielkonzept &<br><em>Tiers</em></h2>
-        <div class="chapter-subtitle">Lebende Zellen + Roguelike-Memory. Keine statischen Türme — Zellen bewegen sich, jagen, sterben. Komposition und Timing zählen mehr als Position.</div>
+        <div class="chapter-subtitle">Lebende Zellen + Roguelike-Memory. Zellen bewegen sich, jagen, sterben autonom. Komposition und Timing zählen mehr als Position.</div>
       </div>
     </div>
 
@@ -16,7 +16,7 @@
       <div class="principle-symbol">A+B</div>
       <div>
         <h3>Lebendes Schlachtfeld mit Roguelike-Memory</h3>
-        <p>Platzierte Zellen sind keine Türme — sie <strong>leben, jagen und sterben autonom</strong> (siehe §11 Physik). Der Spieler entscheidet, <em>welche</em> Zellen im Roster sind und <em>wann</em> sie auf das Feld kommen, nicht wo sie stehen sollen. Der Tower-Defense-Anker bleibt nur in der Aktivierungskaskade: angeborene Zellen → DC → adaptive Zellen → Memory. Mit 12 Helden und 12 Pathogenen wird die <strong>Roster-Wahl vor jedem Kampf</strong> zur strategischen Kernentscheidung; die Briefing-Karte vor jedem Level zeigt, wogegen das Roster greift (siehe §12).</p>
+        <p>Platzierte Zellen <strong>leben, jagen und sterben autonom</strong> (siehe §11 Physik). Der Spieler entscheidet, <em>welche</em> Zellen im Roster sind und <em>wann</em> sie auf das Feld kommen, nicht wo sie stehen sollen. Die Aktivierungskaskade — angeborene Zellen → DC → adaptive Zellen → Memory — gibt jedem Kampf eine klare strategische Reihenfolge. Mit 12 Helden und 12 Pathogenen wird die <strong>Roster-Wahl vor jedem Kampf</strong> zur strategischen Kernentscheidung; die Briefing-Karte vor jedem Level zeigt, wogegen das Roster greift (siehe §12).</p>
       </div>
     </div>
 

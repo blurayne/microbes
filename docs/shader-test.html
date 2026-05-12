@@ -1,0 +1,3149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Cytologica · live cell shader</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-0: #0b0712;
+    --bg-1: #14102a;
+    --bg-2: #1a1538;
+    --ink: #ece6d6;
+    --dim: #8a83a0;
+    --accent: #6cf2ff;
+    --accent-2: #ff7bd6;
+    --warn: #ffd479;
+    --line: rgba(236, 230, 214, 0.08);
+    --line-2: rgba(108, 242, 255, 0.25);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; background: var(--bg-0); color: var(--ink); }
+  body {
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-weight: 300;
+    overflow: hidden;
+    background:
+      radial-gradient(1200px 800px at 70% 20%, #1a1138 0%, #0b0712 60%),
+      radial-gradient(900px 600px at 10% 90%, #2a0f3a 0%, transparent 60%),
+      var(--bg-0);
+  }
+
+  /* Subtle film-grain overlay */
+  body::after {
+    content: "";
+    position: fixed; inset: 0;
+    pointer-events: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.9  0 0 0 0 0.85  0 0 0 0 0.7  0 0 0 0.06 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+    opacity: 0.5;
+    mix-blend-mode: overlay;
+    z-index: 999;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr var(--aside-w, 460px);
+    grid-template-rows: 64px 1fr;
+    height: 100%;
+  }
+  /* When the source aside is collapsed it leaves the grid entirely
+     and becomes an absolutely-positioned strip — pinned to the
+     viewport's right edge on desktop, bottom edge on mobile. The
+     canvas grid column then expands to fill the freed space. */
+  .layout.src-collapsed { grid-template-columns: 1fr; }
+  aside.collapsed { min-width: 0; }
+  .layout.src-collapsed > aside.collapsed {
+    position: absolute;
+    z-index: 5;
+    /* Desktop default — vertical strip on the right edge, beneath
+       the header. Tab bar runs top-to-bottom; chevron stays on top. */
+    top: 64px;
+    right: 0;
+    bottom: 0;
+    width: auto;
+    background: rgba(11, 7, 18, 0.85);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-left: 1px solid var(--line);
+    border-bottom: none;
+    border-top: none;
+  }
+
+  header {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 28px;
+    border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, rgba(20,16,42,0.7), rgba(20,16,42,0.2));
+    backdrop-filter: blur(8px);
+  }
+
+  .brand {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+  }
+  .brand .mark {
+    font-family: "Fraunces", serif;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 26px;
+    letter-spacing: -0.01em;
+    color: var(--ink);
+  }
+  .brand .mark em {
+    color: var(--accent-2);
+    font-style: italic;
+  }
+  .brand .sub {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--dim);
+  }
+
+  .meta {
+    display: flex;
+    gap: 18px;
+    align-items: center;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border: 1px solid var(--line-2);
+    border-radius: 999px;
+    color: var(--accent);
+  }
+  .badge .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .badge.fallback { color: var(--warn); border-color: rgba(255,212,121,0.35); }
+  .badge.fallback .dot { background: var(--warn); box-shadow: 0 0 8px var(--warn); }
+  @keyframes pulse {
+    0%,100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  /* ----------- viewport ----------- */
+  .viewport {
+    position: relative;
+    border-right: 1px solid var(--line);
+    overflow: hidden;
+  }
+  canvas#stage {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+  }
+  .crosshair {
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: min(70vh, 70vw); height: min(70vh, 70vw);
+    border: 1px solid rgba(108, 242, 255, 0.12);
+    border-radius: 50%;
+    pointer-events: none;
+  }
+  .crosshair::before, .crosshair::after {
+    content: "";
+    position: absolute;
+    background: rgba(108, 242, 255, 0.18);
+  }
+  .crosshair::before {
+    left: 0; right: 0; top: 50%;
+    height: 1px;
+  }
+  .crosshair::after {
+    top: 0; bottom: 0; left: 50%;
+    width: 1px;
+  }
+  .scalebar {
+    position: absolute;
+    left: 28px; bottom: 24px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    color: var(--accent);
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+  .scalebar .bar {
+    width: 90px; height: 2px;
+    background: var(--accent);
+    margin-bottom: 6px;
+    box-shadow: 0 0 6px rgba(108,242,255,0.5);
+  }
+  .annot {
+    position: absolute;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--dim);
+    pointer-events: none;
+  }
+  .annot.top-right { right: 28px; top: 24px; text-align: right; }
+  .annot.bottom-right { right: 28px; bottom: 24px; text-align: right; }
+  .annot strong { color: var(--ink); font-weight: 500; }
+
+  /* ----------- controls ----------- */
+  .controls {
+    position: absolute;
+    left: 28px; top: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    width: 220px;
+    padding: 16px 18px;
+    background: rgba(11, 7, 18, 0.55);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(6px);
+    user-select: none;
+  }
+  .controls.dragging { opacity: 0.85; }
+  .controls h3 {
+    margin: 0 0 4px 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: var(--dim);
+    font-weight: 500;
+  }
+  .controls-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    cursor: move;
+    touch-action: none;
+  }
+  .controls-head h3 { margin: 0; }
+  .ctrl input, .ctrl select, .ctrl button { cursor: auto; }
+  .ctrl-x {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--dim);
+    width: 22px; height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+    padding: 0;
+  }
+  .ctrl-x:hover {
+    color: var(--accent);
+    border-color: var(--line-2);
+    background: rgba(108, 242, 255, 0.06);
+  }
+
+  .ctrl-show {
+    position: absolute;
+    left: 28px; top: 24px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: rgba(11, 7, 18, 0.65);
+    border: 1px solid var(--line-2);
+    color: var(--accent);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    backdrop-filter: blur(6px);
+    transition: background 0.15s;
+  }
+  .ctrl-show:hover { background: rgba(108, 242, 255, 0.1); }
+  .ctrl-show .dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+  }
+  .ctrl-show[hidden] { display: none; }
+  .controls[hidden] { display: none; }
+  .ctrl {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .ctrl label {
+    display: flex;
+    justify-content: space-between;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    color: var(--ink);
+  }
+  .ctrl label span:last-child {
+    color: var(--accent);
+  }
+  .ctrl input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%; height: 2px;
+    background: var(--line);
+    outline: none;
+    margin: 4px 0;
+  }
+  .ctrl input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    box-shadow: 0 0 8px rgba(108,242,255,0.6);
+  }
+  .ctrl input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 0 8px rgba(108,242,255,0.6);
+  }
+  .ctrl select {
+    width: 100%;
+    margin-top: 4px;
+    padding: 6px 8px;
+    background: rgba(11, 7, 18, 0.7);
+    color: var(--ink);
+    border: 1px solid var(--line-2);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    cursor: pointer;
+    outline: none;
+  }
+  .ctrl select:focus { border-color: var(--accent); }
+
+  /* ----------- code panel ----------- */
+  aside {
+    background: var(--bg-1);
+    border-left: 1px solid var(--line);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .tabs {
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid var(--line);
+    background: rgba(0,0,0,0.25);
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    flex: 0 0 auto;
+  }
+  .tabs::-webkit-scrollbar { height: 4px; }
+  .tabs::-webkit-scrollbar-track { background: transparent; }
+  .tabs::-webkit-scrollbar-thumb { background: var(--line); border-radius: 2px; }
+  .copy-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    background: rgba(11, 7, 18, 0.95);
+    border: none;
+    border-left: 1px solid var(--line);
+    color: var(--dim);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s;
+    /* Sticky to the trailing edge of the scrolling tab strip
+       (right edge in horizontal layout, bottom in vertical when
+       collapsed on desktop). Mirrors the chevron's sticky-left
+       so the user can always reach copy regardless of scroll. */
+    position: sticky;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+  }
+  .copy-btn:hover {
+    color: var(--accent);
+    background: rgba(108, 242, 255, 0.05);
+  }
+  .copy-btn.copied {
+    color: var(--accent-2);
+  }
+  .copy-btn svg { display: block; }
+  .tab {
+    flex: 1;
+    background: none;
+    border: none;
+    padding: 14px 16px;
+    color: var(--dim);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+  }
+  .tab .lang {
+    color: var(--dim);
+    font-size: 9px;
+    margin-left: 6px;
+  }
+
+  .code-info {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--line);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    color: var(--dim);
+    line-height: 1.6;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .code-info strong {
+    color: var(--accent-2);
+    font-weight: 400;
+  }
+
+  .code-pane {
+    flex: 1;
+    overflow: auto;
+    padding: 18px 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .code-pane pre {
+    margin: 0;
+    padding: 0 22px;
+    white-space: pre;
+    color: var(--ink);
+  }
+  .code-pane::-webkit-scrollbar { width: 8px; }
+  .code-pane::-webkit-scrollbar-track { background: transparent; }
+  .code-pane::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+
+  /* Editable WGSL pane: same look as the read-only <pre>, just with
+     a caret. Drops syntax highlighting on the active editor pane
+     (typing into highlighted spans destroys the markup); the GLSL
+     and JS panes keep their highlighting since they stay read-only. */
+  .code-pane pre[contenteditable="plaintext-only"] {
+    outline: none;
+    caret-color: var(--accent);
+    min-height: 100%;
+    cursor: text;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .code-pane pre[contenteditable="plaintext-only"]:focus {
+    background: rgba(108, 242, 255, 0.03);
+  }
+  /* Tiny status strip below the active pane — shows compile state
+     of the WGSL editor. Hidden by default; populated by JS. */
+  .wgsl-status {
+    flex: 0 0 auto;
+    padding: 6px 22px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--dim);
+    border-top: 1px solid var(--line);
+    background: rgba(0, 0, 0, 0.18);
+    white-space: pre-wrap;
+    overflow: auto;
+    max-height: 25%;
+  }
+  .wgsl-status.ok    { color: var(--accent-2); }
+  .wgsl-status.error { color: #ff6b9a; text-transform: none; letter-spacing: 0; }
+
+  /* Source-section collapse: when aside has .collapsed, drop the
+     code-info + code-pane bodies + status, leaving only the tab
+     bar (with chevron) visible. The grid-template column for the
+     aside shrinks to fit the tabs. */
+  .src-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    min-width: 32px;
+    background: rgba(11, 7, 18, 0.95);
+    border: none;
+    border-right: 1px solid var(--line);
+    color: var(--dim);
+    cursor: pointer;
+    transition: color 0.15s, background 0.15s, transform 0.2s;
+    /* Sticky so the chevron stays anchored at the start of the
+       tab bar even when the user scrolls the other tabs sideways
+       (or vertically when the bar is rotated). z-index keeps it
+       layered over the other tabs as they slide past. */
+    position: sticky;
+    left: 0;
+    top: 0;
+    z-index: 2;
+  }
+  .src-toggle:hover { color: var(--accent); background: rgba(108, 242, 255, 0.10); }
+  .src-toggle svg { display: block; }
+  /* Chevron points right when collapsed, down when expanded. */
+  aside.collapsed .src-toggle svg { transform: rotate(0deg); }
+  aside:not(.collapsed) .src-toggle svg { transform: rotate(90deg); }
+  aside.collapsed .code-info,
+  aside.collapsed .code-pane,
+  aside.collapsed .wgsl-status,
+  /* #pane-console has its own `display: flex` rule with id-level
+     specificity (set so the console-bar + pre stack vertically when
+     the pane is active), which would override the class-level
+     `display: none` above. Re-state the hide at id specificity. */
+  aside.collapsed #pane-console { display: none; }
+
+  /* Vertical tab bar when collapsed on desktop — the right-edge
+     strip. Tabs stack top-to-bottom; chevron stays at the top.
+     Tab text reads horizontally still (no rotation), just in a
+     narrower slot. */
+  .layout.src-collapsed > aside.collapsed .tabs {
+    flex-direction: column;
+    align-items: stretch;
+    border-bottom: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    height: 100%;
+  }
+  .layout.src-collapsed > aside.collapsed .tab,
+  .layout.src-collapsed > aside.collapsed .copy-btn {
+    flex: 0 0 auto;
+    border-right: none;
+    border-left: none;
+    border-bottom: 1px solid var(--line);
+    padding: 14px 18px;
+    min-width: 0;
+  }
+  .layout.src-collapsed > aside.collapsed .src-toggle {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    width: auto;
+    height: 36px;
+    min-height: 36px;
+  }
+  /* Mobile: pin the bar to the bottom edge of the viewport, run
+     horizontally. Threshold 700 px is well below any realistic
+     desktop viewport but covers tablets in portrait. */
+  @media (max-width: 700px) {
+    .layout.src-collapsed > aside.collapsed {
+      top: auto;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      height: auto;
+      border-left: none;
+      border-top: 1px solid var(--line);
+    }
+    .layout.src-collapsed > aside.collapsed .tabs {
+      flex-direction: row;
+      overflow-x: auto;
+      overflow-y: hidden;
+      height: auto;
+    }
+    .layout.src-collapsed > aside.collapsed .tab,
+    .layout.src-collapsed > aside.collapsed .copy-btn {
+      border-bottom: none;
+      border-right: 1px solid var(--line);
+      padding: 12px 16px;
+    }
+    .layout.src-collapsed > aside.collapsed .src-toggle {
+      border-bottom: none;
+      border-right: 1px solid var(--line);
+      width: 36px;
+      height: auto;
+      min-height: 0;
+    }
+    /* The "one shader · two targets · identical math…" code-info
+       blurb is purely informational and eats vertical real estate
+       on phones. Hide it on small viewports. */
+    .code-info { display: none; }
+  }
+
+  /* Console pane: a scroll buffer for window.console.* output that's
+     mirrored into a tab next to JS. Each line is a single entry
+     formatted as "[HH:MM:SS] level: message". */
+  #pane-console { padding: 0; display: flex; flex-direction: column; }
+  #pane-console.active { display: flex; }
+  .console-bar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 22px;
+    border-bottom: 1px solid var(--line);
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--dim);
+  }
+  .console-clear {
+    background: none;
+    border: 1px solid var(--line);
+    color: var(--dim);
+    padding: 4px 10px;
+    border-radius: 3px;
+    font: inherit;
+    cursor: pointer;
+    text-transform: inherit;
+    letter-spacing: inherit;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .console-clear:hover { color: var(--accent); border-color: var(--accent); }
+  #src-console {
+    flex: 1;
+    margin: 0;
+    padding: 12px 22px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--ink);
+  }
+  .con-time  { color: var(--dim); }
+  .con-log   { color: var(--ink); }
+  .con-info  { color: var(--accent-2); }
+  .con-warn  { color: #ffc66c; }
+  .con-error { color: #ff6b9a; }
+
+  /* simple shader syntax tinting */
+  .tk-kw    { color: #ff7bd6; }
+  .tk-type  { color: #6cf2ff; }
+  .tk-fn    { color: #ffd479; }
+  .tk-num   { color: #c2b3ff; }
+  .tk-str   { color: #a8e9a0; }
+  .tk-cmt   { color: #5a5470; font-style: italic; }
+  .tk-attr  { color: #88e0c0; }
+  .tk-op    { color: #d8d2c2; }
+
+  .pane {
+    display: none;
+  }
+  .pane.active { display: block; }
+
+  footer {
+    grid-column: 1 / -1;
+    display: none;
+  }
+
+  /* ----------- responsive ----------- */
+  @media (max-width: 880px) {
+    .layout {
+      grid-template-columns: 1fr;
+      grid-template-rows: 64px 50vh 1fr;
+    }
+    /* When the source aside is collapsed it leaves the grid via
+       position:absolute, so the second 1fr row that the expanded
+       layout reserves for it becomes a tall BLACK GAP between the
+       viewport and the bottom-pinned strip. Collapse → single
+       1fr row so the viewport fills everything below the header. */
+    .layout.src-collapsed {
+      grid-template-rows: 64px 1fr;
+    }
+    aside { border-left: none; border-top: 1px solid var(--line); }
+    .controls { width: 180px; padding: 12px; }
+    /* Zoom slider redundant on mobile — wheel + pinch already
+       drive the same value. Hide it to free vertical real estate
+       in the cramped controls panel. */
+    .ctrl-zoom { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+  <header>
+    <div class="brand">
+      <div class="mark">cyto<em>logica</em></div>
+      <div class="sub">live cell · shader specimen 04</div>
+    </div>
+    <div class="meta">
+      <span id="fps">— fps</span>
+      <span class="badge" id="renderer-badge">
+        <span class="dot"></span><span id="renderer-name">initialising</span>
+      </span>
+    </div>
+  </header>
+
+  <main class="viewport">
+    <canvas id="stage"></canvas>
+    <div class="crosshair"></div>
+
+    <div class="annot top-right">
+      objective <strong>×400</strong><br/>
+      stain · h&amp;e (stylised)<br/>
+      illum · brightfield
+    </div>
+    <div class="annot bottom-right">
+      <strong>spec.04</strong> eukaryote<br/>
+      cyto­plasmic survey<br/>
+      live · realtime
+    </div>
+
+    <div class="scalebar">
+      <div class="bar"></div>
+      10 µm
+    </div>
+
+    <div class="controls" id="controls">
+      <div class="controls-head">
+        <h3>specimen controls</h3>
+        <button class="ctrl-x" id="ctrl-close" title="hide controls (h)" aria-label="hide controls">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M3 3l6 6M9 3l-6 6"/></svg>
+        </button>
+      </div>
+      <div class="ctrl">
+        <label><span>specimen</span></label>
+        <select id="celltype">
+          <option value="0">eukaryote · generic</option>
+          <option value="1">macrophage · immune</option>
+          <option value="2">neutrophil · immune</option>
+          <option value="3">nk-cell · immune</option>
+          <option value="4">b-cell · immune</option>
+          <option value="5">virus · pathogen</option>
+          <option value="6">bacterium · pathogen</option>
+          <option value="7">amoeba · pathogen</option>
+          <option value="8">spore · pathogen</option>
+          <option value="9">monocyte · immune</option>
+          <option value="10">mast cell · immune</option>
+          <option value="11">dendritic cell · immune</option>
+          <option value="12">basophil · immune</option>
+          <option value="13">platelet · immune</option>
+          <option value="14">t-cell · immune</option>
+          <option value="15">eosinophil · immune</option>
+          <option value="16">red blood cell · immune</option>
+          <option value="17">germ · pathogen</option>
+          <option value="18">slime mold · pathogen</option>
+          <option value="19">mite · pathogen</option>
+          <option value="20">toxin · pathogen</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label><span>theme</span></label>
+        <select id="theme">
+          <option value="0">microscope · H&amp;E (default)</option>
+          <option value="1">cartoon · saturated</option>
+          <option value="2">kurzgesagt · flat neon</option>
+          <option value="3">classic · canvas2d game look</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label><span>background</span></label>
+        <select id="bgkind">
+          <option value="0">bloodflow · default</option>
+          <option value="1">lung · smoke</option>
+          <option value="2">heart · striated muscle</option>
+          <option value="3">brain · neural network</option>
+          <option value="4">bone marrow · trabecular</option>
+          <option value="5">cell shadow · voronoi</option>
+          <option value="6">black · isolation</option>
+        </select>
+      </div>
+      <div class="ctrl">
+        <label style="display: flex; align-items: center; gap: 8px;">
+          <input id="caustics" type="checkbox"/>
+          <span>caustics overlay</span>
+        </label>
+      </div>
+      <div class="ctrl ctrl-zoom">
+        <label><span>zoom</span><span id="zoom-val">1.00</span></label>
+        <input id="zoom" type="range" min="0.5" max="2.5" step="0.01" value="1.0"/>
+      </div>
+      <div class="ctrl">
+        <label><span>activity</span><span id="speed-val">1.00</span></label>
+        <input id="speed" type="range" min="0" max="3" step="0.01" value="1.0"/>
+      </div>
+      <div class="ctrl">
+        <label><span>organelles</span><span id="org-val">8</span></label>
+        <input id="organelles" type="range" min="0" max="16" step="1" value="8"/>
+      </div>
+    </div>
+
+    <button class="ctrl-show" id="ctrl-show" hidden title="show controls (h)" aria-label="show controls">
+      <span class="dot"></span> controls
+    </button>
+  </main>
+
+  <aside id="src-aside" class="collapsed">
+    <div class="tabs">
+      <button class="src-toggle" id="src-toggle" title="show / hide source" aria-label="toggle source panel" aria-expanded="false">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 2.5l4 3.5-4 3.5"/></svg>
+      </button>
+      <button class="tab active" data-pane="wgsl">WGSL <span class="lang">webgpu</span></button>
+      <button class="tab" data-pane="glsl">GLSL <span class="lang">webgl2</span></button>
+      <button class="tab" data-pane="js">JS <span class="lang">host</span></button>
+      <button class="tab" data-pane="console">Console <span class="lang" id="console-count">0</span></button>
+      <button class="copy-btn" id="copy-src" title="copy source to clipboard" aria-label="copy source">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="9" width="11" height="11" rx="1.5"/>
+          <path d="M5 15V5.5A1.5 1.5 0 0 1 6.5 4H15"/>
+        </svg>
+        <span id="copy-label">copy</span>
+      </button>
+    </div>
+    <div class="code-info">
+      one shader · two targets · <strong>identical math</strong><br/>
+      runtime selects wgsl when <strong>navigator.gpu</strong> exists, else falls back to glsl es 3.00 ·
+      <strong>edit the wgsl pane to live-recompile</strong>
+    </div>
+    <div class="code-pane pane active" id="pane-wgsl"><pre id="src-wgsl" contenteditable="plaintext-only" spellcheck="false" autocorrect="off" autocapitalize="off"></pre></div>
+    <div class="code-pane pane" id="pane-glsl"><pre id="src-glsl"></pre></div>
+    <div class="code-pane pane" id="pane-js"><pre id="src-js"></pre></div>
+    <div class="code-pane pane" id="pane-console">
+      <div class="console-bar">
+        <span id="console-summary">0 entries</span>
+        <button class="console-clear" id="console-clear" title="clear console">clear</button>
+      </div>
+      <pre id="src-console"></pre>
+    </div>
+    <div class="wgsl-status" id="wgsl-status">ready</div>
+  </aside>
+
+</div>
+
+<!--
+  ============================================================
+  SHADER SOURCES (hosted as text/plain so we can show them
+  in the right-hand pane verbatim AND compile them at runtime)
+  ============================================================
+-->
+
+<script id="shader-wgsl" type="text/plain">
+// ────────────────────────────────────────────────────────────
+//  cytologica · WGSL fragment shader
+//  stylised cell · brightfield + H&E look
+//
+//  cellType selector (0..20):
+//    0 eukaryote   1 macrophage   2 neutrophil
+//    3 nk-cell     4 b-cell       5 virus
+//    6 bacterium   7 amoeba       8 spore
+//    9 monocyte   10 mast        11 dendritic
+//   12 basophil   13 platelet    14 t-cell
+//   15 eosinophil 16 rbc         17 germ
+//   18 slime      19 mite        20 toxin
+// ────────────────────────────────────────────────────────────
+
+struct Uniforms {
+  resolution  : vec2<f32>,
+  time        : f32,
+  zoom        : f32,
+  activity    : f32,
+  organelles  : f32,
+  cellType    : f32,
+  theme       : f32,   // 0 microscope · 1 cartoon · 2 kurzgesagt · 3 classic
+  bgKind      : f32,   // 0 bloodstream · 1 lung · 2 heart · 3 brain · 4 bone marrow
+  cellOffsetX : f32,   // cell centre offset in UV space (drag)
+  cellOffsetY : f32,
+  cellRadius  : f32,   // cell radius multiplier (pinch / wheel) — 1.0 default
+  caustics    : f32,   // 0 off · 1 on (water-turbulence overlay on bg)
+};
+@group(0) @binding(0) var<uniform> U : Uniforms;
+
+// ── hash / noise ────────────────────────────────────────────
+fn hash(p: vec2<f32>) -> f32 {
+  let h = dot(p, vec2<f32>(127.1, 311.7));
+  return fract(sin(h) * 43758.5453);
+}
+
+fn noise(p: vec2<f32>) -> f32 {
+  let i = floor(p);
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  let a = hash(i);
+  let b = hash(i + vec2<f32>(1.0, 0.0));
+  let c = hash(i + vec2<f32>(0.0, 1.0));
+  let d = hash(i + vec2<f32>(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+fn fbm(pIn: vec2<f32>) -> f32 {
+  var p = pIn;
+  var v: f32 = 0.0;
+  var a: f32 = 0.5;
+  for (var i: i32 = 0; i < 5; i = i + 1) {
+    v = v + a * noise(p);
+    p = p * 2.03;
+    a = a * 0.5;
+  }
+  return v;
+}
+
+// rotated capsule — used for mitochondria + bacterium body SDF
+fn capsule(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
+  let pa = p - a;
+  let ba = b - a;
+  let h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
+
+// Smoke-FBM helpers for the "lung · smoke" background (kind 1).
+// Adapted from "Smoke" by Roman Bobniev / FatumR (Apache 2.0,
+// https://www.shadertoy.com/view/ldBSDd). The original sampled an
+// audio texture (iChannel0) for live amplitude reactivity; we
+// substitute a slow sine to mimic a breathing rhythm.
+fn smoke_rand2(co: vec2<f32>) -> f32 {
+  return fract(cos(dot(co, vec2<f32>(12.9898, 78.233))) * 43758.5453);
+}
+fn smoke_valueNoise(vl: vec2<f32>) -> f32 {
+  let g = floor(vl);
+  let a = smoke_rand2(g);
+  let b = smoke_rand2(g + vec2<f32>(1.0, 0.0));
+  let c = smoke_rand2(g + vec2<f32>(0.0, 1.0));
+  let d = smoke_rand2(g + vec2<f32>(1.0, 1.0));
+  let f = vec2<f32>(smoothstep(0.0, 1.0, fract(vl.x)),
+                    smoothstep(0.0, 1.0, fract(vl.y)));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+fn smoke_fbm(p_in: vec2<f32>) -> f32 {
+  var amplitude: f32 = 0.5;
+  var rez: f32 = 0.0;
+  var p = p_in;
+  for (var i: i32 = 0; i < 6; i = i + 1) {  // 6 octaves (was 8 in source; trimmed for mobile)
+    rez = rez + amplitude * smoke_valueNoise(p);
+    amplitude = amplitude / 2.0;
+    p = p * 2.0;
+  }
+  return rez;
+}
+fn smoke_complex(p: vec2<f32>, t: f32) -> f32 {
+  // Substitute the audio-reactive amplitude with a slow sine — reads
+  // as a steady breathing rhythm in lieu of music input.
+  let breath = 0.55 + 0.20 * sin(t * 0.6);
+  let slow = t / 2.5;
+  let fast = t / 0.5;
+  let off1 = vec2<f32>(slow, 0.0);
+  let off2 = vec2<f32>(sin(fast) * 0.1, 0.0);
+  let inner1 = smoke_fbm(p - off2);
+  let inner2 = smoke_fbm(p + 2.0 * inner1);
+  let inner3 = smoke_fbm(p + inner2);
+  return breath * smoke_fbm(p + off1 + inner3);
+}
+
+// ── vertex (fullscreen triangle) ────────────────────────────
+@vertex
+fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+  var p = array<vec2<f32>, 3>(
+    vec2<f32>(-1.0, -1.0),
+    vec2<f32>( 3.0, -1.0),
+    vec2<f32>(-1.0,  3.0),
+  );
+  return vec4<f32>(p[vi], 0.0, 1.0);
+}
+
+// per-type membrane SDF. Most types are blob variants on
+// cellMembrane; bacterium is a capsule (rod), virus is a hex
+// capsid with spike modulation, amoeba/spore add longer
+// pseudopod modes. Returns a signed distance.
+fn membraneFor(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
+  if (kind == 6) {
+    // bacterium — rod (capsule) along the X axis with a soft
+    // wobble on the radius so it breathes.
+    let breathe = 0.018 * sin(t * 0.6);
+    return capsule(uv, vec2<f32>(-0.32, 0.0), vec2<f32>(0.32, 0.0), 0.20 + breathe);
+  }
+  if (kind == 5) {
+    // virus — hex capsid (~6-fold symmetry) with rim spikes.
+    let ang = atan2(uv.y, uv.x);
+    let hex = 0.04 * cos(ang * 6.0 + t * 0.3);
+    let spikes = 0.05 * pow(0.5 + 0.5 * cos(ang * 12.0 - t * 0.2), 6.0);
+    return length(uv) - (0.42 + hex + spikes);
+  }
+  if (kind == 7) {
+    // amoeba — large, very irregular blob with longer-period
+    // pseudopod extensions.
+    let ang = atan2(uv.y, uv.x);
+    let pseudo = 0.10 * sin(ang * 3.0 + t * 0.4)
+               + 0.06 * sin(ang * 7.0 - t * 0.25);
+    let breathe = 0.02 * sin(t * 0.7);
+    return length(uv) - (0.60 + pseudo + breathe);
+  }
+  if (kind == 8) {
+    // spore — small with thick double-wall (rendered via an inner
+    // ring in the colour pass); the SDF itself is a hard small disc.
+    return length(uv) - (0.36 + 0.012 * sin(t * 0.4));
+  }
+  if (kind == 13) {
+    // platelet — small 10-point star fragment, no nucleus.
+    let ang = atan2(uv.y, uv.x);
+    let star = 0.05 * cos(ang * 10.0);
+    return length(uv) - (0.30 + star);
+  }
+  if (kind == 16) {
+    // rbc — biconcave disc seen face-on; smooth rim (the dark
+    // central depression is added in the compose pass).
+    return length(uv) - (0.50 + 0.006 * sin(t * 0.4));
+  }
+  if (kind == 11) {
+    // dendritic cell — round body with 6 long thin tendrils.
+    let ang = atan2(uv.y, uv.x);
+    let tend = 0.18 * pow(0.5 + 0.5 * cos(ang * 6.0 + t * 0.2), 14.0);
+    return length(uv) - (0.42 + tend);
+  }
+  if (kind == 19) {
+    // mite — round body with 4 small leg bumps.
+    let ang = atan2(uv.y, uv.x);
+    let legs = 0.06 * pow(0.5 + 0.5 * cos(ang * 4.0 + 0.5), 8.0);
+    return length(uv) - (0.46 + legs);
+  }
+  if (kind == 20) {
+    // toxin — sharp 10-point spiked star, glowing in compose.
+    let ang = atan2(uv.y, uv.x);
+    let star = 0.12 * pow(0.5 + 0.5 * cos(ang * 10.0 + t * 0.3), 4.0);
+    return length(uv) - (0.40 + star);
+  }
+  if (kind == 10) {
+    // mast cell — slightly oblong, packed with granules.
+    let stretched = vec2<f32>(uv.x * 0.85, uv.y * 1.10);
+    return length(stretched) - (0.52 + 0.012 * sin(t * 0.5));
+  }
+  if (kind == 18) {
+    // slime mold — irregular lobed blob (more chaotic than germ).
+    let ang = atan2(uv.y, uv.x);
+    let chaos = 0.09 * sin(ang * 4.0 + t * 0.3)
+              + 0.05 * sin(ang * 7.0 - t * 0.5)
+              + 0.04 * sin(ang * 11.0 + t * 0.8);
+    return length(uv) - (0.55 + chaos);
+  }
+  if (kind == 17) {
+    // germ — small 3-lobe bacterial-style blob.
+    let ang = atan2(uv.y, uv.x);
+    let lobes = 0.07 * cos(ang * 3.0 + t * 0.4);
+    return length(uv) - (0.40 + lobes);
+  }
+  if (kind == 9) {
+    // monocyte — round + high-frequency surface ripple.
+    let ang = atan2(uv.y, uv.x);
+    let ripple = 0.04 * sin(ang * 11.0 + t * 0.5)
+               + 0.02 * sin(ang * 23.0 - t * 0.3);
+    return length(uv) - (0.58 + ripple);
+  }
+  // shared blob variants: amplitude scales by type so macrophage
+  // wobbles harder than a tight neutrophil/nk.
+  var amp: f32 = 1.0;
+  var rad: f32 = 0.62;
+  if (kind == 1)  { amp = 1.6; rad = 0.66; }   // macrophage
+  if (kind == 2)  { amp = 0.5; rad = 0.55; }   // neutrophil
+  if (kind == 3)  { amp = 0.4; rad = 0.46; }   // nk
+  if (kind == 4)  { amp = 0.6; rad = 0.50; }   // b-cell
+  if (kind == 12) { amp = 0.30; rad = 0.50; }  // basophil — smooth round
+  if (kind == 14) { amp = 0.25; rad = 0.52; }  // t-cell — very smooth lymphocyte
+  if (kind == 15) { amp = 0.35; rad = 0.50; }  // eosinophil — smooth round
+  let ang = atan2(uv.y, uv.x);
+  let wob = amp * (0.045 * sin(ang * 5.0 + t * 0.6)
+                 + 0.025 * sin(ang * 9.0 - t * 0.4)
+                 + 0.015 * sin(ang * 17.0 + t * 1.1));
+  return length(uv) - (rad + wob);
+}
+
+// per-type cytoplasm base colour. The kind 9..20 entries pull
+// cytoBot from CELL_TYPES in state.js (lines 838..1086) so the
+// preview matches what the disk shader paints in-game.
+fn cytoColor(kind: i32) -> vec3<f32> {
+  if (kind == 1)  { return vec3<f32>(0.74, 0.50, 0.55); }   // macrophage tan-pink
+  if (kind == 2)  { return vec3<f32>(0.86, 0.70, 0.74); }   // neutrophil pale
+  if (kind == 3)  { return vec3<f32>(0.55, 0.50, 0.72); }   // nk blue-violet
+  if (kind == 4)  { return vec3<f32>(0.70, 0.45, 0.55); }   // b-cell deep pink
+  if (kind == 5)  { return vec3<f32>(0.30, 0.25, 0.42); }   // virus indigo core
+  if (kind == 6)  { return vec3<f32>(0.55, 0.70, 0.40); }   // bacterium green
+  if (kind == 7)  { return vec3<f32>(0.55, 0.55, 0.40); }   // amoeba olive
+  if (kind == 8)  { return vec3<f32>(0.78, 0.66, 0.40); }   // spore amber
+  if (kind == 9)  { return vec3<f32>(0.43, 0.55, 0.94); }   // monocyte #6d8df0
+  if (kind == 10) { return vec3<f32>(0.33, 0.66, 0.47); }   // mast #54a877
+  if (kind == 11) { return vec3<f32>(0.30, 0.56, 0.81); }   // dendritic #4d8fcf
+  if (kind == 12) { return vec3<f32>(0.85, 0.48, 0.63); }   // basophil #d97aa1
+  if (kind == 13) { return vec3<f32>(0.84, 0.65, 0.08); }   // platelet #d7a614
+  if (kind == 14) { return vec3<f32>(0.55, 0.48, 0.88); }   // t-cell #8d7be0
+  if (kind == 15) { return vec3<f32>(0.88, 0.52, 0.35); }   // eosinophil #e0855a
+  if (kind == 16) { return vec3<f32>(0.63, 0.09, 0.09); }   // rbc #a01818
+  if (kind == 17) { return vec3<f32>(0.37, 0.63, 0.19); }   // germ #5fa030
+  if (kind == 18) { return vec3<f32>(0.48, 0.70, 0.14); }   // slime #7ab323
+  if (kind == 19) { return vec3<f32>(0.80, 0.42, 0.08); }   // mite #cc6a14
+  if (kind == 20) { return vec3<f32>(1.00, 0.36, 0.69); }   // toxin #ff5cb1
+  return vec3<f32>(0.78, 0.55, 0.66);                       // eukaryote
+}
+
+// nucleus SDF for the types that have one. Returns 1e9 (no
+// nucleus) for prokaryotes / virus / spore.
+fn nucleusSdf(uv: vec2<f32>, kind: i32, t: f32) -> f32 {
+  let nucOff = vec2<f32>(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
+  let p = uv - nucOff;
+  // anucleate: prokaryotes / virus / spore / platelet / rbc /
+  // slime mold / toxin (toxin isn't a cell at all).
+  if (kind == 5  || kind == 6  || kind == 8
+   || kind == 13 || kind == 16 || kind == 18 || kind == 20) { return 1e9; }
+  if (kind == 1 || kind == 9) {
+    // kidney-shaped nucleus: big lobe minus a smaller indent.
+    // Macrophage (1) + monocyte (9) — both belong to the
+    // mononuclear phagocyte system.
+    let r1 = length(p - vec2<f32>(-0.04, 0.0)) - 0.22;
+    let r2 = length(p - vec2<f32>(0.10, 0.0)) - 0.14;
+    return max(r1, -r2);
+  }
+  if (kind == 2) {
+    // neutrophil — three connected lobes (signature multi-lobe).
+    let a = length(p - vec2<f32>(-0.12, -0.04)) - 0.10;
+    let b = length(p - vec2<f32>( 0.12, -0.04)) - 0.10;
+    let c = length(p - vec2<f32>( 0.00,  0.13)) - 0.10;
+    return min(min(a, b), c);
+  }
+  if (kind == 12 || kind == 15) {
+    // bilobed — basophil and eosinophil both share this shape.
+    let a = length(p - vec2<f32>(-0.13, 0.0)) - 0.13;
+    let b = length(p - vec2<f32>( 0.13, 0.0)) - 0.13;
+    return min(a, b);
+  }
+  if (kind == 3) { return length(p) - 0.30; }                                   // nk — dominant
+  if (kind == 4) { return length(p) - 0.26; }                                   // b-cell — round
+  if (kind == 7) { return length(p - vec2<f32>(0.18, -0.08)) - 0.18; }          // amoeba eccentric
+  if (kind == 11) { return length(p) - 0.18; }                                  // dendritic round-small
+  if (kind == 14) { return length(p) - 0.30; }                                  // t-cell — large dominant
+  if (kind == 17) { return length(p) - 0.16; }                                  // germ — small
+  if (kind == 10) { return length(p) - 0.20; }                                  // mast — round
+  if (kind == 19) { return length(p) - 0.18; }                                  // mite — round
+  return length(p) - 0.22;                                                       // eukaryote default
+}
+
+// ── environment backgrounds ─────────────────────────────────
+// Five procedural environments matching Kurzgesagt-style explainers:
+// bloodstream (red flow + RBC silhouettes), lung (alveolar honey-
+// comb), heart (striated muscle bands), brain (radial dendrites +
+// synapse dots), bone marrow (Voronoi trabeculae). Each modulates
+// its palette by the active theme so the cell on top reads
+// cohesively.
+fn envBackground(uv: vec2<f32>, kind: i32, theme: i32, t: f32) -> vec3<f32> {
+  // kind 6 — flat black. Useful for isolating the cell silhouette
+  // when debugging shader changes; nothing in this branch can ever
+  // tint the cytoplasm/membrane/etc through the bg compositing path.
+  if (kind == 6) { return vec3<f32>(0.0); }
+
+  if (kind == 1) {
+    // lung · smoke — adapted from "Smoke" by Roman Bobniev / FatumR
+    // (Apache 2.0, https://www.shadertoy.com/view/ldBSDd). Layered
+    // value-noise FBM with self-referential offsets; the original's
+    // audio-reactive amplitude is replaced by a slow breathing sine.
+    let v = smoke_complex((uv + vec2<f32>(0.5)) * 1.0, t);
+    var hot  = vec3<f32>(0.510, 0.204, 0.016);   // orangeColor2
+    var cool = vec3<f32>(0.529, 0.808, 0.980);   // blueColor
+    if (theme == 1) { hot = vec3<f32>(0.85, 0.30, 0.10); cool = vec3<f32>(0.30, 0.75, 0.95); }
+    if (theme == 2) { hot = vec3<f32>(0.30, 0.10, 0.45); cool = vec3<f32>(0.55, 0.80, 1.00); }
+    if (theme == 3) { hot = vec3<f32>(0.45, 0.20, 0.10); cool = vec3<f32>(0.42, 0.65, 0.85); }
+    return mix(hot, cool, clamp(v, 0.0, 1.0));
+  }
+  if (kind == 2) {
+    // heart — striated muscle bands
+    let stripes = sin(uv.y * 18.0 + sin(uv.x * 4.0) * 0.5) * 0.5 + 0.5;
+    var base   = vec3<f32>(0.32, 0.05, 0.07);
+    var stripe = vec3<f32>(0.55, 0.08, 0.10);
+    if (theme == 1) { base = vec3<f32>(0.45, 0.10, 0.10); stripe = vec3<f32>(0.18, 0.02, 0.04); }
+    if (theme == 2) { base = vec3<f32>(0.18, 0.03, 0.06); stripe = vec3<f32>(0.85, 0.20, 0.30); }
+    if (theme == 3) { base = vec3<f32>(0.42, 0.10, 0.12); stripe = vec3<f32>(0.30, 0.06, 0.08); }
+    return mix(base, stripe, stripes);
+  }
+  if (kind == 3) {
+    // brain — "Star Nest" by Pablo Roman Andrioli, MIT licence,
+    // https://www.shadertoy.com/view/XlfGRj. Volumetric folded-fractal
+    // raymarch — reads as a dense neural / synapse network. Loop
+    // counts trimmed (volsteps 12, iterations 12) from the original
+    // (20, 17) for mobile cost; visuals stay close.
+    let zoom = 0.800;
+    let tile = 0.850;
+    let formuparam = 0.53;
+    let stepsize = 0.10;
+    let brightness = 0.0015;
+    let darkmatter = 0.300;
+    let distfading = 0.730;
+    let saturation = 0.850;
+    var dir = vec3<f32>(uv * zoom, 1.0);
+    let time2 = t * 0.010 + 0.25;
+    // `from` is a reserved keyword in WGSL — renamed to `origin`.
+    var origin = vec3<f32>(1.0, 0.5, 0.5) + vec3<f32>(time2 * 2.0, time2, -2.0);
+    var s: f32 = 0.10;
+    var fade: f32 = 1.0;
+    var v: vec3<f32> = vec3<f32>(0.0);
+    for (var r: i32 = 0; r < 12; r = r + 1) {
+      var p = origin + s * dir * 0.5;
+      p = abs(vec3<f32>(tile) - ((p % vec3<f32>(tile * 2.0)) + vec3<f32>(tile * 2.0)) % vec3<f32>(tile * 2.0));
+      var pa: f32 = 0.0;
+      var a: f32 = 0.0;
+      for (var i: i32 = 0; i < 12; i = i + 1) {
+        p = abs(p) / dot(p, p) - vec3<f32>(formuparam);
+        a = a + abs(length(p) - pa);
+        pa = length(p);
+      }
+      let dm = max(0.0, darkmatter - a * a * 0.001);
+      a = a * a * a;
+      if (r > 4) { fade = fade * (1.0 - dm); }
+      v = v + vec3<f32>(fade);
+      v = v + vec3<f32>(s, s * s, s * s * s * s) * a * brightness * fade;
+      fade = fade * distfading;
+      s = s + stepsize;
+    }
+    let lv = length(v);
+    v = mix(vec3<f32>(lv), v, vec3<f32>(saturation));
+    var col = v * 0.01;
+    if (theme == 1) { col = clamp(col * 1.6, vec3<f32>(0.0), vec3<f32>(1.0)); }
+    if (theme == 2) { col = mix(col, vec3<f32>(0.20, 0.10, 0.45), 0.25); }
+    if (theme == 3) { col = clamp(col * 0.85 + vec3<f32>(0.04, 0.04, 0.07), vec3<f32>(0.0), vec3<f32>(1.0)); }
+    return col;
+  }
+  if (kind == 4) {
+    // bone marrow — Voronoi-style trabeculae (single ring of neighbours)
+    let g = uv * 4.0;
+    let fi = floor(g);
+    let f = fract(g);
+    var minD: f32 = 9.0;
+    for (var ix: i32 = -1; ix <= 1; ix = ix + 1) {
+      for (var iy: i32 = -1; iy <= 1; iy = iy + 1) {
+        let nb = fi + vec2<f32>(f32(ix), f32(iy));
+        let pt = vec2<f32>(f32(ix), f32(iy)) + 0.5
+               + 0.45 * vec2<f32>(hash(nb), hash(nb + vec2<f32>(7.0, 11.0))) - f;
+        minD = min(minD, length(pt));
+      }
+    }
+    let trab = smoothstep(0.05, 0.20, minD);
+    var marrow = vec3<f32>(0.75, 0.65, 0.40);
+    var bone   = vec3<f32>(0.25, 0.18, 0.10);
+    if (theme == 1) { marrow = vec3<f32>(0.95, 0.85, 0.55); bone = vec3<f32>(0.10, 0.08, 0.05); }
+    if (theme == 2) { marrow = vec3<f32>(0.78, 0.70, 0.45); bone = vec3<f32>(0.30, 0.10, 0.40); }
+    if (theme == 3) { marrow = vec3<f32>(0.65, 0.55, 0.40); bone = vec3<f32>(0.30, 0.20, 0.15); }
+    return mix(bone, marrow, trab);
+  }
+  if (kind == 5) {
+    // red cells · voronoi — adapted from "Red Cells I" by Shadertoy
+    // user wrasm (https://www.shadertoy.com/view/WlfGDM, CC BY-NC-SA 3.0).
+    // Smooth-min Voronoi over a 3x3 neighbour grid with animated point
+    // positions; the highlight peak per cell reads as a flowing
+    // erythrocyte field. Per-theme palette modulation as elsewhere.
+    let st = uv * 5.0;
+    let cell_pos   = floor(st);
+    let cell_coord = fract(st);
+    var sum: f32 = 0.0;
+    for (var ix: i32 = -1; ix <= 1; ix = ix + 1) {
+      for (var iy: i32 = -1; iy <= 1; iy = iy + 1) {
+        let nb = vec2<f32>(f32(ix), f32(iy));
+        let h0 = hash(cell_pos + nb);
+        let h1 = hash(cell_pos + nb + vec2<f32>(17.3, 41.7));
+        let nb_seed = vec2<f32>(h0, h1);
+        let nb_pos  = 0.5 + 0.5 * sin(t * 0.4 + nb_seed * 6.0);
+        let diff = (nb + nb_pos) - cell_coord;
+        sum = sum + exp(-32.0 * dot(diff, diff));
+      }
+    }
+    let v = -(1.0 / 32.0) * log(max(sum, 1e-6));
+    let intensity = 0.03 / pow(max(1.2 - sqrt(max(v, 0.0)), 0.05), 3.0);
+    var base = vec3<f32>(200.0/255.0, 50.0/255.0, 69.0/255.0);
+    if (theme == 1) { base = vec3<f32>(0.95, 0.30, 0.30); }   // cartoon
+    if (theme == 2) { base = vec3<f32>(0.55, 0.10, 0.20); }   // kurzgesagt
+    if (theme == 3) { base = vec3<f32>(0.65, 0.25, 0.30); }   // classic
+    return clamp(base * intensity, vec3<f32>(0.0), vec3<f32>(2.0));
+  }
+  // kind == 0 — bloodstream (default).
+  let n   = fbm(uv * 3.0 + vec2<f32>(t * 0.04, t * 0.03));
+  let rbc = fbm(uv * 8.0 + vec2<f32>(0.0, t * 0.15));
+  if (theme == 1) {
+    let rbcDot = step(0.55, rbc);
+    return mix(vec3<f32>(0.55, 0.10, 0.12), vec3<f32>(0.85, 0.30, 0.30), rbcDot);
+  }
+  if (theme == 2) {
+    let rbcDot = step(0.55, rbc);
+    var col = mix(vec3<f32>(0.18, 0.03, 0.05), vec3<f32>(0.50, 0.08, 0.18), rbcDot);
+    col = col + vec3<f32>(0.40, 0.10, 0.10) * smoothstep(0.55, 0.85, rbc);
+    return col;
+  }
+  if (theme == 3) {
+    let r = length(uv);
+    return mix(vec3<f32>(0.30, 0.05, 0.08), vec3<f32>(0.10, 0.02, 0.04), smoothstep(0.0, 1.2, r));
+  }
+  // microscope — fbm tint + RBC silhouettes drifting
+  var col = mix(vec3<f32>(0.18, 0.03, 0.05), vec3<f32>(0.42, 0.06, 0.08), n);
+  col = mix(col, vec3<f32>(0.62, 0.10, 0.14), smoothstep(0.55, 0.75, rbc) * 0.5);
+  return col;
+}
+
+// Caustics overlay — adapted from "Tileable Water Caustic" by
+// David Hoskins (modified joltz0r), https://www.shadertoy.com/view/ltSczG.
+// Shadertoy default licence (CC BY-NC-SA 3.0). Returns a {tint,
+// offset} pair: callers use offset to displace the bg sample and
+// multiply the result by tint.
+struct CausticOut { tint: vec3<f32>, offset: vec2<f32> };
+fn computeCaustics(uv: vec2<f32>, t: f32) -> CausticOut {
+  let TAU = 6.28318530718;
+  let time2 = t * 0.5 + 23.0;
+  let p0 = ((uv * TAU) % vec2<f32>(TAU) + vec2<f32>(TAU)) % vec2<f32>(TAU) - vec2<f32>(150.0);
+  var i = p0;
+  var c: f32 = 1.0;
+  let inten: f32 = 0.005;
+  for (var n: i32 = 0; n < 5; n = n + 1) {
+    let tn = time2 * (1.0 - (3.5 / f32(n + 1)));
+    i = p0 + vec2<f32>(cos(tn - i.x) + sin(tn + i.y),
+                       sin(tn - i.y) + cos(tn + i.x));
+    let denom = vec2<f32>(p0.x / (sin(i.x + tn) / inten),
+                          p0.y / (cos(i.y + tn) / inten));
+    c = c + 1.0 / max(length(denom), 1e-4);
+  }
+  c = c / 5.0;
+  c = 1.17 - pow(c, 1.4);
+  let shade = pow(abs(c), 8.0);
+  let tint = clamp((vec3<f32>(shade) + vec3<f32>(0.0, 1.35, 0.5)) * 2.0,
+                   vec3<f32>(0.0), vec3<f32>(1.0));
+  let off  = vec2<f32>(cos(c) - 0.75, sin(c) - 0.75) * 0.04;
+  var out: CausticOut;
+  out.tint = tint;
+  out.offset = off;
+  return out;
+}
+
+// ── fragment ────────────────────────────────────────────────
+@fragment
+fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+  let res = U.resolution;
+  let t = U.time * U.activity;
+  let kind = i32(round(U.cellType));
+
+  let theme = i32(round(U.theme));
+  let bgKind = i32(round(U.bgKind));
+
+  // centre + aspect-correct (viewport space)
+  var uv = (frag.xy - 0.5 * res) / min(res.x, res.y);
+  uv.y = -uv.y;
+  // Divide so a HIGHER zoom value makes the cell BIGGER (natural
+  // direction: pinch-spread zooms in, wheel-up zooms in, slider-
+  // right zooms in). Was multiplication in earlier revisions; the
+  // wheel + pinch unification in PR #84 made the inverted direction
+  // visible to the user (PR-level commentary in commit message).
+  uv = uv / max(U.zoom, 0.01);
+
+  // Cell-local UV — translates by user drag, scales by user pinch.
+  // All cell-body computations (membrane SDF, nucleus, granules,
+  // organelles, special features) read uvCell; viewport-scale
+  // effects (env background, microscope chromatic limb, brownian
+  // particles) keep using uv.
+  let uvCell = (uv - vec2<f32>(U.cellOffsetX, U.cellOffsetY)) / max(U.cellRadius, 0.01);
+
+  // ── extracellular medium ──
+  // Initialise to zero up front. Both branches below assign, but
+  // some drivers / WGSL validators treat the read as undefined
+  // unless the var is initialised at declaration — manifests as
+  // a black-bg field on certain hardware.
+  var bg: vec3<f32> = vec3<f32>(0.0);
+  if (U.caustics > 0.5) {
+    let cx = computeCaustics((uv + vec2<f32>(0.5)) * 1.0, t);
+    // Background is theme-INDEPENDENT — always pass theme = 0 so
+    // the env palette stays the same regardless of which microscope
+    // / cartoon / kurzgesagt / classic theme is picked. The cell
+    // body still uses `theme` for its own modulation.
+    bg = envBackground(uv + cx.offset, bgKind, 0, t) * cx.tint;
+  } else {
+    bg = envBackground(uv, bgKind, 0, t);
+  }
+
+  // ── cell body ──
+  let mem = membraneFor(uvCell, kind, t);
+  let inside = smoothstep(0.004, -0.004, mem);
+  let edge = smoothstep(0.022, 0.0, abs(mem));
+
+  // cytoplasm — type-specific stain with subtle structure
+  var cyto = cytoColor(kind);
+  let granular = fbm(uvCell * 22.0 + vec2<f32>(t * 0.02, 0.0));
+  cyto = cyto - vec3<f32>(0.10, 0.07, 0.08) * granular;
+  let sheets = fbm(uvCell * 6.0 - vec2<f32>(t * 0.03, t * 0.02));
+  cyto = cyto + vec3<f32>(0.08, 0.04, 0.05) * (sheets - 0.5);
+
+  // b-cell rough-ER stripes — diagonal sinusoid in the cytoplasm
+  if (kind == 4) {
+    let er = sin(uvCell.x * 14.0 + uvCell.y * 6.0 + t * 0.4) * 0.5 + 0.5;
+    cyto = cyto + vec3<f32>(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
+  }
+
+  // ── nucleus ──
+  let nucD = nucleusSdf(uvCell, kind, t);
+  let nucMask = smoothstep(0.006, -0.006, nucD);
+  let nucEdge = smoothstep(0.020, 0.0, abs(nucD));
+  let nucOff = vec2<f32>(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
+  let nucP = uvCell - nucOff;
+  var nucCol = vec3<f32>(0.30, 0.14, 0.42);
+  if (kind == 3)                  { nucCol = vec3<f32>(0.20, 0.12, 0.46); }   // nk
+  if (kind == 4)                  { nucCol = vec3<f32>(0.36, 0.12, 0.40); }   // b-cell
+  if (kind == 9 || kind == 14)    { nucCol = vec3<f32>(0.18, 0.12, 0.44); }   // monocyte / t-cell — blue
+  if (kind == 11)                 { nucCol = vec3<f32>(0.15, 0.20, 0.40); }   // dendritic — blue
+  if (kind == 12)                 { nucCol = vec3<f32>(0.30, 0.05, 0.20); }   // basophil — dark
+  if (kind == 15)                 { nucCol = vec3<f32>(0.40, 0.18, 0.10); }   // eosinophil — orange
+  if (kind == 10)                 { nucCol = vec3<f32>(0.10, 0.30, 0.18); }   // mast — green
+  if (kind == 17)                 { nucCol = vec3<f32>(0.15, 0.30, 0.05); }   // germ — green
+  if (kind == 19)                 { nucCol = vec3<f32>(0.30, 0.15, 0.05); }   // mite — orange
+  let chromatin = fbm(nucP * 28.0 + vec2<f32>(t * 0.05, 0.0));
+  nucCol = nucCol + vec3<f32>(0.18, 0.08, 0.22) * chromatin;
+  // nucleolus (single round/kidney-style nucleus only — not bilobed/multilobed)
+  if (kind == 0 || kind == 3 || kind == 4 || kind == 7
+   || kind == 10 || kind == 11 || kind == 14 || kind == 17 || kind == 19) {
+    let nlD = length(nucP - vec2<f32>(0.05, 0.04)) - 0.045;
+    let nlMask = smoothstep(0.004, -0.004, nlD);
+    nucCol = mix(nucCol, vec3<f32>(0.55, 0.20, 0.50), nlMask);
+  }
+
+  // ── mitochondria (capsules) ── absent for prokaryotes / virus /
+  // spore / anucleate fragments / toxin
+  var mito: f32 = 1e9;
+  var nMito = i32(round(U.organelles));
+  if (kind == 5 || kind == 8) { nMito = 0; }
+  if (kind == 6 || kind == 17) { nMito = 0; }                   // bacterium / germ — prokaryotes
+  if (kind == 13 || kind == 16 || kind == 20) { nMito = 0; }    // platelet / rbc / toxin
+  for (var i: i32 = 0; i < 16; i = i + 1) {
+    if (i >= nMito) { break; }
+    let fi = f32(i);
+    let baseA = fi * 0.7853 + t * 0.08;
+    let rad = 0.40 + 0.05 * sin(fi * 1.7);
+    let centre = vec2<f32>(cos(baseA), sin(baseA)) * rad
+               + vec2<f32>(0.015 * sin(t * 1.3 + fi),
+                           0.015 * cos(t * 1.1 + fi * 2.0));
+    let dir = vec2<f32>(cos(baseA + 1.5708), sin(baseA + 1.5708));
+    let len = 0.045;
+    let a = centre - dir * len;
+    let b = centre + dir * len;
+    let d = capsule(uvCell, a, b, 0.018);
+    mito = min(mito, d);
+  }
+  let mitoMask = smoothstep(0.004, -0.004, mito);
+  let mitoEdge = smoothstep(0.012, 0.0, abs(mito));
+  let mitoCol = vec3<f32>(0.95, 0.55, 0.30);
+
+  // ── vesicles / granules ── count + colour vary by type
+  var vesCount: i32 = 14;
+  if (kind == 1)  { vesCount = 22; }   // macrophage lysosomes
+  if (kind == 2)  { vesCount = 30; }   // neutrophil fine granules
+  if (kind == 3)  { vesCount = 6;  }   // nk cytotoxic granules
+  if (kind == 4)  { vesCount = 8;  }   // b-cell
+  if (kind == 6)  { vesCount = 18; }   // bacterium ribosomes
+  if (kind == 7)  { vesCount = 10; }   // amoeba food vacuoles
+  if (kind == 5)  { vesCount = 0;  }   // virus
+  if (kind == 8)  { vesCount = 4;  }   // spore
+  if (kind == 9)  { vesCount = 14; }   // monocyte
+  if (kind == 10) { vesCount = 60; }   // mast — granule-packed (signature)
+  if (kind == 11) { vesCount = 6;  }   // dendritic — minimal
+  if (kind == 12) { vesCount = 25; }   // basophil — dark metachromatic granules
+  if (kind == 13) { vesCount = 4;  }   // platelet — alpha-granules
+  if (kind == 14) { vesCount = 0;  }   // t-cell — smooth lymphocyte
+  if (kind == 15) { vesCount = 18; }   // eosinophil — large bright acidophilic granules
+  if (kind == 16) { vesCount = 0;  }   // rbc
+  if (kind == 17) { vesCount = 8;  }   // germ
+  if (kind == 18) { vesCount = 12; }   // slime
+  if (kind == 19) { vesCount = 10; }   // mite
+  if (kind == 20) { vesCount = 8;  }   // toxin sparkles
+  var vesRadius = 0.012;
+  if (kind == 2)  { vesRadius = 0.008; }
+  if (kind == 3)  { vesRadius = 0.020; }
+  if (kind == 7)  { vesRadius = 0.022; }
+  if (kind == 10) { vesRadius = 0.006; }   // mast — tiny dense
+  if (kind == 12) { vesRadius = 0.010; }
+  if (kind == 15) { vesRadius = 0.020; }   // eosinophil — large bright
+  if (kind == 13) { vesRadius = 0.014; }
+  if (kind == 20) { vesRadius = 0.014; }
+  var vesCol = vec3<f32>(1.0, 0.92, 0.65);
+  if (kind == 3)  { vesCol = vec3<f32>(0.75, 0.85, 1.00); }
+  if (kind == 6)  { vesCol = vec3<f32>(0.80, 0.90, 0.55); }
+  if (kind == 7)  { vesCol = vec3<f32>(0.55, 0.45, 0.30); }
+  if (kind == 10) { vesCol = vec3<f32>(0.12, 0.40, 0.25); }   // mast — dark green
+  if (kind == 12) { vesCol = vec3<f32>(0.20, 0.10, 0.55); }   // basophil — dark blue/violet
+  if (kind == 15) { vesCol = vec3<f32>(1.00, 0.55, 0.30); }   // eosinophil — bright orange
+  if (kind == 13) { vesCol = vec3<f32>(0.55, 0.40, 0.10); }   // platelet — amber
+  if (kind == 17) { vesCol = vec3<f32>(0.70, 0.85, 0.45); }   // germ — light green
+  if (kind == 18) { vesCol = vec3<f32>(0.60, 0.75, 0.20); }   // slime
+  if (kind == 19) { vesCol = vec3<f32>(0.90, 0.60, 0.20); }   // mite
+  if (kind == 20) { vesCol = vec3<f32>(1.00, 0.90, 1.00); }   // toxin — bright sparkle
+  var ves: f32 = 1e9;
+  for (var j: i32 = 0; j < 32; j = j + 1) {
+    if (j >= vesCount) { break; }
+    let fj = f32(j);
+    let pos = vec2<f32>(
+      0.42 * sin(fj * 1.91 + t * (0.18 + 0.03 * fj)),
+      0.42 * cos(fj * 2.37 + t * (0.21 + 0.02 * fj))
+    );
+    let jit = vec2<f32>(0.008 * sin(t * 3.0 + fj * 7.0),
+                        0.008 * cos(t * 2.6 + fj * 5.0));
+    ves = min(ves, length(uvCell - pos - jit) - vesRadius);
+  }
+  let vesMask = smoothstep(0.003, -0.003, ves);
+
+  // virus capsid hex pattern overlay — bright lattice on the body
+  var capsid: f32 = 0.0;
+  if (kind == 5) {
+    let h = 0.5 + 0.5 * cos(uvCell.x * 28.0) * cos(uvCell.y * 28.0);
+    capsid = pow(h, 6.0);
+  }
+
+  // bacterium flagellum — a wiggling tail extending right
+  var flag: f32 = 1e9;
+  if (kind == 6) {
+    let xf = uvCell.x - 0.32;
+    if (xf > 0.0 && xf < 0.45) {
+      let yf = uvCell.y - 0.04 * sin(xf * 26.0 - t * 8.0);
+      flag = abs(yf) - 0.006;
+    }
+  }
+  let flagMask = smoothstep(0.003, -0.003, flag);
+
+  // spore double-wall — inner ring inside the outer membrane
+  var wall: f32 = 1e9;
+  if (kind == 8) {
+    wall = abs(length(uvCell) - 0.30) - 0.014;
+  }
+  let wallMask = smoothstep(0.003, -0.003, wall);
+
+  // rbc biconcave — dark central depression on the disc
+  var biconcave: f32 = 0.0;
+  if (kind == 16) {
+    biconcave = smoothstep(0.22, 0.04, length(uvCell));
+  }
+
+  // slime hyphal threads — faint dark radial filaments at the rim
+  var hyphae: f32 = 0.0;
+  if (kind == 18) {
+    let ang = atan2(uvCell.y, uvCell.x);
+    let r = length(uvCell);
+    let lines = pow(abs(cos(ang * 1.5 + t * 0.1)), 50.0);
+    hyphae = lines * smoothstep(0.55, 0.40, r) * smoothstep(0.22, 0.32, r);
+  }
+
+  // toxin glow — bright violet halo just inside the membrane
+  var toxinGlow: f32 = 0.0;
+  if (kind == 20) {
+    let r = length(uvCell);
+    toxinGlow = pow(smoothstep(0.55, 0.42, r), 2.0) * smoothstep(0.30, 0.42, r);
+  }
+
+  // ── compose ── (theme switch)
+  // All four themes read the same per-type pre-computed locals:
+  // cyto / vesCol / nucCol / nucMask / nucEdge / mito* / capsid /
+  // flagMask / wallMask / biconcave / hyphae / toxinGlow / edge /
+  // inside / bg. Each branch composes them differently to deliver
+  // a distinct visual language without any new helpers.
+  // Use uvCell (cell-relative) for halo/highlight/biconcave; use uv
+  // (viewport) for the microscope chromatic limb + brownian particles.
+  let r = length(uvCell);
+  let rView = length(uv);
+  var col: vec3<f32>;
+
+  if (theme == 1) {
+    // ─── cartoon · saturated, thick black outlines ───
+    col = bg;
+    let cytoSat = clamp(cyto * 1.30, vec3<f32>(0.0), vec3<f32>(1.0));
+    col = mix(col, cytoSat, inside);
+    let hl = smoothstep(0.16, 0.0, length(uvCell - vec2<f32>(-0.18, 0.18)));
+    col = col + vec3<f32>(0.32, 0.30, 0.28) * hl * inside;
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col = col + vec3<f32>(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3<f32>(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3<f32>(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.45, biconcave * inside);
+    col = col + vec3<f32>(0.55, 0.30, 0.85) * toxinGlow;
+    col = mix(col, vec3<f32>(0.0, 0.0, 0.0), edge);
+  } else if (theme == 2) {
+    // ─── kurzgesagt · flat cyto, thin pale rim, neon halo ───
+    col = bg;
+    col = mix(col, cyto, inside);
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col = col + vec3<f32>(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3<f32>(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3<f32>(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.55, biconcave * inside);
+    col = col + vec3<f32>(0.55, 0.30, 0.85) * toxinGlow;
+    let halo = pow(smoothstep(0.55, 0.42, r), 2.0);
+    col = col + cyto * 1.6 * halo * inside;
+    col = mix(col, vec3<f32>(0.95, 0.92, 0.85), edge * 0.4);
+  } else if (theme == 3) {
+    // ─── classic · canvas2d game look (radial fill + dark outline) ───
+    col = bg;
+    let cytoTop = clamp(cyto * 1.35 + vec3<f32>(0.05), vec3<f32>(0.0), vec3<f32>(1.0));
+    let highlight = smoothstep(0.7, 0.0, length(uvCell - vec2<f32>(-0.15, 0.18)));
+    let cytoFill = mix(cyto, cytoTop, highlight);
+    col = mix(col, cytoFill, inside);
+    col = mix(col, vec3<f32>(0.04, 0.02, 0.08), edge);
+  } else {
+    // ─── microscope · H&E (default) — existing behaviour ───
+    col = bg;
+    col = mix(col, cyto, inside);
+    col = mix(col, mitoCol, mitoMask * inside);
+    col = mix(col, vec3<f32>(0.45, 0.20, 0.10), mitoEdge * inside * 0.6);
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col = mix(col, vec3<f32>(0.18, 0.08, 0.25), nucEdge * (1.0 - nucMask) * 0.7);
+    col = col + vec3<f32>(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3<f32>(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3<f32>(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.45, biconcave * inside);
+    col = mix(col, vec3<f32>(0.20, 0.30, 0.05), hyphae * 0.7);
+    col = col + vec3<f32>(0.50, 0.30, 0.80) * toxinGlow;
+    col = mix(col, vec3<f32>(0.16, 0.06, 0.18), edge * 0.85);
+
+    // brownian particles + chromatic limb + film grain — microscope only.
+    for (var k: i32 = 0; k < 18; k = k + 1) {
+      let fk = f32(k);
+      let speedK = 0.3 + 0.5 * hash(vec2<f32>(fk, 1.0));
+      let p = vec2<f32>(
+        0.55 * sin(fk * 3.71 + t * speedK),
+        0.55 * cos(fk * 5.19 + t * speedK * 1.13)
+      );
+      let d = length(uvCell - p);
+      col = col + vec3<f32>(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, d) * inside;
+    }
+    col = col + vec3<f32>(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, rView), 2.0) * 0.6;
+    let g = hash(frag.xy + vec2<f32>(t * 31.7, t * 17.3)) - 0.5;
+    col = col + vec3<f32>(g) * 0.025;
+  }
+
+  return vec4<f32>(col, 1.0);
+}
+</script>
+
+<script id="shader-glsl-vs" type="text/plain">#version 300 es
+precision highp float;
+out vec2 v_uv;
+void main() {
+  // fullscreen triangle
+  vec2 p = vec2(
+    float((gl_VertexID & 1) << 2) - 1.0,
+    float((gl_VertexID & 2) << 1) - 1.0
+  );
+  v_uv = p;
+  gl_Position = vec4(p, 0.0, 1.0);
+}
+</script>
+
+<script id="shader-glsl-fs" type="text/plain">#version 300 es
+// ────────────────────────────────────────────────────────────
+//  cytologica · GLSL ES 3.00 fragment shader
+//  identical math to the WGSL version, retargeted for WebGL2
+//
+//  cellType selector (0..20):
+//    0 eukaryote   1 macrophage   2 neutrophil
+//    3 nk-cell     4 b-cell       5 virus
+//    6 bacterium   7 amoeba       8 spore
+//    9 monocyte   10 mast        11 dendritic
+//   12 basophil   13 platelet    14 t-cell
+//   15 eosinophil 16 rbc         17 germ
+//   18 slime      19 mite        20 toxin
+// ────────────────────────────────────────────────────────────
+precision highp float;
+
+uniform vec2  u_resolution;
+uniform float u_time;
+uniform float u_zoom;
+uniform float u_activity;
+uniform float u_organelles;
+uniform float u_cellType;
+uniform float u_theme;
+uniform float u_bgKind;
+uniform float u_cellOffsetX;
+uniform float u_cellOffsetY;
+uniform float u_cellRadius;
+uniform float u_caustics;
+
+out vec4 outColor;
+
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash(i);
+  float b = hash(i + vec2(1.0, 0.0));
+  float c = hash(i + vec2(0.0, 1.0));
+  float d = hash(i + vec2(1.0, 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float fbm(vec2 p) {
+  float v = 0.0;
+  float a = 0.5;
+  for (int i = 0; i < 5; i++) {
+    v += a * noise(p);
+    p *= 2.03;
+    a *= 0.5;
+  }
+  return v;
+}
+
+float capsule(vec2 p, vec2 a, vec2 b, float r) {
+  vec2 pa = p - a;
+  vec2 ba = b - a;
+  float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+  return length(pa - ba * h) - r;
+}
+
+// Smoke-FBM helpers (mirrors WGSL). Adapted from "Smoke" by Roman
+// Bobniev / FatumR (Apache 2.0, https://www.shadertoy.com/view/ldBSDd).
+float smoke_rand2(vec2 co) {
+  return fract(cos(dot(co, vec2(12.9898, 78.233))) * 43758.5453);
+}
+float smoke_valueNoise(vec2 vl) {
+  vec2 g = floor(vl);
+  float a = smoke_rand2(g);
+  float b = smoke_rand2(g + vec2(1.0, 0.0));
+  float c = smoke_rand2(g + vec2(0.0, 1.0));
+  float d = smoke_rand2(g + vec2(1.0, 1.0));
+  vec2 f = vec2(smoothstep(0.0, 1.0, fract(vl.x)),
+                smoothstep(0.0, 1.0, fract(vl.y)));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+float smoke_fbm(vec2 p_in) {
+  float amplitude = 0.5;
+  float rez = 0.0;
+  vec2 p = p_in;
+  for (int i = 0; i < 6; i++) {
+    rez += amplitude * smoke_valueNoise(p);
+    amplitude /= 2.0;
+    p *= 2.0;
+  }
+  return rez;
+}
+float smoke_complex(vec2 p, float t) {
+  float breath = 0.55 + 0.20 * sin(t * 0.6);
+  float slow = t / 2.5;
+  float fast = t / 0.5;
+  vec2 off1 = vec2(slow, 0.0);
+  vec2 off2 = vec2(sin(fast) * 0.1, 0.0);
+  float n0 = smoke_fbm(p - off2);
+  float n1 = smoke_fbm(p + 2.0 * n0);
+  float n2 = smoke_fbm(p + n1);
+  float n3 = smoke_fbm(p + off1 + n2);
+  return breath * n3;
+}
+
+float membraneFor(vec2 uv, int kind, float t) {
+  if (kind == 6) {
+    float breathe = 0.018 * sin(t * 0.6);
+    return capsule(uv, vec2(-0.32, 0.0), vec2(0.32, 0.0), 0.20 + breathe);
+  }
+  if (kind == 5) {
+    float ang = atan(uv.y, uv.x);
+    float hex = 0.04 * cos(ang * 6.0 + t * 0.3);
+    float spikes = 0.05 * pow(0.5 + 0.5 * cos(ang * 12.0 - t * 0.2), 6.0);
+    return length(uv) - (0.42 + hex + spikes);
+  }
+  if (kind == 7) {
+    float ang = atan(uv.y, uv.x);
+    float pseudo = 0.10 * sin(ang * 3.0 + t * 0.4)
+                 + 0.06 * sin(ang * 7.0 - t * 0.25);
+    float breathe = 0.02 * sin(t * 0.7);
+    return length(uv) - (0.60 + pseudo + breathe);
+  }
+  if (kind == 8) {
+    return length(uv) - (0.36 + 0.012 * sin(t * 0.4));
+  }
+  if (kind == 13) {
+    float ang = atan(uv.y, uv.x);
+    float star = 0.05 * cos(ang * 10.0);
+    return length(uv) - (0.30 + star);
+  }
+  if (kind == 16) {
+    return length(uv) - (0.50 + 0.006 * sin(t * 0.4));
+  }
+  if (kind == 11) {
+    float ang = atan(uv.y, uv.x);
+    float tend = 0.18 * pow(0.5 + 0.5 * cos(ang * 6.0 + t * 0.2), 14.0);
+    return length(uv) - (0.42 + tend);
+  }
+  if (kind == 19) {
+    float ang = atan(uv.y, uv.x);
+    float legs = 0.06 * pow(0.5 + 0.5 * cos(ang * 4.0 + 0.5), 8.0);
+    return length(uv) - (0.46 + legs);
+  }
+  if (kind == 20) {
+    float ang = atan(uv.y, uv.x);
+    float star = 0.12 * pow(0.5 + 0.5 * cos(ang * 10.0 + t * 0.3), 4.0);
+    return length(uv) - (0.40 + star);
+  }
+  if (kind == 10) {
+    vec2 stretched = vec2(uv.x * 0.85, uv.y * 1.10);
+    return length(stretched) - (0.52 + 0.012 * sin(t * 0.5));
+  }
+  if (kind == 18) {
+    float ang = atan(uv.y, uv.x);
+    float chaos = 0.09 * sin(ang * 4.0  + t * 0.3)
+                + 0.05 * sin(ang * 7.0  - t * 0.5)
+                + 0.04 * sin(ang * 11.0 + t * 0.8);
+    return length(uv) - (0.55 + chaos);
+  }
+  if (kind == 17) {
+    float ang = atan(uv.y, uv.x);
+    float lobes = 0.07 * cos(ang * 3.0 + t * 0.4);
+    return length(uv) - (0.40 + lobes);
+  }
+  if (kind == 9) {
+    float ang = atan(uv.y, uv.x);
+    float ripple = 0.04 * sin(ang * 11.0 + t * 0.5)
+                 + 0.02 * sin(ang * 23.0 - t * 0.3);
+    return length(uv) - (0.58 + ripple);
+  }
+  float amp = 1.0;
+  float rad = 0.62;
+  if (kind == 1)  { amp = 1.6;  rad = 0.66; }
+  if (kind == 2)  { amp = 0.5;  rad = 0.55; }
+  if (kind == 3)  { amp = 0.4;  rad = 0.46; }
+  if (kind == 4)  { amp = 0.6;  rad = 0.50; }
+  if (kind == 12) { amp = 0.30; rad = 0.50; }
+  if (kind == 14) { amp = 0.25; rad = 0.52; }
+  if (kind == 15) { amp = 0.35; rad = 0.50; }
+  float ang = atan(uv.y, uv.x);
+  float wob = amp * (0.045 * sin(ang * 5.0  + t * 0.6)
+                   + 0.025 * sin(ang * 9.0  - t * 0.4)
+                   + 0.015 * sin(ang * 17.0 + t * 1.1));
+  return length(uv) - (rad + wob);
+}
+
+vec3 cytoColor(int kind) {
+  if (kind == 1)  return vec3(0.74, 0.50, 0.55);
+  if (kind == 2)  return vec3(0.86, 0.70, 0.74);
+  if (kind == 3)  return vec3(0.55, 0.50, 0.72);
+  if (kind == 4)  return vec3(0.70, 0.45, 0.55);
+  if (kind == 5)  return vec3(0.30, 0.25, 0.42);
+  if (kind == 6)  return vec3(0.55, 0.70, 0.40);
+  if (kind == 7)  return vec3(0.55, 0.55, 0.40);
+  if (kind == 8)  return vec3(0.78, 0.66, 0.40);
+  if (kind == 9)  return vec3(0.43, 0.55, 0.94);   // monocyte
+  if (kind == 10) return vec3(0.33, 0.66, 0.47);   // mast
+  if (kind == 11) return vec3(0.30, 0.56, 0.81);   // dendritic
+  if (kind == 12) return vec3(0.85, 0.48, 0.63);   // basophil
+  if (kind == 13) return vec3(0.84, 0.65, 0.08);   // platelet
+  if (kind == 14) return vec3(0.55, 0.48, 0.88);   // t-cell
+  if (kind == 15) return vec3(0.88, 0.52, 0.35);   // eosinophil
+  if (kind == 16) return vec3(0.63, 0.09, 0.09);   // rbc
+  if (kind == 17) return vec3(0.37, 0.63, 0.19);   // germ
+  if (kind == 18) return vec3(0.48, 0.70, 0.14);   // slime
+  if (kind == 19) return vec3(0.80, 0.42, 0.08);   // mite
+  if (kind == 20) return vec3(1.00, 0.36, 0.69);   // toxin
+  return vec3(0.78, 0.55, 0.66);
+}
+
+float nucleusSdf(vec2 uv, int kind, float t) {
+  vec2 nucOff = vec2(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
+  vec2 p = uv - nucOff;
+  if (kind == 5  || kind == 6  || kind == 8
+   || kind == 13 || kind == 16 || kind == 18 || kind == 20) return 1e9;
+  if (kind == 1 || kind == 9) {
+    float r1 = length(p - vec2(-0.04, 0.0)) - 0.22;
+    float r2 = length(p - vec2( 0.10, 0.0)) - 0.14;
+    return max(r1, -r2);
+  }
+  if (kind == 2) {
+    float a = length(p - vec2(-0.12, -0.04)) - 0.10;
+    float b = length(p - vec2( 0.12, -0.04)) - 0.10;
+    float c = length(p - vec2( 0.00,  0.13)) - 0.10;
+    return min(min(a, b), c);
+  }
+  if (kind == 12 || kind == 15) {
+    float a = length(p - vec2(-0.13, 0.0)) - 0.13;
+    float b = length(p - vec2( 0.13, 0.0)) - 0.13;
+    return min(a, b);
+  }
+  if (kind == 3)  return length(p) - 0.30;
+  if (kind == 4)  return length(p) - 0.26;
+  if (kind == 7)  return length(p - vec2(0.18, -0.08)) - 0.18;
+  if (kind == 11) return length(p) - 0.18;
+  if (kind == 14) return length(p) - 0.30;
+  if (kind == 17) return length(p) - 0.16;
+  if (kind == 10) return length(p) - 0.20;
+  if (kind == 19) return length(p) - 0.18;
+  return length(p) - 0.22;
+}
+
+// envBackground — five Kurzgesagt-style environments. Mirrors WGSL.
+vec3 envBackground(vec2 uv, int kind, int theme, float t) {
+  // kind 6 — flat black. Mirrors WGSL.
+  if (kind == 6) return vec3(0.0);
+
+  if (kind == 1) {
+    // lung · smoke — mirrors WGSL. Apache 2.0, FatumR.
+    float v = smoke_complex((uv + vec2(0.5)) * 1.0, t);
+    vec3 hot  = vec3(0.510, 0.204, 0.016);
+    vec3 cool = vec3(0.529, 0.808, 0.980);
+    if (theme == 1) { hot = vec3(0.85, 0.30, 0.10); cool = vec3(0.30, 0.75, 0.95); }
+    if (theme == 2) { hot = vec3(0.30, 0.10, 0.45); cool = vec3(0.55, 0.80, 1.00); }
+    if (theme == 3) { hot = vec3(0.45, 0.20, 0.10); cool = vec3(0.42, 0.65, 0.85); }
+    return mix(hot, cool, clamp(v, 0.0, 1.0));
+  }
+  if (kind == 2) {
+    float stripes = sin(uv.y * 18.0 + sin(uv.x * 4.0) * 0.5) * 0.5 + 0.5;
+    vec3 base   = vec3(0.32, 0.05, 0.07);
+    vec3 stripe = vec3(0.55, 0.08, 0.10);
+    if (theme == 1) { base = vec3(0.45, 0.10, 0.10); stripe = vec3(0.18, 0.02, 0.04); }
+    if (theme == 2) { base = vec3(0.18, 0.03, 0.06); stripe = vec3(0.85, 0.20, 0.30); }
+    if (theme == 3) { base = vec3(0.42, 0.10, 0.12); stripe = vec3(0.30, 0.06, 0.08); }
+    return mix(base, stripe, stripes);
+  }
+  if (kind == 3) {
+    // brain — "Star Nest" by Pablo Roman Andrioli, MIT licence,
+    // https://www.shadertoy.com/view/XlfGRj. Volumetric folded-fractal
+    // raymarch — reads as a dense neural / synapse network. Loop
+    // counts trimmed (volsteps 12, iterations 12) from the original
+    // (20, 17) for mobile cost; visuals stay close.
+    float zoom = 0.800;
+    float tile_ = 0.850;
+    float formuparam = 0.53;
+    float stepsize = 0.10;
+    float brightness = 0.0015;
+    float darkmatter = 0.300;
+    float distfading = 0.730;
+    float saturation = 0.850;
+    vec3 dir = vec3(uv * zoom, 1.0);
+    float time2 = t * 0.010 + 0.25;
+    vec3 from = vec3(1.0, 0.5, 0.5) + vec3(time2 * 2.0, time2, -2.0);
+    float s_ = 0.10;
+    float fade = 1.0;
+    vec3 v_ = vec3(0.0);
+    for (int r2 = 0; r2 < 12; r2++) {
+      vec3 p = from + s_ * dir * 0.5;
+      p = abs(vec3(tile_) - mod(p, vec3(tile_ * 2.0)));
+      float pa = 0.0;
+      float a = 0.0;
+      for (int i = 0; i < 12; i++) {
+        p = abs(p) / dot(p, p) - vec3(formuparam);
+        a += abs(length(p) - pa);
+        pa = length(p);
+      }
+      float dm = max(0.0, darkmatter - a * a * 0.001);
+      a = a * a * a;
+      if (r2 > 4) fade *= 1.0 - dm;
+      v_ += vec3(fade);
+      v_ += vec3(s_, s_ * s_, s_ * s_ * s_ * s_) * a * brightness * fade;
+      fade *= distfading;
+      s_ += stepsize;
+    }
+    v_ = mix(vec3(length(v_)), v_, vec3(saturation));
+    vec3 col = v_ * 0.01;
+    if (theme == 1) col = clamp(col * 1.6, 0.0, 1.0);
+    if (theme == 2) col = mix(col, vec3(0.20, 0.10, 0.45), 0.25);
+    if (theme == 3) col = clamp(col * 0.85 + vec3(0.04, 0.04, 0.07), 0.0, 1.0);
+    return col;
+  }
+  if (kind == 4) {
+    vec2 g = uv * 4.0;
+    vec2 fi = floor(g);
+    vec2 f = fract(g);
+    float minD = 9.0;
+    for (int ix = -1; ix <= 1; ix++) {
+      for (int iy = -1; iy <= 1; iy++) {
+        vec2 nb = fi + vec2(float(ix), float(iy));
+        vec2 pt = vec2(float(ix), float(iy)) + 0.5
+                + 0.45 * vec2(hash(nb), hash(nb + vec2(7.0, 11.0))) - f;
+        minD = min(minD, length(pt));
+      }
+    }
+    float trab = smoothstep(0.05, 0.20, minD);
+    vec3 marrow = vec3(0.75, 0.65, 0.40);
+    vec3 bone   = vec3(0.25, 0.18, 0.10);
+    if (theme == 1) { marrow = vec3(0.95, 0.85, 0.55); bone = vec3(0.10, 0.08, 0.05); }
+    if (theme == 2) { marrow = vec3(0.78, 0.70, 0.45); bone = vec3(0.30, 0.10, 0.40); }
+    if (theme == 3) { marrow = vec3(0.65, 0.55, 0.40); bone = vec3(0.30, 0.20, 0.15); }
+    return mix(bone, marrow, trab);
+  }
+  if (kind == 5) {
+    // red cells · voronoi — adapted from "Red Cells I" by Shadertoy
+    // user wrasm (https://www.shadertoy.com/view/WlfGDM, CC BY-NC-SA 3.0).
+    // Smooth-min Voronoi with animated point positions.
+    vec2 st = uv * 5.0;
+    vec2 cell_pos   = floor(st);
+    vec2 cell_coord = fract(st);
+    float sum = 0.0;
+    for (int ix = -1; ix <= 1; ix++) {
+      for (int iy = -1; iy <= 1; iy++) {
+        vec2 nb = vec2(float(ix), float(iy));
+        float h0 = hash(cell_pos + nb);
+        float h1 = hash(cell_pos + nb + vec2(17.3, 41.7));
+        vec2 nb_seed = vec2(h0, h1);
+        vec2 nb_pos  = 0.5 + 0.5 * sin(t * 0.4 + nb_seed * 6.0);
+        vec2 diff = (nb + nb_pos) - cell_coord;
+        sum += exp(-32.0 * dot(diff, diff));
+      }
+    }
+    float v = -(1.0 / 32.0) * log(max(sum, 1e-6));
+    float intensity = 0.03 / pow(max(1.2 - sqrt(max(v, 0.0)), 0.05), 3.0);
+    vec3 base = vec3(200.0/255.0, 50.0/255.0, 69.0/255.0);
+    if (theme == 1) base = vec3(0.95, 0.30, 0.30);
+    if (theme == 2) base = vec3(0.55, 0.10, 0.20);
+    if (theme == 3) base = vec3(0.65, 0.25, 0.30);
+    return clamp(base * intensity, 0.0, 2.0);
+  }
+  // bloodstream (default)
+  float n   = fbm(uv * 3.0 + vec2(t * 0.04, t * 0.03));
+  float rbc = fbm(uv * 8.0 + vec2(0.0, t * 0.15));
+  if (theme == 1) {
+    float rbcDot = step(0.55, rbc);
+    return mix(vec3(0.55, 0.10, 0.12), vec3(0.85, 0.30, 0.30), rbcDot);
+  }
+  if (theme == 2) {
+    float rbcDot = step(0.55, rbc);
+    vec3 col = mix(vec3(0.18, 0.03, 0.05), vec3(0.50, 0.08, 0.18), rbcDot);
+    col += vec3(0.40, 0.10, 0.10) * smoothstep(0.55, 0.85, rbc);
+    return col;
+  }
+  if (theme == 3) {
+    float r = length(uv);
+    return mix(vec3(0.30, 0.05, 0.08), vec3(0.10, 0.02, 0.04), smoothstep(0.0, 1.2, r));
+  }
+  vec3 col = mix(vec3(0.18, 0.03, 0.05), vec3(0.42, 0.06, 0.08), n);
+  col = mix(col, vec3(0.62, 0.10, 0.14), smoothstep(0.55, 0.75, rbc) * 0.5);
+  return col;
+}
+
+// Caustics overlay (mirrors WGSL). CC BY-NC-SA 3.0 · David Hoskins.
+// Returns the caustic tint; the displaced uv is computed inline.
+vec3 computeCaustics(vec2 uv, float t, out vec2 outOffset) {
+  const float TAU = 6.28318530718;
+  float time2 = t * 0.5 + 23.0;
+  vec2 p0 = mod(uv * TAU, TAU) - 150.0;
+  vec2 i = p0;
+  float c = 1.0;
+  float inten = 0.005;
+  for (int n = 0; n < 5; n++) {
+    float tn = time2 * (1.0 - (3.5 / float(n + 1)));
+    i = p0 + vec2(cos(tn - i.x) + sin(tn + i.y),
+                  sin(tn - i.y) + cos(tn + i.x));
+    vec2 denom = vec2(p0.x / (sin(i.x + tn) / inten),
+                      p0.y / (cos(i.y + tn) / inten));
+    c += 1.0 / max(length(denom), 1e-4);
+  }
+  c /= 5.0;
+  c = 1.17 - pow(c, 1.4);
+  float shade = pow(abs(c), 8.0);
+  vec3 tint = clamp((vec3(shade) + vec3(0.0, 1.35, 0.5)) * 2.0, 0.0, 1.0);
+  outOffset = vec2(cos(c) - 0.75, sin(c) - 0.75) * 0.04;
+  return tint;
+}
+
+void main() {
+  vec2 res = u_resolution;
+  float t = u_time * u_activity;
+  int kind = int(floor(u_cellType + 0.5));
+  int theme = int(floor(u_theme + 0.5));
+  int bgKind = int(floor(u_bgKind + 0.5));
+
+  vec2 uv = (gl_FragCoord.xy - 0.5 * res) / min(res.x, res.y);
+  // Divide so HIGHER zoom = BIGGER cell. See WGSL comment.
+  uv /= max(u_zoom, 0.01);
+
+  // Cell-local UV — drag offset + pinch radius. See WGSL comment.
+  vec2 uvCell = (uv - vec2(u_cellOffsetX, u_cellOffsetY)) / max(u_cellRadius, 0.01);
+
+  // extracellular medium — see WGSL comment about defensive init.
+  vec3 bg = vec3(0.0);
+  if (u_caustics > 0.5) {
+    vec2 cx_off;
+    vec3 cx_tint = computeCaustics((uv + vec2(0.5)) * 1.0, t, cx_off);
+    // Theme-INDEPENDENT background — see WGSL comment.
+    bg = envBackground(uv + cx_off, bgKind, 0, t) * cx_tint;
+  } else {
+    bg = envBackground(uv, bgKind, 0, t);
+  }
+
+  // membrane
+  float mem = membraneFor(uvCell, kind, t);
+  float inside = smoothstep(0.004, -0.004, mem);
+  float edge   = smoothstep(0.022, 0.0, abs(mem));
+
+  // cytoplasm
+  vec3 cyto = cytoColor(kind);
+  cyto -= vec3(0.10, 0.07, 0.08) * fbm(uvCell * 22.0 + vec2(t * 0.02, 0.0));
+  cyto += vec3(0.08, 0.04, 0.05) * (fbm(uvCell * 6.0 - vec2(t * 0.03, t * 0.02)) - 0.5);
+  if (kind == 4) {
+    float er = sin(uvCell.x * 14.0 + uvCell.y * 6.0 + t * 0.4) * 0.5 + 0.5;
+    cyto += vec3(0.10, 0.05, 0.07) * (er - 0.5) * 0.6;
+  }
+
+  // nucleus
+  float nucD = nucleusSdf(uvCell, kind, t);
+  float nucMask = smoothstep(0.006, -0.006, nucD);
+  float nucEdge = smoothstep(0.020, 0.0, abs(nucD));
+  vec2 nucOff = vec2(0.06 * sin(t * 0.25), 0.04 * cos(t * 0.31));
+  vec2 nucP = uvCell - nucOff;
+  vec3 nucCol = vec3(0.30, 0.14, 0.42);
+  if (kind == 3)               nucCol = vec3(0.20, 0.12, 0.46);
+  if (kind == 4)               nucCol = vec3(0.36, 0.12, 0.40);
+  if (kind == 9 || kind == 14) nucCol = vec3(0.18, 0.12, 0.44);
+  if (kind == 11)              nucCol = vec3(0.15, 0.20, 0.40);
+  if (kind == 12)              nucCol = vec3(0.30, 0.05, 0.20);
+  if (kind == 15)              nucCol = vec3(0.40, 0.18, 0.10);
+  if (kind == 10)              nucCol = vec3(0.10, 0.30, 0.18);
+  if (kind == 17)              nucCol = vec3(0.15, 0.30, 0.05);
+  if (kind == 19)              nucCol = vec3(0.30, 0.15, 0.05);
+  nucCol += vec3(0.18, 0.08, 0.22) * fbm(nucP * 28.0 + vec2(t * 0.05, 0.0));
+  if (kind == 0 || kind == 3 || kind == 4 || kind == 7
+   || kind == 10 || kind == 11 || kind == 14 || kind == 17 || kind == 19) {
+    float nlD = length(nucP - vec2(0.05, 0.04)) - 0.045;
+    float nlMask = smoothstep(0.004, -0.004, nlD);
+    nucCol = mix(nucCol, vec3(0.55, 0.20, 0.50), nlMask);
+  }
+
+  // mitochondria — absent for prokaryotes / virus / spore /
+  // anucleate fragments / toxin
+  float mito = 1e9;
+  int nMito = int(floor(u_organelles + 0.5));
+  if (kind == 5  || kind == 8)                nMito = 0;
+  if (kind == 6  || kind == 17)               nMito = 0;
+  if (kind == 13 || kind == 16 || kind == 20) nMito = 0;
+  for (int i = 0; i < 16; i++) {
+    if (i >= nMito) break;
+    float fi = float(i);
+    float baseA = fi * 0.7853 + t * 0.08;
+    float rad = 0.40 + 0.05 * sin(fi * 1.7);
+    vec2 centre = vec2(cos(baseA), sin(baseA)) * rad
+                + vec2(0.015 * sin(t * 1.3 + fi),
+                       0.015 * cos(t * 1.1 + fi * 2.0));
+    vec2 dir = vec2(cos(baseA + 1.5708), sin(baseA + 1.5708));
+    float len = 0.045;
+    vec2 a = centre - dir * len;
+    vec2 b = centre + dir * len;
+    mito = min(mito, capsule(uvCell, a, b, 0.018));
+  }
+  float mitoMask = smoothstep(0.004, -0.004, mito);
+  float mitoEdge = smoothstep(0.012, 0.0, abs(mito));
+  vec3 mitoCol = vec3(0.95, 0.55, 0.30);
+
+  // vesicles / granules
+  int vesCount = 14;
+  if (kind == 1)  vesCount = 22;
+  if (kind == 2)  vesCount = 30;
+  if (kind == 3)  vesCount = 6;
+  if (kind == 4)  vesCount = 8;
+  if (kind == 5)  vesCount = 0;
+  if (kind == 6)  vesCount = 18;
+  if (kind == 7)  vesCount = 10;
+  if (kind == 8)  vesCount = 4;
+  if (kind == 9)  vesCount = 14;
+  if (kind == 10) vesCount = 60;   // mast — granule-packed
+  if (kind == 11) vesCount = 6;
+  if (kind == 12) vesCount = 25;   // basophil — dark granules
+  if (kind == 13) vesCount = 4;
+  if (kind == 14) vesCount = 0;
+  if (kind == 15) vesCount = 18;   // eosinophil — large bright
+  if (kind == 16) vesCount = 0;
+  if (kind == 17) vesCount = 8;
+  if (kind == 18) vesCount = 12;
+  if (kind == 19) vesCount = 10;
+  if (kind == 20) vesCount = 8;
+  float vesRadius = 0.012;
+  if (kind == 2)  vesRadius = 0.008;
+  if (kind == 3)  vesRadius = 0.020;
+  if (kind == 7)  vesRadius = 0.022;
+  if (kind == 10) vesRadius = 0.006;
+  if (kind == 12) vesRadius = 0.010;
+  if (kind == 15) vesRadius = 0.020;
+  if (kind == 13) vesRadius = 0.014;
+  if (kind == 20) vesRadius = 0.014;
+  vec3 vesCol = vec3(1.0, 0.92, 0.65);
+  if (kind == 3)  vesCol = vec3(0.75, 0.85, 1.00);
+  if (kind == 6)  vesCol = vec3(0.80, 0.90, 0.55);
+  if (kind == 7)  vesCol = vec3(0.55, 0.45, 0.30);
+  if (kind == 10) vesCol = vec3(0.12, 0.40, 0.25);   // mast — dark green
+  if (kind == 12) vesCol = vec3(0.20, 0.10, 0.55);   // basophil — dark blue/violet
+  if (kind == 15) vesCol = vec3(1.00, 0.55, 0.30);   // eosinophil — bright orange
+  if (kind == 13) vesCol = vec3(0.55, 0.40, 0.10);
+  if (kind == 17) vesCol = vec3(0.70, 0.85, 0.45);
+  if (kind == 18) vesCol = vec3(0.60, 0.75, 0.20);
+  if (kind == 19) vesCol = vec3(0.90, 0.60, 0.20);
+  if (kind == 20) vesCol = vec3(1.00, 0.90, 1.00);   // toxin — bright sparkle
+  float ves = 1e9;
+  for (int j = 0; j < 32; j++) {
+    if (j >= vesCount) break;
+    float fj = float(j);
+    vec2 pos = vec2(
+      0.42 * sin(fj * 1.91 + t * (0.18 + 0.03 * fj)),
+      0.42 * cos(fj * 2.37 + t * (0.21 + 0.02 * fj))
+    );
+    vec2 jit = vec2(0.008 * sin(t * 3.0 + fj * 7.0),
+                    0.008 * cos(t * 2.6 + fj * 5.0));
+    ves = min(ves, length(uvCell - pos - jit) - vesRadius);
+  }
+  float vesMask = smoothstep(0.003, -0.003, ves);
+
+  // virus capsid lattice overlay
+  float capsid = 0.0;
+  if (kind == 5) {
+    float h = 0.5 + 0.5 * cos(uvCell.x * 28.0) * cos(uvCell.y * 28.0);
+    capsid = pow(h, 6.0);
+  }
+
+  // bacterium flagellum
+  float flag = 1e9;
+  if (kind == 6) {
+    float xf = uvCell.x - 0.32;
+    if (xf > 0.0 && xf < 0.45) {
+      float yf = uvCell.y - 0.04 * sin(xf * 26.0 - t * 8.0);
+      flag = abs(yf) - 0.006;
+    }
+  }
+  float flagMask = smoothstep(0.003, -0.003, flag);
+
+  // spore double-wall ring
+  float wall = 1e9;
+  if (kind == 8) {
+    wall = abs(length(uvCell) - 0.30) - 0.014;
+  }
+  float wallMask = smoothstep(0.003, -0.003, wall);
+
+  // rbc biconcave
+  float biconcave = 0.0;
+  if (kind == 16) {
+    biconcave = smoothstep(0.22, 0.04, length(uvCell));
+  }
+
+  // slime hyphal threads
+  float hyphae = 0.0;
+  if (kind == 18) {
+    float ang = atan(uvCell.y, uvCell.x);
+    float r = length(uvCell);
+    float lines = pow(abs(cos(ang * 1.5 + t * 0.1)), 50.0);
+    hyphae = lines * smoothstep(0.55, 0.40, r) * smoothstep(0.22, 0.32, r);
+  }
+
+  // toxin glow
+  float toxinGlow = 0.0;
+  if (kind == 20) {
+    float r = length(uvCell);
+    toxinGlow = pow(smoothstep(0.55, 0.42, r), 2.0) * smoothstep(0.30, 0.42, r);
+  }
+
+  // compose · 4-theme switch. uvCell drives cell-relative effects;
+  // uv stays viewport-space for the microscope chromatic limb +
+  // brownian particles.
+  float r = length(uvCell);
+  float rView = length(uv);
+  vec3 col;
+
+  if (theme == 1) {
+    // cartoon
+    col = bg;
+    vec3 cytoSat = clamp(cyto * 1.30, 0.0, 1.0);
+    col = mix(col, cytoSat, inside);
+    float hl = smoothstep(0.16, 0.0, length(uvCell - vec2(-0.18, 0.18)));
+    col += vec3(0.32, 0.30, 0.28) * hl * inside;
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col += vec3(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.45, biconcave * inside);
+    col += vec3(0.55, 0.30, 0.85) * toxinGlow;
+    col = mix(col, vec3(0.0), edge);
+  } else if (theme == 2) {
+    // kurzgesagt
+    col = bg;
+    col = mix(col, cyto, inside);
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col += vec3(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.55, biconcave * inside);
+    col += vec3(0.55, 0.30, 0.85) * toxinGlow;
+    float halo = pow(smoothstep(0.55, 0.42, r), 2.0);
+    col += cyto * 1.6 * halo * inside;
+    col = mix(col, vec3(0.95, 0.92, 0.85), edge * 0.4);
+  } else if (theme == 3) {
+    // classic — canvas2d game look
+    col = bg;
+    vec3 cytoTop = clamp(cyto * 1.35 + vec3(0.05), 0.0, 1.0);
+    float highlight = smoothstep(0.7, 0.0, length(uvCell - vec2(-0.15, 0.18)));
+    vec3 cytoFill = mix(cyto, cytoTop, highlight);
+    col = mix(col, cytoFill, inside);
+    col = mix(col, vec3(0.04, 0.02, 0.08), edge);
+  } else {
+    // microscope · H&E (default — existing behaviour)
+    col = bg;
+    col = mix(col, cyto, inside);
+    col = mix(col, mitoCol, mitoMask * inside);
+    col = mix(col, vec3(0.45, 0.20, 0.10), mitoEdge * inside * 0.6);
+    col = mix(col, vesCol, vesMask * inside);
+    col = mix(col, nucCol, nucMask);
+    col = mix(col, vec3(0.18, 0.08, 0.25), nucEdge * (1.0 - nucMask) * 0.7);
+    col += vec3(0.30, 0.20, 0.45) * capsid * inside;
+    col = mix(col, vec3(0.40, 0.55, 0.30), flagMask);
+    col = mix(col, vec3(0.45, 0.30, 0.10), wallMask);
+    col = mix(col, col * 0.45, biconcave * inside);
+    col = mix(col, vec3(0.20, 0.30, 0.05), hyphae * 0.7);
+    col += vec3(0.50, 0.30, 0.80) * toxinGlow;
+    col = mix(col, vec3(0.16, 0.06, 0.18), edge * 0.85);
+
+    for (int k = 0; k < 18; k++) {
+      float fk = float(k);
+      float speedK = 0.3 + 0.5 * hash(vec2(fk, 1.0));
+      vec2 p = vec2(
+        0.55 * sin(fk * 3.71 + t * speedK),
+        0.55 * cos(fk * 5.19 + t * speedK * 1.13)
+      );
+      col += vec3(0.18, 0.14, 0.10) * smoothstep(0.008, 0.0, length(uvCell - p)) * inside;
+    }
+    col += vec3(0.05, 0.10, 0.20) * pow(smoothstep(0.6, 1.0, rView), 2.0) * 0.6;
+    float g = hash(gl_FragCoord.xy + vec2(t * 31.7, t * 17.3)) - 0.5;
+    col += vec3(g) * 0.025;
+  }
+
+  outColor = vec4(col, 1.0);
+}
+</script>
+
+<script>
+/* ------------------------------------------------------------
+   cytologica · runtime
+   selects WebGPU when available, falls back to WebGL2.
+   ------------------------------------------------------------ */
+
+const $ = id => document.getElementById(id);
+const canvas = $('stage');
+
+// ─── console mirror ─────────────────────────────────────────────────────
+// Wraps window.console so every log/info/warn/error/debug call also
+// shows up inside the "Console" tab. The original console is still
+// called, so devtools behave identically. Capacity-bounded at 500
+// entries to keep memory + DOM cost low; oldest get dropped first.
+const __consoleBuf = (() => {
+  const MAX = 500;
+  const entries = [];
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const fmtTime = () => {
+    const d = new Date();
+    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+  };
+  const fmtArg = (a) => {
+    if (a instanceof Error) return a.stack || `${a.name}: ${a.message}`;
+    if (typeof a === 'string') return a;
+    try { return JSON.stringify(a, null, 2); } catch (_) { return String(a); }
+  };
+  const escapeHTML = (s) => s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  function render() {
+    const out = $('src-console');
+    if (!out) return;
+    const html = entries.map(e =>
+      `<span class="con-time">[${e.time}]</span> <span class="con-${e.level}">${e.level}: ${escapeHTML(e.text)}</span>`
+    ).join('\n');
+    out.innerHTML = html;
+    // Auto-scroll to bottom on new entries.
+    out.scrollTop = out.scrollHeight;
+    const cnt = $('console-count');
+    const sum = $('console-summary');
+    if (cnt) cnt.textContent = entries.length;
+    if (sum) {
+      const errs = entries.filter(e => e.level === 'error').length;
+      const warns = entries.filter(e => e.level === 'warn').length;
+      sum.textContent = `${entries.length} entries · ${errs} error${errs === 1 ? '' : 's'} · ${warns} warning${warns === 1 ? '' : 's'}`;
+    }
+  }
+  function push(level, args) {
+    if (entries.length >= MAX) entries.shift();
+    entries.push({ level, time: fmtTime(), text: args.map(fmtArg).join(' ') });
+    render();
+  }
+  function clear() { entries.length = 0; render(); }
+  return { push, clear, render };
+})();
+{
+  // Per user spec: console output should ONLY show in the in-page
+  // Console tab — not also pass through to the native browser
+  // console / DevTools. Drop the orig.* passthrough so there's a
+  // single canonical home for log lines (the #src-console pane).
+  // The native DevTools console will still show framework-emitted
+  // entries (e.g. WebGPU validation errors that fire outside our
+  // wrapper) so this isn't a complete blackout.
+  console.log   = (...a) => __consoleBuf.push('log',   a);
+  console.info  = (...a) => __consoleBuf.push('info',  a);
+  console.warn  = (...a) => __consoleBuf.push('warn',  a);
+  console.error = (...a) => __consoleBuf.push('error', a);
+  console.debug = (...a) => __consoleBuf.push('log',   a);
+  // Capture uncaught errors + promise rejections.
+  window.addEventListener('error', (e) => {
+    __consoleBuf.push('error', [e.message, `at ${e.filename}:${e.lineno}:${e.colno}`]);
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    __consoleBuf.push('error', ['unhandled rejection:', e.reason]);
+  });
+}
+
+const params = {
+  zoom: 1.0,
+  activity: 1.0,
+  organelles: 8,
+  cellType: 0,
+  theme: 0,         // 0 microscope · 1 cartoon · 2 kurzgesagt · 3 classic
+  bgKind: 0,        // 0 bloodstream · 1 lung · 2 heart · 3 brain · 4 bone marrow
+  cellOffsetX: 0.0, // UV-space drag offset (0,0 = centred)
+  cellOffsetY: 0.0,
+  cellRadius: 1.0,  // mouse-wheel / pinch scale (clamped 0.3..3.0)
+  caustics: 0,      // 0 off · 1 on (water-turbulence overlay on bg)
+};
+
+// hook up sliders ----------------------------------------------------------
+function bind(rangeId, valId, key, fmt) {
+  const r = $(rangeId), v = $(valId);
+  const apply = () => {
+    const x = parseFloat(r.value);
+    params[key] = x;
+    v.textContent = fmt(x);
+  };
+  r.addEventListener('input', apply);
+  apply();
+}
+bind('zoom', 'zoom-val', 'zoom', x => x.toFixed(2));
+bind('speed', 'speed-val', 'activity', x => x.toFixed(2));
+bind('organelles', 'org-val', 'organelles', x => Math.round(x).toString());
+
+// celltype dropdown
+const celltypeSel = $('celltype');
+celltypeSel.addEventListener('change', () => {
+  params.cellType = parseInt(celltypeSel.value, 10) || 0;
+});
+params.cellType = parseInt(celltypeSel.value, 10) || 0;
+
+// theme dropdown
+const themeSel = $('theme');
+themeSel.addEventListener('change', () => {
+  params.theme = parseInt(themeSel.value, 10) || 0;
+});
+params.theme = parseInt(themeSel.value, 10) || 0;
+
+// background-environment dropdown
+const bgkindSel = $('bgkind');
+bgkindSel.addEventListener('change', () => {
+  params.bgKind = parseInt(bgkindSel.value, 10) || 0;
+});
+params.bgKind = parseInt(bgkindSel.value, 10) || 0;
+
+// caustics overlay checkbox (default: off)
+const causticsChk = $('caustics');
+if (causticsChk) {
+  causticsChk.addEventListener('change', () => {
+    params.caustics = causticsChk.checked ? 1 : 0;
+  });
+  params.caustics = causticsChk.checked ? 1 : 0;
+}
+
+// ── Drag + pinch/wheel: move and resize the cell ────────────
+// Pointer events handle both mouse and touch. CSS `touch-action:
+// none` on #stage stops the browser's default scroll/zoom from
+// fighting our gestures.
+canvas.style.touchAction = 'none';
+const _ptrs = new Map();   // pointerId → { x, y } in CSS px
+let _dragStart = null;     // { ptrId, sx, sy, ox, oy } at pointerdown
+let _pinchStart = null;    // { d0, r0 } at second-pointer-down
+
+function _toUv(sx, sy) {
+  // Convert CSS pixel coordinates to UV (matches the shader's
+  // (frag - 0.5*res) / min(res) but accounting for canvas Y-flip).
+  const rect = canvas.getBoundingClientRect();
+  const m = Math.min(rect.width, rect.height);
+  return {
+    x:  (sx - rect.left - rect.width  * 0.5) / m,
+    y: -(sy - rect.top  - rect.height * 0.5) / m,
+  };
+}
+
+canvas.addEventListener('pointerdown', (e) => {
+  canvas.setPointerCapture?.(e.pointerId);
+  _ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (_ptrs.size === 1) {
+    _dragStart = {
+      ptrId: e.pointerId,
+      sx: e.clientX, sy: e.clientY,
+      ox: params.cellOffsetX, oy: params.cellOffsetY,
+    };
+  } else if (_ptrs.size === 2) {
+    const [a, b] = [..._ptrs.values()];
+    _pinchStart = {
+      d0: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+      z0: params.zoom,
+    };
+    _dragStart = null;   // pinch overrides drag
+  }
+});
+
+// Set the viewport zoom from a gesture (wheel / pinch). Clamps to
+// the slider's [0.5..2.5] range and mirrors the value into the
+// slider DOM so the on-screen control + the live render stay in
+// lockstep regardless of which input the user touched last.
+function setZoomFromGesture(z) {
+  const v = Math.max(0.5, Math.min(2.5, z));
+  params.zoom = v;
+  const slider = $('zoom');
+  const vEl    = $('zoom-val');
+  if (slider) slider.value = v.toFixed(2);
+  if (vEl)    vEl.textContent = v.toFixed(2);
+}
+
+canvas.addEventListener('pointermove', (e) => {
+  if (!_ptrs.has(e.pointerId)) return;
+  _ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+  if (_ptrs.size === 2 && _pinchStart) {
+    const [a, b] = [..._ptrs.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    setZoomFromGesture(_pinchStart.z0 * (d / _pinchStart.d0));
+    return;
+  }
+  if (_dragStart && e.pointerId === _dragStart.ptrId) {
+    const u0 = _toUv(_dragStart.sx, _dragStart.sy);
+    const u1 = _toUv(e.clientX, e.clientY);
+    params.cellOffsetX = _dragStart.ox + (u1.x - u0.x);
+    params.cellOffsetY = _dragStart.oy + (u1.y - u0.y);
+  }
+});
+
+function _endPointer(e) {
+  _ptrs.delete(e.pointerId);
+  if (_dragStart && e.pointerId === _dragStart.ptrId) _dragStart = null;
+  if (_ptrs.size < 2) _pinchStart = null;
+}
+canvas.addEventListener('pointerup', _endPointer);
+canvas.addEventListener('pointercancel', _endPointer);
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  setZoomFromGesture(params.zoom * (1 - e.deltaY * 0.001));
+}, { passive: false });
+
+// inject shader sources into the side panel --------------------------------
+const wgslSrc = $('shader-wgsl').textContent.trim();
+const glslVsSrc = $('shader-glsl-vs').textContent.trim();
+const glslFsSrc = $('shader-glsl-fs').textContent.trim();
+const hostSrc = `// renderer dispatcher
+async function boot() {
+  let r = await initWebGPU();         // 1. try WebGPU
+  if (!r) r = initWebGL2();           // 2. fall back to WebGL2
+  if (!r) return;                     // 3. give up
+
+  const start = performance.now();
+  function loop(now) {
+    const t = (now - start) / 1000;
+    r.frame(t);                       // both backends share this signature
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+}
+
+// uniforms uploaded each frame:
+//   resolution (vec2)  time (f32)  zoom (f32)
+//   activity   (f32)   organelles (f32)`;
+
+// raw, unhighlighted source for each pane — used by the copy button
+const rawSources = {
+  wgsl: wgslSrc,
+  glsl: '// === vertex ===\n' + glslVsSrc + '\n\n// === fragment ===\n' + glslFsSrc,
+  js:   hostSrc,
+};
+
+function highlight(src, lang) {
+  // tiny syntax painter — purely cosmetic
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  let s = esc(src);
+  // comments first (line)
+  s = s.replace(/(\/\/[^\n]*)/g, '<span class="tk-cmt">$1</span>');
+  // strings (rare in shaders)
+  s = s.replace(/("[^"]*")/g, '<span class="tk-str">$1</span>');
+  // numbers
+  s = s.replace(/\b(\d+\.\d*|\.\d+|\d+)([eE][+-]?\d+)?\b/g, '<span class="tk-num">$&</span>');
+  // attributes (wgsl)
+  s = s.replace(/(@[a-zA-Z_][a-zA-Z0-9_]*)/g, '<span class="tk-attr">$1</span>');
+  // keywords
+  const kws = lang === 'wgsl'
+    ? ['fn','let','var','return','if','else','for','while','break','continue','struct','true','false','const']
+    : ['void','if','else','for','while','return','break','continue','in','out','uniform','const','true','false','precision','highp','mediump','lowp','int','float','bool','vec2','vec3','vec4','mat2','mat3','mat4'];
+  for (const k of kws) {
+    s = s.replace(new RegExp('\\b'+k+'\\b','g'), '<span class="tk-kw">'+k+'</span>');
+  }
+  // types
+  const types = lang === 'wgsl'
+    ? ['f32','i32','u32','vec2<f32>','vec3<f32>','vec4<f32>','mat2x2','mat3x3','mat4x4']
+    : ['sampler2D'];
+  for (const k of types) {
+    s = s.replace(new RegExp(k.replace(/[<>]/g,c=>'\\'+c),'g'), '<span class="tk-type">'+k+'</span>');
+  }
+  // built-ins
+  const fns = ['sin','cos','tan','atan','atan2','floor','fract','mix','smoothstep','clamp','length','dot','min','max','abs','pow','sqrt','exp','log','round','step'];
+  for (const k of fns) {
+    s = s.replace(new RegExp('\\b'+k+'(?=\\()','g'), '<span class="tk-fn">'+k+'</span>');
+  }
+  return s;
+}
+
+// WGSL pane is contenteditable for live recompile — populate via
+// textContent so the user edits plain text. The GLSL + JS panes
+// stay HTML-highlighted (read-only).
+$('src-wgsl').textContent = wgslSrc;
+$('src-glsl').innerHTML = highlight(rawSources.glsl, 'glsl');
+$('src-js').innerHTML   = highlight(hostSrc, 'glsl');
+
+// tab switching ------------------------------------------------------------
+document.querySelectorAll('.tab').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    $('pane-' + btn.dataset.pane).classList.add('active');
+    // Auto-expand the source aside if the user clicks a tab while
+    // collapsed (otherwise the click is mostly invisible).
+    const aside = $('src-aside');
+    if (aside.classList.contains('collapsed')) {
+      setSrcCollapsed(false);
+    }
+    // Re-render the console on tab activation so any entries
+    // logged before the DOM was wired up get a paint.
+    if (btn.dataset.pane === 'console') __consoleBuf.render();
+  });
+});
+
+// Initial paint of the console once the DOM has the elements.
+__consoleBuf.render();
+$('console-clear')?.addEventListener('click', () => __consoleBuf.clear());
+
+// ─── source aside collapse ───────────────────────────────────────────────
+function setSrcCollapsed(collapsed) {
+  const aside = $('src-aside');
+  const toggle = $('src-toggle');
+  const layout = document.querySelector('.layout');
+  aside.classList.toggle('collapsed', collapsed);
+  layout.classList.toggle('src-collapsed', collapsed);
+  toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  try { localStorage.setItem('shaderTest.srcCollapsedV2', collapsed ? '1' : '0'); } catch (_) {}
+}
+{
+  const stored = (() => { try { return localStorage.getItem('shaderTest.srcCollapsedV2'); } catch (_) { return null; } })();
+  // default: collapsed (matches user spec).
+  setSrcCollapsed(stored === null ? true : stored === '1');
+  $('src-toggle').addEventListener('click', () => {
+    const aside = $('src-aside');
+    setSrcCollapsed(!aside.classList.contains('collapsed'));
+  });
+}
+
+// ─── controls panel drag ─────────────────────────────────────────────────
+{
+  const panel = $('controls');
+  const head = panel.querySelector('.controls-head');
+  // Restore stored position if present.
+  try {
+    const saved = JSON.parse(localStorage.getItem('shaderTest.ctrlPos') || 'null');
+    if (saved && Number.isFinite(saved.x) && Number.isFinite(saved.y)) {
+      panel.style.left = saved.x + 'px';
+      panel.style.top  = saved.y + 'px';
+    }
+  } catch (_) {}
+  let drag = null;
+  const onDown = (e) => {
+    // Ignore drag if the user clicked the close button or anything
+    // interactive inside the head — only drag from blank head area.
+    if (e.target.closest('.ctrl-x')) return;
+    const evt = e.touches ? e.touches[0] : e;
+    const rect = panel.getBoundingClientRect();
+    drag = { dx: evt.clientX - rect.left, dy: evt.clientY - rect.top };
+    panel.classList.add('dragging');
+    e.preventDefault();
+  };
+  const onMove = (e) => {
+    if (!drag) return;
+    const evt = e.touches ? e.touches[0] : e;
+    const x = Math.max(0, Math.min(window.innerWidth  - panel.offsetWidth,  evt.clientX - drag.dx));
+    const y = Math.max(0, Math.min(window.innerHeight - panel.offsetHeight, evt.clientY - drag.dy));
+    panel.style.left = x + 'px';
+    panel.style.top  = y + 'px';
+  };
+  const onUp = () => {
+    if (!drag) return;
+    drag = null;
+    panel.classList.remove('dragging');
+    try {
+      const x = parseFloat(panel.style.left) || 0;
+      const y = parseFloat(panel.style.top)  || 0;
+      localStorage.setItem('shaderTest.ctrlPos', JSON.stringify({ x, y }));
+    } catch (_) {}
+  };
+  head.addEventListener('mousedown',  onDown);
+  head.addEventListener('touchstart', onDown, { passive: false });
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('mouseup',   onUp);
+  window.addEventListener('touchend',  onUp);
+}
+
+// ─── live WGSL editor (WebGPU only) ──────────────────────────────────────
+// On every keystroke (debounced ~600 ms) the WGSL pane's text gets
+// re-fed to the renderer's setWgslSource(). On success the running
+// pipeline atom-swaps to the new shader; on failure the old one
+// keeps running and the error is shown in the status strip below.
+{
+  const pre = $('src-wgsl');
+  const status = $('wgsl-status');
+  let timer = null;
+  const setStatus = (cls, msg) => {
+    status.classList.remove('ok', 'error');
+    if (cls) status.classList.add(cls);
+    status.textContent = msg;
+  };
+  const recompile = async () => {
+    if (!renderer || typeof renderer.setWgslSource !== 'function') {
+      setStatus('error', 'webgl2 fallback active — wgsl edits ignored');
+      return;
+    }
+    const src = pre.textContent || '';
+    setStatus('', 'compiling…');
+    const r = await renderer.setWgslSource(src);
+    if (r.ok) setStatus('ok', 'compiled · running new pipeline');
+    else      setStatus('error', r.error || 'compile failed');
+  };
+  pre.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(recompile, 600);
+  });
+  // Disable editing on the WGSL pane when the WebGPU path didn't
+  // boot (WebGL2 fallback can't recompile WGSL anyway). Wait one
+  // tick so renderer is assigned in the boot promise.
+  queueMicrotask(() => {
+    setTimeout(() => {
+      if (!renderer || typeof renderer.setWgslSource !== 'function') {
+        pre.removeAttribute('contenteditable');
+        pre.style.cursor = 'default';
+        setStatus('', 'read-only · webgl2 fallback');
+      } else {
+        setStatus('', 'editable · live recompile');
+      }
+    }, 200);
+  });
+}
+
+// copy active source -------------------------------------------------------
+const copyBtn = $('copy-src');
+const copyLabel = $('copy-label');
+let copyResetTimer = null;
+
+async function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    try { await navigator.clipboard.writeText(text); return true; }
+    catch (_) { /* fall through */ }
+  }
+  // legacy fallback for non-secure contexts (e.g. file://)
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch (_) {}
+  document.body.removeChild(ta);
+  return ok;
+}
+
+copyBtn.addEventListener('click', async () => {
+  const activeTab = document.querySelector('.tab.active');
+  if (!activeTab) return;
+  // For WGSL, prefer the live editor text. For console, copy the
+  // current buffer (textContent of the rendered list). Other panes
+  // fall back to the cached raw source.
+  const pane = activeTab.dataset.pane;
+  let src;
+  if      (pane === 'wgsl')    src = $('src-wgsl').textContent || rawSources.wgsl;
+  else if (pane === 'console') src = $('src-console').textContent || '';
+  else                         src = rawSources[pane];
+  const ok = await copyToClipboard(src);
+  copyLabel.textContent = ok ? 'copied' : 'failed';
+  copyBtn.classList.toggle('copied', ok);
+  clearTimeout(copyResetTimer);
+  copyResetTimer = setTimeout(() => {
+    copyLabel.textContent = 'copy';
+    copyBtn.classList.remove('copied');
+  }, 1400);
+});
+
+// hide / show controls panel ----------------------------------------------
+const controlsEl = $('controls');
+const showBtn = $('ctrl-show');
+function setControlsVisible(visible) {
+  controlsEl.hidden = !visible;
+  showBtn.hidden    = visible;
+}
+$('ctrl-close').addEventListener('click', () => setControlsVisible(false));
+showBtn.addEventListener('click',          () => setControlsVisible(true));
+window.addEventListener('keydown', e => {
+  // ignore when typing into inputs
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  if (e.key === 'h' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault();
+    setControlsVisible(controlsEl.hidden);
+  }
+});
+
+// ─── renderer selection ───────────────────────────────────────────────────
+let renderer = null;
+
+function setBadge(name, isFallback) {
+  $('renderer-name').textContent = name;
+  $('renderer-badge').classList.toggle('fallback', !!isFallback);
+}
+
+async function initWebGPU() {
+  console.log('[webgpu] init: navigator.gpu present?', !!navigator.gpu);
+  if (!navigator.gpu) return null;
+  try {
+    const adapter = await navigator.gpu.requestAdapter();
+    console.log('[webgpu] adapter:', adapter ? `ok (${adapter.info?.vendor || '?'} ${adapter.info?.architecture || ''})` : 'null');
+    if (!adapter) return null;
+    const device = await adapter.requestDevice();
+    console.log('[webgpu] device acquired');
+    // Catch every WebGPU validation / out-of-memory error (these
+    // are otherwise async-fired and never surface in our log).
+    // Dedupe identical messages within a 2 s window so a single
+    // root cause doesn't flood the console with hundreds of frame-
+    // submit cascade messages.
+    const _errSeen = new Map();   // msg → { count, firstAt, lastReported }
+    device.addEventListener?.('uncapturederror', (e) => {
+      const msg = e.error?.message || String(e.error || e);
+      const now = performance.now();
+      const ent = _errSeen.get(msg);
+      if (!ent) {
+        _errSeen.set(msg, { count: 1, firstAt: now, lastReported: now });
+        console.error('[webgpu] uncaptured error: ' + msg);
+        return;
+      }
+      ent.count++;
+      // Re-report at exponential thresholds (2, 10, 100, 1000…)
+      // so we still know if a recurring error is escalating.
+      if (ent.count === 2 || ent.count === 10 || ent.count === 100 || ent.count === 1000) {
+        console.error(`[webgpu] (repeated ×${ent.count}) ` + msg.split('\n')[0]);
+        ent.lastReported = now;
+      }
+    });
+    device.lost?.then((info) => {
+      console.error('[webgpu] device lost:', info.reason, info.message);
+    });
+    // The preferred format is canvas-independent — we can pick it
+    // before claiming the canvas via getContext('webgpu') so that
+    // WebGL2 fallback still has a virgin canvas to work with if
+    // shader / pipeline creation fails below.
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    console.log('[webgpu] format:', format, 'canvas css', canvas.clientWidth + 'x' + canvas.clientHeight, 'dpr', window.devicePixelRatio);
+
+    // Wrap shader-module creation in a validation error scope so
+    // creation-time errors are caught synchronously rather than
+    // showing up as opaque "Invalid RenderPipeline" cascades on
+    // first submit. (createShaderModule is technically async-
+    // validated but Dawn surfaces validation errors via the scope
+    // mechanism.)
+    device.pushErrorScope('validation');
+    let module = device.createShaderModule({ code: wgslSrc });
+    const moduleErr = await device.popErrorScope();
+    if (moduleErr) console.error('[webgpu] shader-module validation:\n' + moduleErr.message);
+
+    // Surface any compile diagnostics from the INITIAL module — the
+    // live-recompile path already does this for user edits, but
+    // boot-time issues were silent until now.
+    try {
+      const info = await module.getCompilationInfo?.();
+      const msgs = info?.messages || [];
+      const errs = msgs.filter(m => m.type === 'error');
+      const warns = msgs.filter(m => m.type === 'warning');
+      if (errs.length)  console.error('[webgpu] WGSL errors:', errs.map(m => `L${m.lineNum}: ${m.message}`).join('\n'));
+      if (warns.length) console.warn('[webgpu] WGSL warnings:', warns.map(m => `L${m.lineNum}: ${m.message}`).join('\n'));
+      if (!errs.length && !warns.length) console.log('[webgpu] WGSL compiled clean');
+    } catch (e) { console.warn('[webgpu] getCompilationInfo failed:', e.message); }
+
+    // Use createRenderPipelineAsync + an error scope so the actual
+    // pipeline-validation error gets surfaced cleanly, instead of
+    // the "Invalid RenderPipeline" cascade flooding the console
+    // on every frame submit.
+    device.pushErrorScope('validation');
+    let pipeline;
+    try {
+      pipeline = await device.createRenderPipelineAsync({
+        layout: 'auto',
+        vertex:   { module, entryPoint: 'vs_main' },
+        fragment: { module, entryPoint: 'fs_main', targets: [{ format }] },
+        primitive: { topology: 'triangle-list' },
+      });
+    } catch (e) {
+      console.error('[webgpu] pipeline rejected:\n' + (e?.message || e));
+      const popErr = await device.popErrorScope();
+      if (popErr) console.error('[webgpu] pipeline validation:\n' + popErr.message);
+      return null;
+    }
+    const pipelineErr = await device.popErrorScope();
+    if (pipelineErr) {
+      console.error('[webgpu] pipeline validation:\n' + pipelineErr.message);
+      return null;
+    }
+    console.log('[webgpu] pipeline created');
+
+    // Claim + configure the canvas now (only after shader + pipeline
+    // both succeeded). If we'd done this earlier and then failed
+    // here, the canvas would be locked into webgpu mode and the
+    // WebGL2 fallback below would get back null from getContext().
+    const ctx = canvas.getContext('webgpu');
+    console.log('[webgpu] context:', ctx ? 'ok' : 'null');
+    if (!ctx) return null;
+    ctx.configure({ device, format, alphaMode: 'opaque' });
+
+    // 8 floats = 32 bytes (matches std140-ish padding in WGSL Uniforms)
+    const uboSize = 64;
+    const ubo = device.createBuffer({
+      size: uboSize,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    let bindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [{ binding: 0, resource: { buffer: ubo } }],
+    });
+    console.log('[webgpu] ubo + bindGroup ready');
+
+    const cpuBuf = new Float32Array(16);
+    let firstFrameLogged = false;
+
+    function frame(time) {
+      // resize-safe
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const w = canvas.clientWidth  * dpr | 0;
+      const h = canvas.clientHeight * dpr | 0;
+      if (canvas.width !== w || canvas.height !== h) {
+        if (w === 0 || h === 0) {
+          // Bail this frame — drawing into a 0x0 canvas yields a
+          // permanently-cleared swap chain on some WebGPU drivers
+          // and is the most likely root cause of "everything is
+          // black after page load".
+          console.warn('[webgpu] skipping frame: canvas client size is 0 (' + canvas.clientWidth + 'x' + canvas.clientHeight + ')');
+          return;
+        }
+        canvas.width = w; canvas.height = h;
+      }
+      if (!firstFrameLogged) {
+        console.log('[webgpu] first frame at', w + 'x' + h);
+      }
+
+      cpuBuf[0] = canvas.width;
+      cpuBuf[1] = canvas.height;
+      cpuBuf[2] = time;
+      cpuBuf[3] = params.zoom;
+      cpuBuf[4] = params.activity;
+      cpuBuf[5] = params.organelles;
+      cpuBuf[6] = params.cellType;
+      cpuBuf[7]  = params.theme;
+      cpuBuf[8]  = params.bgKind;
+      cpuBuf[9]  = params.cellOffsetX;
+      cpuBuf[10] = params.cellOffsetY;
+      cpuBuf[11] = params.cellRadius;
+      cpuBuf[12] = params.caustics;
+      device.queue.writeBuffer(ubo, 0, cpuBuf);
+
+      const enc = device.createCommandEncoder();
+      const view = ctx.getCurrentTexture().createView();
+      const pass = enc.beginRenderPass({
+        colorAttachments: [{
+          view,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      pass.setPipeline(pipeline);
+      pass.setBindGroup(0, bindGroup);
+      pass.draw(3, 1, 0, 0);
+      pass.end();
+      device.queue.submit([enc.finish()]);
+      if (!firstFrameLogged) {
+        firstFrameLogged = true;
+        console.log('[webgpu] first frame submitted ok');
+      }
+    }
+
+    // Live-recompile path: rebuild shader module + pipeline + bind
+    // group from a fresh WGSL source string. Returns either { ok }
+    // or { ok: false, error }. Errors come from the GPUShaderModule
+    // compilation info or from createRenderPipeline throwing.
+    async function setWgslSource(newCode) {
+      try {
+        device.pushErrorScope('validation');
+        const m = device.createShaderModule({ code: newCode });
+        const mErr = await device.popErrorScope();
+        if (mErr) return { ok: false, error: 'shader-module:\n' + mErr.message };
+        const info = await m.getCompilationInfo?.();
+        const errs = (info?.messages || []).filter(x => x.type === 'error');
+        if (errs.length) {
+          return { ok: false, error: errs.map(e => `L${e.lineNum}: ${e.message}`).join('\n') };
+        }
+        device.pushErrorScope('validation');
+        const p = await device.createRenderPipelineAsync({
+          layout: 'auto',
+          vertex:   { module: m, entryPoint: 'vs_main' },
+          fragment: { module: m, entryPoint: 'fs_main', targets: [{ format }] },
+          primitive: { topology: 'triangle-list' },
+        });
+        const pErr = await device.popErrorScope();
+        if (pErr) return { ok: false, error: 'pipeline:\n' + pErr.message };
+        const bg = device.createBindGroup({
+          layout: p.getBindGroupLayout(0),
+          entries: [{ binding: 0, resource: { buffer: ubo } }],
+        });
+        // Atomic swap — only after every step succeeded. The frame
+        // closure reads `pipeline` and `bindGroup` directly each
+        // tick, so reassigning them is enough.
+        module = m;
+        pipeline = p;
+        bindGroup = bg;
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e?.message || e) };
+      }
+    }
+
+    return { name: 'webgpu · wgsl', frame, setWgslSource };
+  } catch (e) {
+    console.error('[webgpu] init failed (caught):', e?.message || e, e?.stack);
+    return null;
+  }
+}
+
+function initWebGL2() {
+  console.log('[webgl2] init: requesting context');
+  const gl = canvas.getContext('webgl2', { antialias: true, premultipliedAlpha: false });
+  if (!gl) { console.error('[webgl2] no context'); return null; }
+  console.log('[webgl2] context ok · vendor:', gl.getParameter(gl.VENDOR), '· renderer:', gl.getParameter(gl.RENDERER));
+
+  function compile(type, src) {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+      const log = gl.getShaderInfoLog(sh);
+      console.error('[webgl2]', type === gl.VERTEX_SHADER ? 'vertex' : 'fragment', 'shader compile failed:\n' + log);
+      throw new Error('shader compile failed: ' + log);
+    }
+    return sh;
+  }
+  const vs = compile(gl.VERTEX_SHADER, glslVsSrc);
+  const fs = compile(gl.FRAGMENT_SHADER, glslFsSrc);
+  const prog = gl.createProgram();
+  gl.attachShader(prog, vs); gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    const log = gl.getProgramInfoLog(prog);
+    console.error('[webgl2] program link failed:\n' + log);
+    throw new Error('link failed: ' + log);
+  }
+  console.log('[webgl2] program linked ok');
+  gl.useProgram(prog);
+
+  const u_res  = gl.getUniformLocation(prog, 'u_resolution');
+  const u_time = gl.getUniformLocation(prog, 'u_time');
+  const u_zoom = gl.getUniformLocation(prog, 'u_zoom');
+  const u_act  = gl.getUniformLocation(prog, 'u_activity');
+  const u_org  = gl.getUniformLocation(prog, 'u_organelles');
+  const u_kind  = gl.getUniformLocation(prog, 'u_cellType');
+  const u_theme   = gl.getUniformLocation(prog, 'u_theme');
+  const u_bgKind  = gl.getUniformLocation(prog, 'u_bgKind');
+  const u_cox     = gl.getUniformLocation(prog, 'u_cellOffsetX');
+  const u_coy     = gl.getUniformLocation(prog, 'u_cellOffsetY');
+  const u_cr      = gl.getUniformLocation(prog, 'u_cellRadius');
+  const u_cau     = gl.getUniformLocation(prog, 'u_caustics');
+
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+
+  function frame(time) {
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const w = canvas.clientWidth  * dpr | 0;
+    const h = canvas.clientHeight * dpr | 0;
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+    }
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    gl.uniform2f(u_res, canvas.width, canvas.height);
+    gl.uniform1f(u_time, time);
+    gl.uniform1f(u_zoom, params.zoom);
+    gl.uniform1f(u_act,  params.activity);
+    gl.uniform1f(u_org,  params.organelles);
+    gl.uniform1f(u_kind,   params.cellType);
+    gl.uniform1f(u_theme,  params.theme);
+    gl.uniform1f(u_bgKind, params.bgKind);
+    gl.uniform1f(u_cox,    params.cellOffsetX);
+    gl.uniform1f(u_coy,    params.cellOffsetY);
+    gl.uniform1f(u_cr,     params.cellRadius);
+    gl.uniform1f(u_cau,    params.caustics);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  return { name: 'webgl2 · glsl es 3.0', frame };
+}
+
+// fps meter ----------------------------------------------------------------
+let fpsAcc = 0, fpsFrames = 0, fpsLast = 0;
+function updateFps(now) {
+  fpsFrames++;
+  if (now - fpsLast > 500) {
+    const fps = (fpsFrames * 1000) / (now - fpsLast);
+    $('fps').textContent = fps.toFixed(0).padStart(2,'0') + ' fps';
+    fpsLast = now; fpsFrames = 0;
+  }
+}
+
+// boot ---------------------------------------------------------------------
+(async () => {
+  renderer = await initWebGPU();
+  if (renderer) {
+    setBadge(renderer.name, false);
+  } else {
+    renderer = initWebGL2();
+    if (!renderer) {
+      setBadge('no gpu support', true);
+      return;
+    }
+    setBadge(renderer.name, true);
+  }
+
+  // dump host code into JS pane (already done above; nothing more to do here)
+
+  fpsLast = performance.now();
+  const start = fpsLast;
+  function loop(now) {
+    const t = (now - start) / 1000;
+    renderer.frame(t);
+    updateFps(now);
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+
+</body>
+</html>

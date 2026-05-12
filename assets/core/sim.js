@@ -10,12 +10,23 @@ import {
   CELL_RADIUS, BROWNIAN, MARGIN, BOND_DURATION, SPLIT_DURATION, HASH_CELL,
   pickRandomActiveType,
 } from './state.js';
+import { getRule, maxAttractRadius, defaultHp, getBestCounter } from './sim-rules.js';
 
 // Push-apart impulse from finishSplit() ramps in linearly over this
 // duration so the new cells don't snap outward at the moment of
 // transition. 0.30 s reads as "soft drift apart" without delaying the
 // physics noticeably.
 const SPLIT_IMPULSE_FADE_S = 0.30;
+// B-cell antibody system. Cooldown gates emit cadence, speed sets the
+// projectile travel rate, lifetime caps how far they go before
+// despawning, and damage is applied once on hit. Tuned so a single
+// B-cell takes ~6-8 hits to kill a virus (defaultHp=58, damage 8 →
+// 7-8 hits ÷ 1 emit per 1.4s ≈ 11s to kill).
+const ANTIBODY_COOLDOWN_S = 1.4;
+const ANTIBODY_SPEED      = 220;
+const ANTIBODY_LIFE_S     = 2.4;
+const ANTIBODY_DAMAGE     = 8;
+const ANTIBODY_RADIUS     = 3;
 
 export class Sim {
   constructor() {
@@ -38,6 +49,15 @@ export class Sim {
      * via drawParticles().
      */
     this.particles = [];
+    /**
+     * Antibody projectiles emitted by B-cells. Linear motion (no damping)
+     * with a target reference; on hit, applies ANTIBODY_DAMAGE to the
+     * target and the projectile disappears. Rendered through the same
+     * `drawParticles` pipeline each renderer already supports — the
+     * shape is `{ x, y, vx, vy, r, color, life, maxLife }` plus the
+     * antibody-specific `targetId` for hit-tracking.
+     */
+    this.antibodies = [];
 
     // Input scratch — mutated by app.js's input handlers.
     /** @type {null|{cell, dx, dy, started, downX, downY, samples }} */
@@ -50,7 +70,7 @@ export class Sim {
     this.activePointers = new Map();
 
     /** Camera: world-space → screen-space affine = scale*world + translate. */
-    this.camera = { scale: 1, tx: 0, ty: 0 };
+    this.camera = { scale: 1, tx: 0, ty: 0, rotation: 0 };
 
     // Viewport in CSS pixels (set by app.js after each resize).
     this.W = 0;
@@ -63,11 +83,25 @@ export class Sim {
   setViewport(W, H) { this.W = W; this.H = H; }
 
   // Camera helpers. Pure math; safe to call any time.
+  // Forward transform: screen = R(θ) · (world · scale) + (tx, ty).
+  // When rotation === 0 the trig collapses to (cos, sin) = (1, 0)
+  // and these reduce to the original (sx - tx)/scale form.
   screenToWorld(sx, sy) {
-    return { x: (sx - this.camera.tx) / this.camera.scale, y: (sy - this.camera.ty) / this.camera.scale };
+    const s = this.camera.scale;
+    const c = Math.cos(this.camera.rotation);
+    const r = Math.sin(this.camera.rotation);
+    const dx = sx - this.camera.tx;
+    const dy = sy - this.camera.ty;
+    // Inverse rotation R(-θ) = [[c, r], [-r, c]] then divide by scale.
+    return { x: (c * dx + r * dy) / s, y: (-r * dx + c * dy) / s };
   }
   worldToScreen(wx, wy) {
-    return { x: wx * this.camera.scale + this.camera.tx, y: wy * this.camera.scale + this.camera.ty };
+    const s = this.camera.scale;
+    const c = Math.cos(this.camera.rotation);
+    const r = Math.sin(this.camera.rotation);
+    const sx = wx * s;
+    const sy = wy * s;
+    return { x: c * sx - r * sy + this.camera.tx, y: r * sx + c * sy + this.camera.ty };
   }
 
   // ---------- Cell lifecycle ----------
@@ -97,16 +131,95 @@ export class Sim {
       wobbleSeed: Math.random() * 1000,
       wobbleFreq: 0.55 + Math.random() * 0.45,
       flash: 0,
+      mouthFlashKind: null,
+      mouthFlashTimer: 0,
+      lookX: 0,
+      lookY: 0,
       target: null,
       patrolTarget: null,
       patrolTimer: 0,
       alarmTarget: null,
       alarmTimer: 0,
       category: (CELL_TYPES[t] && CELL_TYPES[t].category) || 'good',
+      hp: defaultHp(t),
+      maxHp: defaultHp(t),
+      // B-cell antibody emit cooldown (seconds). Counts down each
+      // frame; emits when ≤0 and an alarm target exists. Stays at 0
+      // for non-bcell types — checked alongside the type guard.
+      _antibodyCd: 0,
       nextBlink: (typeof performance !== 'undefined' ? performance.now() : 0)
         + 1500 + Math.random() * 4500,
       _colors: (CELL_TYPES[t] || CELL_TYPES.neutrophil).colors,
     };
+  }
+
+  // Lookup by id. Linear scan over `cells` — fine at the project's
+  // hard cap of 1024 and called only from antibody hit-checks (one
+  // lookup per active antibody per frame, typically <20 antibodies).
+  _cellById(id) {
+    for (const c of this.cells) if (c.id === id) return c;
+    return null;
+  }
+
+  // Spawn an antibody from `owner` toward `target`'s current
+  // position. Velocity is fixed-magnitude in that direction; the
+  // antibody flies in a straight line and dies on hit or expiry.
+  _emitAntibody(owner, target) {
+    const dx = target.x - owner.x, dy = target.y - owner.y;
+    const d = Math.hypot(dx, dy) || 1;
+    const cc = (CELL_TYPES[owner.type] && CELL_TYPES[owner.type].colors) || {};
+    this.antibodies.push({
+      x: owner.x + (dx / d) * owner.r * 1.05,
+      y: owner.y + (dy / d) * owner.r * 1.05,
+      vx: (dx / d) * ANTIBODY_SPEED,
+      vy: (dy / d) * ANTIBODY_SPEED,
+      r: ANTIBODY_RADIUS,
+      color: cc.accent || '#ffe14a',
+      life: ANTIBODY_LIFE_S,
+      maxLife: ANTIBODY_LIFE_S,
+      targetId: target.id,
+      ownerId: owner.id,
+    });
+    owner.mouthFlashKind = 'fangs';
+    owner.mouthFlashTimer = 0.30;
+    // Optional event hook so app.js can play SFX without sim.js
+    // having to import Audio. Owner is the firing B-cell; the
+    // listener can read owner.x/y to decide an on-screen volume.
+    if (this.onAntibodyEmit) this.onAntibodyEmit(owner, target);
+  }
+
+  // Subtract HP from a cell. Triggers the killCell death + particle
+  // burst when HP drops to 0 or below. Heroes start with Infinity HP
+  // (defaultHp) so this is a no-op for them in Free Game.
+  _applyDamage(cell, amount) {
+    if (!cell || cell.hp == null) return;
+    if (!Number.isFinite(cell.hp)) return;     // invulnerable (heroes)
+    cell.hp -= amount;
+    cell.flash = 0.4;
+    cell.mouthFlashKind = 'frown';
+    cell.mouthFlashTimer = 0.40;
+    // Floating "-N" damage indicator. Per-pair DPS deals fractional
+    // amounts each tick (rule.dps * dt), which would spam the
+    // overlay with -0 labels — so we accumulate sub-1 hits per
+    // cell and emit only when the running total crosses an integer.
+    // The killing blow always emits regardless of accumulator state.
+    cell._dmgAccum = (cell._dmgAccum || 0) + amount;
+    const fatal = cell.hp <= 0;
+    if (fatal || cell._dmgAccum >= 1) {
+      const n = Math.max(1, Math.floor(cell._dmgAccum));
+      cell._dmgAccum -= n;
+      if (this.onFloatingText) this.onFloatingText({
+        x: cell.x, y: cell.y, text: `-${n}`, kind: 'damage',
+        hp: cell.hp, maxHp: cell.maxHp,
+      });
+      // Generic damage hook — app.js plays the per-type damage SFX
+      // (e.g. virus-hit when type === 'virus').
+      if (this.onDamage) this.onDamage({ x: cell.x, y: cell.y, type: cell.type, amount: n });
+    }
+    if (fatal) {
+      cell.hp = 0;
+      this.killCell(cell);
+    }
   }
 
   rollSplitTimer(type) {
@@ -122,16 +235,44 @@ export class Sim {
     }
   }
 
+  // Quiet eviction: pop the oldest cell (= front of the array) so
+  // a new spawn / split can succeed at the cap. No particle burst,
+  // no SFX — recycling is a UX courtesy, not a kill.
+  _recycleOldest(except) {
+    for (let i = 0; i < this.cells.length; i++) {
+      const c = this.cells[i];
+      if (c === except) continue;
+      this.cells.splice(i, 1);
+      this.selectedCells.delete(c);
+      if (typeof console !== 'undefined') {
+        try { console.info('[sim] cap reached, recycled oldest', c.type); } catch {}
+      }
+      return;
+    }
+  }
+
   // ---------- Splitting ----------
   beginSplit(cell) {
     if (cell.state !== 'NORMAL') return;
-    if (this.cells.length >= S.maxCells) {
-      cell.flash = 0.5;
-      cell.splitTimer = this.rollSplitTimer(cell.type) * 0.5;
-      return;
+    // At cap, recycle an unrelated old cell so split can proceed
+    // instead of silently failing. The parent cell itself is
+    // protected so the split mechanic is never confused.
+    while (this.cells.length >= S.maxCells) {
+      const before = this.cells.length;
+      this._recycleOldest(cell);
+      if (this.cells.length === before) {
+        // No recyclable cell (cap == 1 + parent). Fall back to the
+        // pre-existing pulse-and-skip behaviour rather than wedging.
+        cell.flash = 0.5;
+        cell.splitTimer = this.rollSplitTimer(cell.type) * 0.5;
+        return;
+      }
     }
     cell.state = 'SPLITTING';
     cell.splitProgress = 0;
+    // Event hook for app.js — emits {x, y, r, type} so the audio
+    // layer can play a split SFX with distance-based volume.
+    if (this.onSplit) this.onSplit({ x: cell.x, y: cell.y, r: cell.r, type: cell.type });
     const ctype = CELL_TYPES[cell.type];
     if (ctype && ctype.body && ctype.body.kind === 'oblong') {
       cell.splitAngle = cell.orientation;
@@ -151,6 +292,22 @@ export class Sim {
     const right = this.makeCell(cell.x + cx * sep, cell.y + cy * sep, cell.r, cell.type);
     left.orientation = cell.orientation;
     right.orientation = cell.orientation;
+    // Shader state inheritance: children keep the parent's seed +
+    // phase so the cytoplasm grain, mito starting angles, vesicle
+    // layout and ER stripes start where the parent left off — they
+    // read as mitotic siblings, not strangers. They diverge over
+    // time through:
+    //   • slight per-child jitter on wobbleFreq (different speed)
+    //   • one child gets a negated wobbleFreq (different direction
+    //     for orbital + drift animations — see render shaders'
+    //     `dir = sign(v_phase.z)` term).
+    left.phase = cell.phase;
+    right.phase = cell.phase;
+    left.wobbleSeed = cell.wobbleSeed;
+    right.wobbleSeed = cell.wobbleSeed;
+    const baseFreq = Math.abs(cell.wobbleFreq) || 0.7;
+    left.wobbleFreq  =  baseFreq * (0.85 + Math.random() * 0.30);
+    right.wobbleFreq = -baseFreq * (0.85 + Math.random() * 0.30);
     // Inherit parent's velocity. The push-apart impulse below is NOT
     // applied directly — we store it as splitImpulseRemaining* and ramp
     // it in over SPLIT_IMPULSE_FADE_S so the cells don't suddenly snap
@@ -195,7 +352,12 @@ export class Sim {
     }
     if (!c || idx < 0) return;
     const cc = c._colors || {};
-    const N = 32;
+    // Particle count scales with cell radius — bigger pop, bigger spray.
+    // Floor at 2× the previous baseline (32 → 64) so every kill has
+    // visual punch; ceiling at 160 keeps the particle pool bounded for
+    // huge amoebas. CELL_RADIUS (=52) is the size-1 reference.
+    const sizeRatio = Math.max(0.5, c.r / 52);
+    const N = Math.max(64, Math.min(160, Math.round(64 * sizeRatio)));
     for (let i = 0; i < N; i++) {
       const ang = (i / N) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
       const speed = 50 + Math.random() * 100;
@@ -213,6 +375,9 @@ export class Sim {
         maxLife: 2.0,
       });
     }
+    // Event hook for app.js — emits {x, y, type} so the audio layer
+    // can play a death SFX with distance-based volume and stereo pan.
+    if (this.onKill) this.onKill({ x: c.x, y: c.y, type: c.type });
     this.cells.splice(idx, 1);
     this.selectedCells.delete(c);
   }
@@ -231,6 +396,42 @@ export class Sim {
   }
 
   // ---------- Swarm cohesion + spatial hash ----------
+  /**
+   * Composition snapshot for the HUD: which heroes are still
+   * "needed" to counter the on-field pathogens. For each pathogen
+   * type present, look up its best counter (sim-rules.getBestCounter)
+   * and accumulate one need per pathogen instance. Subtract the
+   * heroes of that type already present, and return what's left
+   * (always ≥ 0). When nothing's missing the returned object is
+   * empty — the HUD then renders a "fully covered" message.
+   *
+   * @returns {{ needed: Object<string, number>, pathogens: number }}
+   */
+  getCompositionStatus() {
+    const needed = Object.create(null);
+    const onField = Object.create(null);
+    let pathogens = 0;
+    for (const c of this.cells) {
+      if (c.state !== 'NORMAL') continue;
+      onField[c.type] = (onField[c.type] || 0) + 1;
+      if (c.category === 'bad') pathogens++;
+    }
+    for (const c of this.cells) {
+      if (c.state !== 'NORMAL' || c.category !== 'bad') continue;
+      const counter = getBestCounter(c.type);
+      if (!counter) continue;
+      needed[counter] = (needed[counter] || 0) + 1;
+    }
+    // Subtract heroes already present, drop entries that hit zero.
+    for (const heroType of Object.keys(needed)) {
+      const have = onField[heroType] || 0;
+      const deficit = needed[heroType] - have;
+      if (deficit <= 0) delete needed[heroType];
+      else needed[heroType] = deficit;
+    }
+    return { needed, pathogens };
+  }
+
   swarmCentroid(category) {
     let n = 0, sx = 0, sy = 0;
     for (const c of this.cells) {
@@ -301,6 +502,31 @@ export class Sim {
       }
     }
 
+    // Antibody projectiles. Linear motion (no damping), back-to-front
+    // sweep so we can splice on hit / expiry. Hit detection just
+    // checks distance to the cached target; if the target is gone,
+    // the antibody flies on until life runs out.
+    if (this.antibodies.length > 0) {
+      for (let i = this.antibodies.length - 1; i >= 0; i--) {
+        const a = this.antibodies[i];
+        a.x += a.vx * dt;
+        a.y += a.vy * dt;
+        a.life -= dt;
+        let hit = false;
+        if (a.targetId != null) {
+          const target = this._cellById(a.targetId);
+          if (target && target.state === 'NORMAL') {
+            const dx = target.x - a.x, dy = target.y - a.y;
+            if (dx * dx + dy * dy < (target.r + a.r) * (target.r + a.r)) {
+              this._applyDamage(target, ANTIBODY_DAMAGE);
+              hit = true;
+            }
+          }
+        }
+        if (hit || a.life <= 0) this.antibodies.splice(i, 1);
+      }
+    }
+
     const centroidGood = this.swarmCentroid('good');
     const centroidBad  = this.swarmCentroid('bad');
     this.rebuildSpatialGrid();
@@ -311,6 +537,29 @@ export class Sim {
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
       if (c.flash > 0) c.flash = Math.max(0, c.flash - dt * 2);
+      if (c.mouthFlashTimer > 0) {
+        c.mouthFlashTimer = Math.max(0, c.mouthFlashTimer - dt);
+        if (c.mouthFlashTimer === 0) c.mouthFlashKind = null;
+      }
+      // Eye-target smoothing. Desired direction is the alarm target
+      // if locked-on, else the velocity vector. Exp lerp with a 0.15 s
+      // time constant absorbs the alarmTarget snap on closer-enemy
+      // pickups so pupils drift instead of teleporting.
+      {
+        let dx, dy;
+        if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
+          dx = c.alarmTarget.x - c.x;
+          dy = c.alarmTarget.y - c.y;
+        } else {
+          dx = c.vx;
+          dy = c.vy;
+        }
+        const m = Math.hypot(dx, dy) || 1;
+        const tx = dx / m, ty = dy / m;
+        const k = 1 - Math.exp(-dt / 0.15);
+        c.lookX += (tx - c.lookX) * k;
+        c.lookY += (ty - c.lookY) * k;
+      }
 
       if (c.state === 'NORMAL') {
         if (S.randomSplit) {
@@ -330,6 +579,18 @@ export class Sim {
 
           if (c.alarmTimer > 0) c.alarmTimer = Math.max(0, c.alarmTimer - dt);
 
+          // B-cell antibody emit. Tick the cooldown for every cell
+          // (cheap; non-bcell types never reach the emit branch
+          // below) and emit when an alarm target is in attract
+          // range. The alarmRule was set up by the matrix-driven
+          // alarm picker — we don't need to re-resolve it.
+          if (c._antibodyCd > 0) c._antibodyCd = Math.max(0, c._antibodyCd - dt);
+          if (c.type === 'bcell' && c._antibodyCd === 0
+              && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
+            this._emitAntibody(c, c.alarmTarget);
+            c._antibodyCd = ANTIBODY_COOLDOWN_S;
+          }
+
           let goalX = 0, goalY = 0, accel = 0, maxV = 0, hasGoal = false;
 
           if (c.target) {
@@ -347,15 +608,34 @@ export class Sim {
 
           if (!hasGoal) {
             if (c.alarmTimer === 0 && moveCfg.hostility !== 'idle') {
-              let bestD = ALARM_RADIUS * ALARM_RADIUS, enemy = null;
-              this.forEachNeighbour(c, ALARM_RADIUS, (o) => {
+              // Per-pair targeting matrix (sim-rules.js). Picks the
+              // closest neighbour for which getRule returns a rule;
+              // attractRadius from that rule is the search bound,
+              // capped above by the attacker's max attract radius
+              // so a single spatial-grid query covers every rule.
+              const searchR = Math.max(ALARM_RADIUS, maxAttractRadius(c.type));
+              let bestD = searchR * searchR, enemy = null, enemyRule = null;
+              this.forEachNeighbour(c, searchR, (o) => {
                 if (o.state !== 'NORMAL') return;
-                if ((o.category || (CELL_TYPES[o.type] && CELL_TYPES[o.type].category)) === c.category) return;
+                const rule = getRule(c.type, o.type);
+                if (!rule) return;
                 const dx = o.x - c.x, dy = o.y - c.y;
                 const d2 = dx*dx + dy*dy;
-                if (d2 < bestD) { bestD = d2; enemy = o; }
+                if (d2 < rule.attract * rule.attract && d2 < bestD) {
+                  bestD = d2; enemy = o; enemyRule = rule;
+                }
               });
-              if (enemy) { c.alarmTarget = enemy; c.alarmTimer = 1.6; }
+              if (enemy) {
+                // "+1" floating indicator on fresh activation only —
+                // re-acquiring the same target (or chaining to a new
+                // one while still alarmed) doesn't spam the overlay.
+                const wasIdle = !c.alarmTarget;
+                c.alarmTarget = enemy; c.alarmTimer = 1.6;
+                c.alarmRule = enemyRule;
+                if (wasIdle && this.onFloatingText) this.onFloatingText({
+                  x: c.x, y: c.y, text: '+1', kind: 'activate',
+                });
+              }
             }
 
             if (c.alarmTimer > 0 && c.alarmTarget && c.alarmTarget.state === 'NORMAL') {
@@ -366,6 +646,18 @@ export class Sim {
               accel = moveCfg.alarmAccel * sm;
               maxV  = moveCfg.attackSpeed * sm;
               hasGoal = true;
+              // Apply per-pair damage when inside attack range. Cached
+              // alarmRule was set when this target was acquired; if
+              // missing (e.g. target type changed), look it up fresh.
+              const rule = c.alarmRule || getRule(c.type, c.alarmTarget.type);
+              if (rule && rule.dps > 0 && d < rule.attack) {
+                this._applyDamage(c.alarmTarget, rule.dps * dt);
+                if (c.alarmTarget.hp <= 0) {
+                  c.alarmTarget = null;
+                  c.alarmTimer = 0;
+                  c.alarmRule = null;
+                }
+              }
             } else {
               const home = (c.category === 'bad') ? centroidBad : centroidGood;
               if (home && home.r > 0) {
@@ -518,7 +810,14 @@ export class Sim {
   }
 
   spawnAtWorld(typeKey, wx, wy) {
-    if (this.cells.length >= S.maxCells) return null;
+    // At the maxCells cap, recycle the oldest cell instead of
+    // refusing — user intent is "place this thing here", so silently
+    // sacrificing an old cell preserves that contract. Pre-cap fix
+    // surfaced as "click does nothing" once auto-split filled the
+    // pool to 1024 (see settings → Debug log for [sim] cap entries).
+    while (this.cells.length >= S.maxCells) {
+      this._recycleOldest();
+    }
     const jitter = CELL_RADIUS * 0.2;
     const c = this.makeCell(
       wx + (Math.random() - 0.5) * jitter,
@@ -536,6 +835,7 @@ export class Sim {
     this.selectedCells.clear();
     this.targetMarker = null;
     this.particles.length = 0;
+    this.antibodies.length = 0;
     const c = this.makeCell(this.W / 2, this.H / 2);
     this.cells.push(c);
   }

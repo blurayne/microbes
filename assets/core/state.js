@@ -16,51 +16,286 @@ export const ALL_CELL_KEYS = [
 export const DEFAULTS = {
   splitMode: 'bondDrift',
   autoSplitSeconds: 10,
-  maxCells: 32,
+  maxCells: 512,            // population cap. UI number input in Settings → Population; clamps to [32, 4096], invalid input resets to 512. Reached cap = spawnAtWorld/beginSplit recycle the oldest cell (#136); see TODO.md for future ideas.
   bgFlowSpeed: 0.55,
   bgScale: 1.0,             // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0..4×.
   outlinePx: 5,
   showDebugField: false,
-  theme: 'petriDish',
+  // Visual style for the cell rendering itself. Was the lone "theme"
+  // setting until late 2026; renamed when the colour palette below was
+  // introduced as a separate "Interface color" setting.
+  theme: 'legacy',
+  // Colour palette tinting outlines + UI panel accent (was DEFAULTS.theme).
+  // Renamed to interfaceColor to free up "theme" for the cell-shader theme.
+  interfaceColor: 'pink',
   activeTypes: ALL_CELL_KEYS.slice(),
   splitOnTap: false,
+  addDialogView: 'grid',    // 'grid' | 'list' — initial view when the add/cell-info dialog opens. Toggle button in the header swaps modes; ? FAB forces 'list', + FAB respects this setting.
   randomSplit: false,
   metaSplit: true,          // metaball merge between the two halves while SPLITTING
-  metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu / pixi alike.
-  metaOutlineMode: 'edge',  // 'edge' | 'sdf' | 'polygon' — outline style for the merged blob during SPLITTING. 'edge': trace blurred-mask threshold (1 shared rim). 'sdf': stroke each half polygon (2 rims). 'polygon': polygon-union rim, sharp/no-blur.
+  metaRtMode: 'bbox',       // 'bbox' | 'fullCanvas' | 'sharedMax' — RT sizing strategy for the per-pair metaball pass. Honoured by webgl2 / webgpu alike.
+  metaOutlineMode: 'edge',  // 'edge' | 'sdf' | 'polygon' — outline style for the merged blob during SPLITTING. 'edge' (default) traces the blurred-mask 0.5 contour, so the rim follows the actual rendered blob shape exactly. 'sdf' strokes each half polygon (2 overlapping rims). 'polygon' is a sharp polygon-union rim, no blur.
+  // Game mode. The live simulator IS Free Game today — campaign +
+  // survival are designed (docs/ch04-konzept.md §4.3) as RESTRICTIONS
+  // overlaid on the same physics, not separate code paths. So this
+  // field declares the schema; only 'free' is wired today.
+  gameMode: 'free',
+  // Composition HUD: top-right widget listing heroes still needed to
+  // counter the on-field pathogens. ON by default in Free Game so
+  // the player learns the matrix; toggle hides it for purists.
+  compositionHud: true,
+  cellTypeOverlay: false,   // eye-toggle: per-cell ring + text label identifying the cell type. HTML overlay above the canvas; renderer-agnostic.
+  causticsOverlay: false,   // water-turbulence post-process applied on top of the rendered background. WebGL2 + WebGPU only; Canvas2D is a no-op.
+  liquidRipples: false,     // bg post-process: each on-screen cell radiates concentric ripples that distort the background — reads as cells moving through liquid. WebGL2 + WebGPU only; Canvas2D is a no-op.
+  // Caustics tint — modulates the green/teal cast added on top of
+  // the rendered scene. Defaults reproduce the historical (0, 1.35,
+  // 0.5) bias; lower values toward 0 fade toward neutral white.
+  causticTintR: 0.0,
+  causticTintG: 1.35,
+  causticTintB: 0.5,
+  // Fullscreen overlay effects (all post-bg, post-cells). Ported from
+  // docs/shader-test.html's microscope chrome — toggleable + tunable.
+  staticNoise: false,            // film-grain per-pixel hash noise
+  staticNoiseIntensity: 0.4,
+  staticNoiseBlend: 'additive',  // 'normal' | 'multiply' | 'additive'
+  vignette: false,               // viewport-radial blue tint at corners (microscope)
+  vignetteIntensity: 0.6,
+  vignetteBlend: 'additive',
+  crosshair: false,              // small cyan + at viewport centre
+  // Unified overlay draw order. Every overlay (FX blends + FBO
+  // passes + the HTML cell-type overlay) is a single entry in
+  // this array. The 'scene' entry is a fixed pin marking where
+  // the cell pass runs: overlays *above* the pin run after cells
+  // (full-scene post-process); overlays *below* the pin run
+  // before cells (bg-only post-process). The pin can't be
+  // dragged or removed; the migration shim in loadSettings
+  // collapses the old fxOrder + rippleScope into this array.
+  // Renderers read overlayFxOrder() / overlayKindRunsAfterScene()
+  // helpers — they don't touch the array directly.
+  overlayOrder: [
+    'duotone',     // duotone color grade (S.makeItReal)
+    'noise',       // film-grain (S.staticNoise)
+    'vignette',    // microscope corner-tint (S.vignette)
+    'crosshair',   // viewport centre crosshair (S.crosshair)
+    'microscope',  // variable-radius blur (S.microscopeBlur)
+    'caustics',    // water-turbulence tint (S.causticsOverlay)
+    'celltype',    // HTML cell-type label overlay (S.cellTypeOverlay)
+    'ripples',     // liquid ripples (S.liquidRipples) — above the pin = full-scene scope (matches legacy default)
+    'scene',       // ← fixed scene pin (cells render here)
+                   //   drag an overlay below this line to make it run BEFORE cells (bg-only)
+  ],
+  // Microscope distortion: scene-wide variable-radius blur. Sharp
+  // center (focus zone) with progressively blurrier edges. Knobs:
+  // focus = sharp-zone radius as fraction of min(W,H)/2; strength =
+  // peak edge blur as fraction of min(W,H); falloff = transition
+  // hardness (0 soft, 1 abrupt). WebGL2 + WebGPU only.
+  microscopeBlur: false,
+  microscopeFocus: 0.35,
+  microscopeBlurStrength: 0.04,
+  microscopeFalloff: 0.04,
+  // "Make it real" microscope-photo color grade: maps scene luminance
+  // along a duotone gradient between hue1 (shadows) and hue2 (highlights),
+  // with a saturation knob. Hues are 0..1 around the wheel (0 red, 0.33
+  // green, 0.5 cyan, 0.67 blue). Defaults dial in the green→cyan look
+  // of the reference microbe-microscopy reference. WebGL2 + WebGPU only.
+  makeItReal: false,
+  makeItRealHue1: 0.30,
+  makeItRealHue2: 0.55,
+  makeItRealSaturation: 0.55,
+  // Liquid-ripples knobs. All three are visible in the settings panel
+  // only while S.liquidRipples is on. They feed straight into the
+  // ripple shader's per-cell uniforms (see _rippleCollectCells + UBO).
+  rippleDensity: 1.5,       // how many ripple rings each cell radiates. Higher → tighter wavelength, more visible rings close to the body. Multiplier on the baseline 1 / 0.7.
+  rippleReach: 0.7,         // how far the ripples extend outward. Lower → ripples stay close to the cell (user wants "close to the object" by default). Multiplier on the falloff distance.
+  rippleStrength: 1.0,      // peak UV displacement amplitude. Multiplier on the baseline ~6 px.
+  pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
+  showObjectCount: false,   // append live cell + particle count to the FPS line
+  navArrows: true,          // edge-of-screen arrows pointing at off-screen cells
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
   friction: 0.80,
   bounce: 0.6,
   throwStrength: 0.35,
   wobbleAmp: 0.13,
-  blendMode: 'overlay',
   speedMul: 1.0,
   cartoon: false,
   lang: 'en',                               // 'en' | 'de' | 'es' | 'bar' | 'latin'
   allowBadGuys: true,
   cellSizeMul: 1.0,
-  membraneIntensity: 0.55,
-  cellBorderThickness: 3.0,    // multiplier on the disk-shader outline band; webgl2 / webgpu only
-  background: 'petriDish',
+  membraneIntensity: 0.9,
+  cellBorderThickness: 2.5,    // multiplier on the disk-shader outline band; webgl2 / webgpu only
+  background: 'solid',
+  // Background layer stack. Empty array → renderers fall back to
+  // a single layer derived from S.background (the legacy single-bg
+  // path). PR B will surface a UI that populates this array. See
+  // .claude/plan/10-bg-layer-stack.md.
+  bgLayers: [],
   renderScale: 1.0,
   upscaleMode: 'blur',
-  scanlines: false,
+  scanlinesAlpha: 0.08,     // 0..1 strength of the CRT scanlines overlay; 0 = off (replaces the old scanlines: bool toggle)
   useHighlight: true,                       // selection ring uses theme accent when on
-  renderer: 'pixi',         // 'canvas2d' | 'webgl2' | 'webgpu' | 'pixi' | 'pixi-webgpu' | 'pixi-webgl2'
+  // Audio. Music ON by default — user wants the game to greet the
+  // player with music. The first play() call is autoplay-blocked
+  // until the user has interacted; music.js retries on the very
+  // first pointerdown so the track starts the moment the player
+  // touches anything. Volumes are 0..1 floats.
+  // The dedicated music on/off toggle was removed — volume = 0 is the
+  // mute control now. musicEnabled stays in DEFAULTS as a no-op so
+  // loadSettings doesn't see an unknown saved field and reset others.
+  musicEnabled: true,
+  musicVolume: 0.5,
+  sfxVolume: 0.7,
+  renderer: 'webgpu',       // 'canvas2d' | 'webgl2' | 'webgpu'
 };
 
-const KNOWN_THEME_KEYS = [
-  'petriDish', 'bloodstream', 'neonBloom', 'aquaticGlow',
-  'crayonBox', 'cartoonNight', 'glowStick', 'bedtime',
-  'spectrum', 'aurora', 'prism', 'pride',
-  'deepSpace', 'volcano', 'forestFloor', 'cyberGrid',
-  'lymphNode', 'thymus', 'boneMarrow', 'heart',
-  'gut', 'lung', 'brain', 'kidney', 'skin', 'liver',
+// Interface-colour accents — a SEPARATE small table from the
+// scene-render THEMES (which drive the background). The user
+// flagged the dropdown duplication in #114 ("why do we have the
+// same names from background and interface color?"); splitting
+// the two truly-distinct concepts.
+const KNOWN_INTERFACE_COLOR_KEYS = [
+  'pink', 'red', 'amber', 'yellow', 'green',
+  'cyan', 'blue', 'violet', 'mono',
 ];
 
+// Cell-shader themes — the new S.theme setting. 'legacy' renders
+// today's geometry unchanged; the other four port the corresponding
+// docs/shader-test.html compose-pass styles into the disk shader.
+const KNOWN_THEME_KEYS = [
+  'legacy', 'microscope', 'cartoon', 'kurzgesagt', 'classic',
+];
+
+// Background scene-render keys — entries in the THEMES table that
+// drive the bg shader. Used by both S.background validation and by
+// the legacy interface-colour migration (any saved interfaceColor
+// that's a bg key gets re-pointed to a sensible accent below).
+const KNOWN_BACKGROUND_KEYS = [
+  'bloodstream', 'bloodflow', 'cellShadow',
+  'cartoonNight', 'spectrum', 'lymphNode',
+  'lung', 'aurora', 'underwater',
+  'lavaFire', 'reactor',
+  'mitochondria', 'neuron', 'bile',
+];
+
+// Map old THEMES keys → new accent keys for the interfaceColor
+// migration (when a saved settings blob still references the
+// old conflated table).
+const LEGACY_INTERFACE_COLOR_MIGRATION = {
+  bloodstream: 'red',  bloodflow: 'red',     cellShadow: 'red',
+  cartoonNight: 'cyan', spectrum: 'violet',  lymphNode: 'violet',
+  lung: 'pink',         lavaFire: 'amber',   reactor: 'green',
+  aurora: 'green',      underwater: 'cyan',
+  mitochondria: 'amber',
+  neuron: 'cyan',       bile: 'green',
+  // Removed scenes — fold to a sensible accent.
+  dracula: 'violet',
+};
+
 const VALID_RENDER_SCALES = [1, 0.5, 0.25, 0.125];
+
+// Currently only 'free' is wired. 'campaign' and 'survival' are
+// reserved for future modes (see docs/ch04-konzept.md §4.3); the
+// settings dropdown shows them as disabled "(soon)" entries.
+const KNOWN_GAME_MODES = ['free'];
+
+// Overlay-stack kinds. Order in this list is incidental; the
+// authoritative draw order is the per-user S.overlayOrder array.
+// 'scene' is the fixed cell-pass pin — exactly one entry per array.
+const OVERLAY_FX_KINDS    = ['noise', 'vignette', 'crosshair'];
+const OVERLAY_SCENE_PIN   = 'scene';
+const KNOWN_OVERLAY_KINDS = [
+  'duotone', 'noise', 'vignette', 'crosshair',
+  'microscope', 'caustics', 'celltype',
+  'ripples',
+  OVERLAY_SCENE_PIN,
+];
+
+// Validate / normalise an overlayOrder array in-place style: takes
+// the raw user value (or undefined) plus optional legacy fxOrder +
+// rippleScope and returns a clean array containing every known
+// overlay kind exactly once, with the scene pin present exactly
+// once. Unknown entries are dropped; duplicates collapse to the
+// first occurrence; missing kinds are appended at their default
+// position relative to the pin.
+function normaliseOverlayOrder(rawOrder, legacyFxOrder, legacyRippleScope) {
+  const defaults = DEFAULTS.overlayOrder;
+  let order = Array.isArray(rawOrder) ? rawOrder.slice() : null;
+
+  if (!order) {
+    // No saved overlayOrder — synthesise from defaults + legacy fields.
+    order = defaults.slice();
+    if (Array.isArray(legacyFxOrder)) {
+      // Splice the FX-subset positions to follow the legacy order.
+      const fxSet = new Set(OVERLAY_FX_KINDS);
+      const slots = [];
+      order.forEach((k, i) => { if (fxSet.has(k)) slots.push(i); });
+      legacyFxOrder.forEach((k, j) => {
+        if (OVERLAY_FX_KINDS.includes(k) && slots[j] !== undefined) {
+          order[slots[j]] = k;
+        }
+      });
+    }
+    if (legacyRippleScope === 'bg') {
+      // Move 'ripples' from above the pin (default) to below.
+      const ri = order.indexOf('ripples');
+      const si = order.indexOf(OVERLAY_SCENE_PIN);
+      if (ri >= 0 && si >= 0 && ri < si) {
+        order.splice(ri, 1);
+        const newPinIdx = order.indexOf(OVERLAY_SCENE_PIN);
+        order.splice(newPinIdx + 1, 0, 'ripples');
+      }
+    }
+  }
+
+  // Drop unknown kinds.
+  order = order.filter(k => KNOWN_OVERLAY_KINDS.includes(k));
+
+  // Collapse duplicates (first occurrence wins).
+  const seen = new Set();
+  order = order.filter(k => {
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  // Append any missing kinds at their default position relative to
+  // the scene pin (above if they're above in DEFAULTS, below if below).
+  const presentSet = new Set(order);
+  const defPinIdx = defaults.indexOf(OVERLAY_SCENE_PIN);
+  for (const k of KNOWN_OVERLAY_KINDS) {
+    if (presentSet.has(k)) continue;
+    if (k === OVERLAY_SCENE_PIN) continue; // handled below
+    const defIdx = defaults.indexOf(k);
+    if (defIdx < defPinIdx) {
+      // Default position is above the pin — insert at the top of
+      // the above-pin section (preserves "post-process" semantics).
+      const pinIdx = order.indexOf(OVERLAY_SCENE_PIN);
+      if (pinIdx >= 0) order.splice(pinIdx, 0, k);
+      else order.unshift(k);
+    } else {
+      order.push(k);
+    }
+    presentSet.add(k);
+  }
+
+  // Scene pin must appear exactly once.
+  if (!presentSet.has(OVERLAY_SCENE_PIN)) {
+    // No pin in user order — insert at the same position as in DEFAULTS.
+    let insertAt = defPinIdx;
+    if (insertAt > order.length) insertAt = order.length;
+    order.splice(insertAt, 0, OVERLAY_SCENE_PIN);
+  }
+
+  return order;
+}
+
+export const OVERLAY_KIND_LIST  = KNOWN_OVERLAY_KINDS;
+export const OVERLAY_FX_LIST    = OVERLAY_FX_KINDS;
+export const OVERLAY_SCENE_KEY  = OVERLAY_SCENE_PIN;
+// Exported for unit tests only; production code goes through
+// loadSettings(). Underscore prefix marks "internal-but-visible".
+export const _normaliseOverlayOrder = normaliseOverlayOrder;
 
 export function loadSettings() {
   if (typeof localStorage === 'undefined') return { ...DEFAULTS };
@@ -80,15 +315,123 @@ export function loadSettings() {
       parsed.activeTypes = [...DEFAULTS.activeTypes];
     }
     if (parsed.splitMode === 'fixedGrid') parsed.splitMode = 'bondDrift';
+    // 2026 rename: S.theme used to hold the colour-palette key
+    // (bloodstream, aurora, …). Now S.theme holds the cell-shader
+    // theme (legacy/microscope/…) and S.interfaceColor holds the
+    // palette. If a saved settings blob still has a palette key in
+    // .theme, migrate it to .interfaceColor and reset .theme to
+    // 'legacy' so existing users see no visual change.
+    if (parsed.theme && KNOWN_INTERFACE_COLOR_KEYS.includes(parsed.theme)) {
+      if (!parsed.interfaceColor) parsed.interfaceColor = parsed.theme;
+      parsed.theme = 'legacy';
+    }
     if (parsed.theme && !KNOWN_THEME_KEYS.includes(parsed.theme)) parsed.theme = DEFAULTS.theme;
-    if (!parsed.background) parsed.background = parsed.theme || DEFAULTS.background;
+    // Legacy interfaceColor migration: pre-PR-#115 the dropdown
+    // pointed at the same THEMES table the bg uses. Re-map any
+    // surviving theme-key value to a sensible accent.
+    if (parsed.interfaceColor && !KNOWN_INTERFACE_COLOR_KEYS.includes(parsed.interfaceColor)) {
+      parsed.interfaceColor =
+        LEGACY_INTERFACE_COLOR_MIGRATION[parsed.interfaceColor] || DEFAULTS.interfaceColor;
+    }
+    if (parsed.gameMode && !KNOWN_GAME_MODES.includes(parsed.gameMode)) parsed.gameMode = DEFAULTS.gameMode;
+    const validBackgrounds = ['solid', ...KNOWN_BACKGROUND_KEYS];
+    if (!parsed.background || !validBackgrounds.includes(parsed.background)) {
+      parsed.background = DEFAULTS.background;
+    }
+    // Removed in late 2026 along with the cell-blending UI.
+    delete parsed.blendMode;
+    // 2026: scanlines bool toggle → scanlinesAlpha slider (0..1).
+    // Legacy true → 0.32 (the old hardcoded alpha); false → 0.
+    if (typeof parsed.scanlines === 'boolean') {
+      if (typeof parsed.scanlinesAlpha !== 'number') {
+        parsed.scanlinesAlpha = parsed.scanlines ? 0.32 : 0;
+      }
+      delete parsed.scanlines;
+    }
+    if (typeof parsed.scanlinesAlpha === 'number') {
+      parsed.scanlinesAlpha = Math.max(0, Math.min(1, parsed.scanlinesAlpha));
+    }
     if (!VALID_RENDER_SCALES.includes(parsed.renderScale)) parsed.renderScale = 1;
-    const validRenderers = ['canvas2d', 'webgl2', 'webgpu', 'pixi', 'pixi-webgpu', 'pixi-webgl2'];
+    const validRenderers = ['canvas2d', 'webgl2', 'webgpu'];
+    // Migrate legacy renderer values (pixi / pixi-webgpu / pixi-webgl2) to
+    // the new default. Pixi support was removed in favour of native WebGPU.
     if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
     const validMetaRtModes = ['bbox', 'fullCanvas', 'sharedMax'];
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
     const validMetaOutlineModes = ['edge', 'sdf', 'polygon'];
     if (!validMetaOutlineModes.includes(parsed.metaOutlineMode)) parsed.metaOutlineMode = DEFAULTS.metaOutlineMode;
+    const validAddDialogViews = ['grid', 'list'];
+    if (!validAddDialogViews.includes(parsed.addDialogView)) parsed.addDialogView = DEFAULTS.addDialogView;
+    const validBlendModes = ['normal', 'multiply', 'additive'];
+    if (!validBlendModes.includes(parsed.staticNoiseBlend)) parsed.staticNoiseBlend = DEFAULTS.staticNoiseBlend;
+    if (!validBlendModes.includes(parsed.vignetteBlend))    parsed.vignetteBlend    = DEFAULTS.vignetteBlend;
+    // Overlay stack: collapse legacy fxOrder + rippleScope into the
+    // unified overlayOrder array. The shim runs every load — old
+    // values are read once, then both legacy fields are deleted from
+    // the parsed blob so they no longer round-trip through saveSettings.
+    parsed.overlayOrder = normaliseOverlayOrder(
+      parsed.overlayOrder,
+      parsed.fxOrder,
+      parsed.rippleScope,
+    );
+    delete parsed.fxOrder;
+    delete parsed.rippleScope;
+    // Microscope post-FX + duotone sliders. Focus + hues + saturation
+    // live on [0, 1]; blur strength + falloff have tighter ceilings
+    // (0.5 / 0.35) tuned in late 2026 — the prior [0, 1] range made
+    // values past 0.1 produce visibly bad bokeh. Old saved settings
+    // that exceeded the new ceiling get clamped down on load.
+    const clampTo = (v, fallback, max = 1) => {
+      const n = typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+      return Math.max(0, Math.min(max, n));
+    };
+    parsed.microscopeFocus         = clampTo(parsed.microscopeFocus,         DEFAULTS.microscopeFocus);
+    parsed.microscopeBlurStrength  = clampTo(parsed.microscopeBlurStrength,  DEFAULTS.microscopeBlurStrength, 0.5);
+    parsed.microscopeFalloff       = clampTo(parsed.microscopeFalloff,       DEFAULTS.microscopeFalloff,      0.35);
+    parsed.makeItRealHue1          = clampTo(parsed.makeItRealHue1,          DEFAULTS.makeItRealHue1);
+    parsed.makeItRealHue2          = clampTo(parsed.makeItRealHue2,          DEFAULTS.makeItRealHue2);
+    parsed.makeItRealSaturation    = clampTo(parsed.makeItRealSaturation,    DEFAULTS.makeItRealSaturation);
+    // One-time migration after PR #147 shipped broken: force all
+    // overlay toggles OFF on first load so users who toggled them on
+    // before this fix don't see a stale (now-different) effect. They
+    // can re-enable from Settings → Overlays. Flag is set once; later
+    // sessions persist whatever the user actually chose.
+    if (!parsed._microscopeFxResetV1) {
+      parsed.microscopeBlur   = false;
+      parsed.makeItReal       = false;
+      parsed.causticsOverlay  = false;
+      parsed.liquidRipples    = false;
+      parsed.staticNoise      = false;
+      parsed.vignette         = false;
+      parsed.crosshair        = false;
+      parsed._microscopeFxResetV1 = true;
+    }
+    // bgLayers: array of { kind, opacity, blend, enabled, ...params }.
+    // Missing / malformed → empty; renderers fall back to S.background.
+    if (!Array.isArray(parsed.bgLayers)) {
+      parsed.bgLayers = [];
+    } else {
+      parsed.bgLayers = parsed.bgLayers.filter(l => l && typeof l === 'object' && typeof l.kind === 'string')
+        .map(l => ({
+          ...l,
+          opacity: (typeof l.opacity === 'number') ? Math.max(0, Math.min(1, l.opacity)) : 1,
+          blend:   validBlendModes.includes(l.blend) ? l.blend : 'normal',
+          enabled: l.enabled !== false,
+        }));
+    }
+    // maxCells: invalid (non-number / NaN / Infinity) → 512; otherwise
+    // clamp to [32, 4096]. Bounds match the Settings number input.
+    if (typeof parsed.maxCells !== 'number' || !Number.isFinite(parsed.maxCells)) {
+      parsed.maxCells = 512;
+    }
+    parsed.maxCells = Math.max(32, Math.min(4096, Math.round(parsed.maxCells)));
+    // 2026-05: user explicitly asked for the split outline to follow
+    // the actual rendered metaball shape. 'edge' mode traces the
+    // blurred-mask 0.5 contour, which IS the rendered blob silhouette
+    // exactly. 'sdf' was the previous default but draws two separate
+    // half-polygon strokes that cross through the bond — not the
+    // rendered shape. Bump any saved 'sdf' value to 'edge'.
+    if (parsed.metaOutlineMode === 'sdf') parsed.metaOutlineMode = 'edge';
     if (typeof parsed.cellBorderThickness !== 'number' || !Number.isFinite(parsed.cellBorderThickness)) {
       parsed.cellBorderThickness = DEFAULTS.cellBorderThickness;
     }
@@ -99,6 +442,11 @@ export function loadSettings() {
     parsed.bgScale = Math.max(0, Math.min(4, parsed.bgScale));
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
+    // Rheinhessisch was renamed to Mainzerisch (Mainz city dialect).
+    if (parsed.lang === 'rhe') parsed.lang = 'mainz';
+    // Removed background: dracula → fall back to bloodstream so existing
+    // savefiles don't get an empty BG dropdown.
+    if (parsed.background === 'dracula') parsed.background = 'bloodstream';
     // Migrate legacy `highlightColor` field to the new `useHighlight` toggle.
     if (typeof parsed.useHighlight !== 'boolean') {
       parsed.useHighlight = (typeof parsed.highlightColor === 'string')
@@ -117,6 +465,66 @@ export function saveSettings() {
 
 export const S = loadSettings();
 
+// ---------- Overlay-stack helpers ----------
+// Renderers + UI talk to S.overlayOrder through these helpers
+// instead of indexing the array directly. Keeps the "scene pin
+// is at most one entry" invariant out of every call site.
+
+// Returns the FX-blend subset of overlayOrder in user order
+// (e.g. ['vignette','noise','crosshair']). Used by renderers
+// that still iterate just the cheap-blend FX trio.
+export function overlayFxOrder() {
+  const order = Array.isArray(S.overlayOrder) ? S.overlayOrder : [];
+  return order.filter(k => OVERLAY_FX_KINDS.includes(k));
+}
+
+// Replace the FX-kind positions inside S.overlayOrder with the
+// supplied permutation, preserving every non-FX entry's slot.
+// Used by the legacy fxOrder UI in app.js so reorders survive
+// until PR B replaces the UI entirely.
+export function setOverlayFxOrder(newFxOrder) {
+  if (!Array.isArray(newFxOrder)) return;
+  const order = S.overlayOrder;
+  if (!Array.isArray(order)) return;
+  const slots = [];
+  order.forEach((k, i) => { if (OVERLAY_FX_KINDS.includes(k)) slots.push(i); });
+  newFxOrder.forEach((k, j) => {
+    if (OVERLAY_FX_KINDS.includes(k) && slots[j] !== undefined) {
+      order[slots[j]] = k;
+    }
+  });
+}
+
+// True iff `kind` is positioned above the scene pin in
+// overlayOrder — i.e. runs as a full-scene post-process after
+// the cell pass. Returns false when the kind appears below the
+// pin (bg-only) or isn't present at all.
+export function overlayKindRunsAfterScene(kind) {
+  const order = Array.isArray(S.overlayOrder) ? S.overlayOrder : [];
+  const ki = order.indexOf(kind);
+  const si = order.indexOf(OVERLAY_SCENE_PIN);
+  if (ki < 0 || si < 0) return false;
+  return ki < si;
+}
+
+// Move the entry `kind` to the requested side of the scene pin.
+// `side` is 'after' (above pin = full-scene) or 'before'
+// (below pin = bg-only). No-op if `kind` is the pin itself.
+export function setOverlayKindSide(kind, side) {
+  if (kind === OVERLAY_SCENE_PIN) return;
+  const order = S.overlayOrder;
+  if (!Array.isArray(order)) return;
+  const ki = order.indexOf(kind);
+  if (ki < 0) return;
+  const wantsAfter = side === 'after';
+  const currentlyAfter = overlayKindRunsAfterScene(kind);
+  if (wantsAfter === currentlyAfter) return;
+  order.splice(ki, 1);
+  const pin = order.indexOf(OVERLAY_SCENE_PIN);
+  if (wantsAfter) order.splice(pin, 0, kind);                // just above
+  else            order.splice(pin + 1, 0, kind);            // just below
+}
+
 // First-run language auto-detect; only fires when no preference was saved.
 if (!S._langSet) {
   const nav = (typeof navigator !== 'undefined' && navigator.language) ? navigator.language : 'en';
@@ -131,39 +539,152 @@ if (!S._langSet) {
 export const LOCALES = {
   en: {
     settings_title: 'Settings',
-    theme: 'Theme', background: 'Background', gameplay: 'Gameplay',
-    splitting: 'Splitting', split_mode: 'Split mode', population: 'Population',
-    physics: 'Physics', cell_blending: 'Cell blending', look: 'Look',
+    bg_solid: 'Solid color',
+    bg_bloodstream: 'Bloodstream (crimson)',
+    bg_bloodflow: 'Bloodflow (vermilion)',
+    bg_cellShadow: 'Cell Shadow (red)',
+    bg_cartoonNight: 'Cosmic Soup (navy)',
+    bg_spectrum: 'Spectrum (rainbow)',
+    bg_lymphNode: 'Lymph Node (violet)',
+    bg_lung: 'Lung (smoke)',
+    bg_aurora: 'Aurora (green/violet)',
+    bg_underwater: 'Underwater (caustic)',
+    bg_lavaFire: 'Magma (orange)',
+    bg_reactor: 'Reactor (acid green)',
+    bg_mitochondria: 'Mitochondria (amber)',
+    bg_neuron: 'Neuron (electric blue)',
+    bg_bile: 'Bile (chartreuse)',
+    ic_pink: 'Pink', ic_red: 'Red', ic_amber: 'Amber', ic_yellow: 'Yellow',
+    ic_green: 'Green', ic_cyan: 'Cyan', ic_blue: 'Blue', ic_violet: 'Violet', ic_mono: 'Mono',
+    theme: 'Theme', interface_color: 'Interface color', background: 'Background', gameplay: 'Gameplay',
+    theme_legacy: 'Legacy (default)', theme_microscope: 'Microscope',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Classic',
+    splitting: 'Splitting', population: 'Population',
+    physics: 'Physics', look: 'Look',
     performance: 'Performance', language: 'Language',
     allow_pathogens: 'Allow pathogens',
-    split_on_tap: 'Split on tap', random_split: 'Random splitting', meta_split: 'Metaball split',
+    pinch_rotation: 'Two-finger rotation',
+    fullscreen: 'Fullscreen',
+    shader_test_link: 'Shader test',
+    game_mode: 'Game mode',
+    mode_free: 'Free Game',
+    mode_campaign_soon: 'Campaign (soon)',
+    mode_survival_soon: 'Survival (soon)',
+    composition_hud: 'Composition HUD',
+    caustics_overlay: 'Caustics overlay',
+    liquid_ripples: 'Liquid ripples',
+    ripple_density: 'Wave density',
+    ripple_reach: 'Wave reach',
+    ripple_strength: 'Wave strength',
+    caustic_tint_r: 'Tint R',
+    caustic_tint_g: 'Tint G',
+    caustic_tint_b: 'Tint B',
+    microscope_blur: 'Microscope blur',
+    microscope_focus: 'Focus radius',
+    microscope_blur_strength: 'Blur strength',
+    microscope_falloff: 'Falloff',
+    make_it_real: 'Electron Microscope (Duotone)',
+    make_it_real_hue1: 'Shadow hue',
+    make_it_real_hue2: 'Highlight hue',
+    make_it_real_saturation: 'Saturation',
+    bg_load_preset: 'Load preset',
+    bg_layers: 'Layers',
+    bg_add_layer: '+ Add layer',
+    bg_layer_kind: 'Kind',
+    bg_layer_opacity: 'Opacity',
+    bg_layer_blend: 'Blend',
+    bg_layer_delete: 'Delete layer',
+    bg_layer_enabled: 'Enabled',
+    bg_layer_drag: 'Drag to reorder',
+    blend_normal: 'Normal',
+    blend_multiply: 'Multiply',
+    blend_additive: 'Additive',
+    bg_layer_base: 'Base',
+    bg_layer_top: 'Top color',
+    bg_layer_bot: 'Bottom color',
+    bg_layer_spot_color: 'Spot color',
+    bg_layer_ring_color: 'Ring color',
+    bg_layer_grid_color: 'Grid color',
+    bg_layer_grid_step: 'Grid step',
+    bg_layer_spot_count: 'Spot count',
+    bg_layer_vignette: 'Vignette',
+    bg_layer_seed_count: 'Random spots',
+    bg_layer_reseed_sec: 'Randomisation (s)',
+    bg_layer_sim_speed: 'Time (steps/frame)',
+    fx_order_title: 'Overlay order',
+    overlay_order_title: 'Stack (top runs last)',
+    overlay_pin_scene: '— scene (cells render here) —',
+    overlay_kind_duotone:    'Electron Microscope (Duotone)',
+    overlay_kind_noise:      'Static noise',
+    overlay_kind_vignette:   'Vignette',
+    overlay_kind_crosshair:  'Crosshair',
+    overlay_kind_microscope: 'Microscope blur',
+    overlay_kind_caustics:   'Caustics',
+    overlay_kind_celltype:   'Cell-type labels',
+    overlay_kind_ripples:    'Liquid ripples',
+    fx_kind_noise: 'Static noise',
+    fx_kind_vignette: 'Vignette',
+    fx_kind_crosshair: 'Crosshair',
+    fx_move_up: 'Move up',
+    fx_move_down: 'Move down',
+    fx_drag_reorder: 'Drag to reorder',
+    cell_type_overlay: 'Show cell types',
+    counters_needed: 'Counters needed',
+    counters_covered: 'Fully covered',
+    no_pathogens: 'No pathogens',
+    audio: 'Audio',
+    music_enabled: 'Music',
+    now_playing: 'Now playing:',
+    music_volume: 'Music volume',
+    sfx_volume: 'Sound effects volume',
+    next_track: 'Next track',
+    random_split: 'Random splitting', meta_split: 'Metaball split',
     meta_rt_mode: 'Metaball RT mode',
     meta_rt_bbox: 'Per-pair bbox (default)',
     meta_rt_full: 'Full-canvas pool',
     meta_rt_shared: 'Shared (largest pair)',
-    split_push: 'Push apart with momentum', split_bond: 'Bond, then drift',
-    max_cells: 'Max cells', auto_split: 'Auto-split (s)',
+    meta_outline_hint_edge: ' — traces the blurred-mask 0.5 contour, matches the rendered blob exactly.',
+    meta_outline_hint_sdf: ' — strokes each half-polygon, two outlines crossing through the bond.',
+    meta_outline_hint_polygon: ' — polygon-union rim, sharp / no blur.',
+    auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
     wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background size', outline_px: 'Outline px',
     membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
     mode_kill: 'Kill mode', mode_kill_tip: 'Tap a cell to make it explode',
-    cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS', show_renderer: 'Show renderer', show_build_info: 'Show build info',
+    cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS', show_renderer: 'Show renderer', show_build_info: 'Show build info', show_object_count: 'Show object count', nav_arrows: 'Off-screen arrows',
+    copy_build: 'Copy build SHA', toast_build_copied: 'Build SHA copied to clipboard', toast_build_copy_failed: 'Copy failed', build_stamp_copy_hint: 'Click to copy full build SHA',
     show_field: 'Show metaball field', render_scale: 'Render scale',
     upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (legacy)',
-    renderer_webgpu: 'WebGPU (legacy)',
-    renderer_pixi_auto: 'Pixi (auto)',
-    renderer_pixi_webgpu: 'Pixi (WebGPU)',
-    renderer_pixi_webgl: 'Pixi (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Reset simulation',
+    about: 'About', about_credits: 'Credits', about_licences: 'Third-party licences', about_licences_note: 'Three shader assets carry the Shadertoy default CC BY-NC-SA 3.0 licence (NonCommercial + ShareAlike). They would need replacing if this project ships under a permissive licence.', about_permissive: 'Permissive ports', about_desc: 'A 2D microbe sim — phagocytes, lymphocytes, and the pathogens they hunt.',
     help_title: 'Cells of the immune system',
     add_cell: 'Add a cell', add_pathogen: 'Add a pathogen',
+    add_title: 'Add', add_tab_cells: 'Cells', add_tab_pathogens: 'Pathogens', add_tab_theme: 'Theme',
+    spawn_banner_friends: 'Allies', spawn_banner_prey: 'Prey', spawn_banner_foes: 'Foes', spawn_banner_close: 'Got it',
+    view_grid: 'Grid view', view_list: 'List view',
+    max_cells: 'Max cells',
+    max_cells_hint: 'At the cap, new spawns + splits silently recycle the oldest cell.',
+    overlays_section: 'Overlays',
+    static_noise: 'Static noise',
+    static_noise_intensity: 'Noise intensity',
+    vignette: 'Vignette',
+    vignette_intensity: 'Vignette intensity',
+    crosshair: 'Crosshair',
+    overlay_blend_label: 'Blend',
+    overlay_blend_normal: 'Normal',
+    overlay_blend_multiply: 'Multiply',
+    overlay_blend_additive: 'Additive',
     palette_to_help: 'Learn what each cell does →',
     palette_bad_to_help: 'Learn what each pathogen does →',
+    debug_log: 'Debug log', clear: 'Clear', copy: 'Copy',
+    pause: 'Pause', paused: 'PAUSE',
+    paused_hint: 'Tap space or anywhere to continue',
     nav_settings: 'Settings', nav_help: 'Help', nav_add_cell: 'Add a cell',
     nav_add_pathogen: 'Add a pathogen', nav_reload: 'Hard reload',
     adding: 'Adding: {name}',
@@ -219,35 +740,142 @@ export const LOCALES = {
   },
   de: {
     settings_title: 'Einstellungen',
-    theme: 'Thema', background: 'Hintergrund', gameplay: 'Spiel',
-    splitting: 'Teilung', split_mode: 'Teilungsmodus', population: 'Population',
-    physics: 'Physik', cell_blending: 'Zellüberblendung', look: 'Aussehen',
+    bg_solid: 'Volltonfarbe',
+    bg_bloodstream: 'Blutstrom (Karmin)',
+    bg_bloodflow: 'Blutfluss (Zinnober)',
+    bg_cellShadow: 'Zellschatten (Rot)',
+    bg_cartoonNight: 'Kosmische Suppe (Nachtblau)',
+    bg_spectrum: 'Spektrum (Regenbogen)',
+    bg_lymphNode: 'Lymphknoten (Violett)',
+    bg_lung: 'Lunge (Rauch)',
+    bg_aurora: 'Polarlicht (Grün/Violett)',
+    bg_underwater: 'Unterwasser (Kaustik)',
+    bg_lavaFire: 'Magma (Orange)',
+    bg_reactor: 'Reaktor (Säuregrün)',
+    bg_mitochondria: 'Mitochondrium (Bernstein)',
+    bg_neuron: 'Neuron (Elektroblau)',
+    bg_bile: 'Galle (Chartreuse)',
+    ic_pink: 'Rosa', ic_red: 'Rot', ic_amber: 'Bernstein', ic_yellow: 'Gelb',
+    ic_green: 'Grün', ic_cyan: 'Cyan', ic_blue: 'Blau', ic_violet: 'Violett', ic_mono: 'Mono',
+    theme: 'Thema', interface_color: 'Schnittstellenfarbe', background: 'Hintergrund', gameplay: 'Spiel',
+    theme_legacy: 'Legacy (Standard)', theme_microscope: 'Mikroskop',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Klassisch',
+    splitting: 'Teilung', population: 'Population',
+    physics: 'Physik', look: 'Aussehen',
     performance: 'Leistung', language: 'Sprache',
     allow_pathogens: 'Krankheitserreger erlauben',
-    split_on_tap: 'Bei Antippen teilen', random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
-    split_push: 'Mit Schwung auseinander', split_bond: 'Verbinden, dann driften',
-    max_cells: 'Max. Zellen', auto_split: 'Auto-Teilung (s)',
+    pinch_rotation: 'Zwei-Finger-Drehung',
+    fullscreen: 'Vollbild',
+    shader_test_link: 'Shader-Test',
+    game_mode: 'Spielmodus',
+    mode_free: 'Free Game',
+    mode_campaign_soon: 'Kampagne (bald)',
+    mode_survival_soon: 'Survival (bald)',
+    composition_hud: 'Aufstellungs-HUD',
+    caustics_overlay: 'Lichtspiel-Overlay',
+    liquid_ripples: 'Flüssigkeitswellen',
+    ripple_density: 'Wellendichte',
+    ripple_reach: 'Wellenreichweite',
+    ripple_strength: 'Wellenstärke',
+    microscope_blur: 'Mikroskop-Unschärfe',
+    microscope_focus: 'Fokusradius',
+    microscope_blur_strength: 'Unschärfe-Stärke',
+    microscope_falloff: 'Übergangshärte',
+    make_it_real: 'Elektronenmikroskop (Duotone)',
+    make_it_real_hue1: 'Schatten-Farbton',
+    make_it_real_hue2: 'Licht-Farbton',
+    make_it_real_saturation: 'Sättigung',
+    bg_load_preset: 'Voreinstellung laden',
+    bg_layers: 'Ebenen',
+    bg_add_layer: '+ Ebene hinzufügen',
+    bg_layer_kind: 'Art',
+    bg_layer_opacity: 'Deckkraft',
+    bg_layer_blend: 'Mischmodus',
+    bg_layer_delete: 'Ebene löschen',
+    bg_layer_enabled: 'Aktiviert',
+    bg_layer_drag: 'Ziehen zum Sortieren',
+    blend_normal: 'Normal',
+    blend_multiply: 'Multiplizieren',
+    blend_additive: 'Addieren',
+    bg_layer_base: 'Basis',
+    bg_layer_top: 'Obere Farbe',
+    bg_layer_bot: 'Untere Farbe',
+    bg_layer_spot_color: 'Spot-Farbe',
+    bg_layer_ring_color: 'Ring-Farbe',
+    bg_layer_grid_color: 'Gitter-Farbe',
+    bg_layer_grid_step: 'Gitter-Abstand',
+    bg_layer_spot_count: 'Spot-Anzahl',
+    bg_layer_vignette: 'Vignette',
+    bg_layer_seed_count: 'Zufalls-Spots',
+    bg_layer_reseed_sec: 'Randomisierung (s)',
+    bg_layer_sim_speed: 'Zeit (Schritte/Frame)',
+    fx_order_title: 'Overlay-Reihenfolge',
+    overlay_order_title: 'Stapel (oben läuft zuletzt)',
+    overlay_pin_scene: '— Szene (Zellen werden hier gezeichnet) —',
+    overlay_kind_duotone:    'Elektronenmikroskop (Duotone)',
+    overlay_kind_noise:      'Rauschen',
+    overlay_kind_vignette:   'Vignette',
+    overlay_kind_crosshair:  'Fadenkreuz',
+    overlay_kind_microscope: 'Mikroskop-Unschärfe',
+    overlay_kind_caustics:   'Kaustik',
+    overlay_kind_celltype:   'Zelltyp-Beschriftung',
+    overlay_kind_ripples:    'Flüssigkeitswellen',
+    fx_kind_noise: 'Rauschen',
+    fx_kind_vignette: 'Vignette',
+    fx_kind_crosshair: 'Fadenkreuz',
+    fx_move_up: 'Nach oben',
+    fx_move_down: 'Nach unten',
+    fx_drag_reorder: 'Ziehen zum Sortieren',
+    cell_type_overlay: 'Zelltypen anzeigen',
+    counters_needed: 'Konter benötigt',
+    counters_covered: 'Voll abgedeckt',
+    no_pathogens: 'Keine Erreger',
+    audio: 'Audio',
+    music_enabled: 'Musik',
+    now_playing: 'Läuft gerade:',
+    music_volume: 'Musiklautstärke',
+    sfx_volume: 'Effektlautstärke',
+    next_track: 'Nächster Titel',
+    random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
+    auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
     wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundgröße', outline_px: 'Umrandung px',
     membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
     mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zelle antippen, sie zerplatzt',
-    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen',
+    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen', show_object_count: 'Objektanzahl anzeigen', nav_arrows: 'Pfeile außerhalb des Bildes',
+    copy_build: 'Build-SHA kopieren', toast_build_copied: 'Build-SHA in Zwischenablage kopiert', toast_build_copy_failed: 'Kopieren fehlgeschlagen', build_stamp_copy_hint: 'Klicken, um die vollständige Build-SHA zu kopieren',
     show_field: 'Metaball-Feld zeigen', render_scale: 'Renderskala',
     upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (alt)',
-    renderer_webgpu: 'WebGPU (alt)',
-    renderer_pixi_auto: 'Pixi (auto)',
-    renderer_pixi_webgpu: 'Pixi (WebGPU)',
-    renderer_pixi_webgl: 'Pixi (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Simulation zurücksetzen',
+    about: 'Über', about_credits: 'Mitwirkende', about_licences: 'Drittanbieter-Lizenzen', about_licences_note: 'Drei Shader-Assets stehen unter der Shadertoy-Standardlizenz CC BY-NC-SA 3.0 (NichtKommerziell + ShareAlike). Müssten ersetzt werden, falls das Projekt jemals unter eine permissive Lizenz gestellt wird.', about_permissive: 'Permissive Portierungen', about_desc: 'Eine 2D-Mikroben-Simulation — Phagozyten, Lymphozyten und die Erreger, die sie jagen.',
     help_title: 'Zellen des Immunsystems',
     add_cell: 'Zelle hinzufügen', add_pathogen: 'Erreger hinzufügen',
+    add_title: 'Hinzufügen', add_tab_cells: 'Zellen', add_tab_pathogens: 'Erreger', add_tab_theme: 'Thema',
+    spawn_banner_friends: 'Verbündete', spawn_banner_prey: 'Beute', spawn_banner_foes: 'Feinde', spawn_banner_close: 'Verstanden',
+    view_grid: 'Rasteransicht', view_list: 'Listenansicht',
+    max_cells: 'Max. Zellen',
+    max_cells_hint: 'Am Limit recyceln neue Spawns + Teilungen die älteste Zelle.',
+    overlays_section: 'Overlays',
+    static_noise: 'Statisches Rauschen',
+    static_noise_intensity: 'Rausch-Intensität',
+    vignette: 'Vignette',
+    vignette_intensity: 'Vignette-Intensität',
+    crosshair: 'Fadenkreuz',
+    overlay_blend_label: 'Mischung',
+    overlay_blend_normal: 'Normal',
+    overlay_blend_multiply: 'Multiplikativ',
+    overlay_blend_additive: 'Additiv',
     palette_to_help: 'Was macht jede Zelle? →',
     palette_bad_to_help: 'Was macht jeder Erreger? →',
+    debug_log: 'Debug-Log', clear: 'Leeren', copy: 'Kopieren',
+    pause: 'Pause', paused: 'PAUSE',
+    paused_hint: 'Leertaste oder Bildschirm zum Fortsetzen',
     nav_settings: 'Einstellungen', nav_help: 'Hilfe', nav_add_cell: 'Zelle hinzufügen',
     nav_add_pathogen: 'Erreger hinzufügen', nav_reload: 'Neu laden',
     adding: 'Hinzufügen: {name}',
@@ -303,14 +931,49 @@ export const LOCALES = {
   },
   es: {
     settings_title: 'Ajustes',
-    theme: 'Tema', background: 'Fondo', gameplay: 'Juego',
-    splitting: 'División', split_mode: 'Modo de división', population: 'Población',
-    physics: 'Física', cell_blending: 'Mezcla de células', look: 'Estilo',
+    bg_solid: 'Color sólido',
+    bg_bloodstream: 'Torrente sanguíneo (carmesí)',
+    bg_bloodflow: 'Flujo sanguíneo (bermellón)',
+    bg_cellShadow: 'Sombra celular (rojo)',
+    bg_cartoonNight: 'Sopa cósmica (azul noche)',
+    bg_spectrum: 'Espectro (arcoíris)',
+    bg_lymphNode: 'Ganglio linfático (violeta)',
+    bg_lung: 'Pulmón (humo)',
+    bg_lavaFire: 'Magma (naranja)',
+    bg_reactor: 'Reactor (verde ácido)',
+    bg_mitochondria: 'Mitocondria (ámbar)',
+    bg_neuron: 'Neurona (azul eléctrico)',
+    bg_bile: 'Bilis (chartreuse)',
+    ic_pink: 'Rosa', ic_red: 'Rojo', ic_amber: 'Ámbar', ic_yellow: 'Amarillo',
+    ic_green: 'Verde', ic_cyan: 'Cian', ic_blue: 'Azul', ic_violet: 'Violeta', ic_mono: 'Mono',
+    theme: 'Tema', interface_color: 'Color de interfaz', background: 'Fondo', gameplay: 'Juego',
+    theme_legacy: 'Legacy (predeterminado)', theme_microscope: 'Microscopio',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Clásico',
+    splitting: 'División', population: 'Población',
+    physics: 'Física', look: 'Estilo',
     performance: 'Rendimiento', language: 'Idioma',
     allow_pathogens: 'Permitir patógenos',
-    split_on_tap: 'Dividir al tocar', random_split: 'División aleatoria', meta_split: 'División metaball',
-    split_push: 'Empujar con impulso', split_bond: 'Unir, luego separar',
-    max_cells: 'Células máx.', auto_split: 'Auto-división (s)',
+    pinch_rotation: 'Rotación con dos dedos',
+    fullscreen: 'Pantalla completa',
+    shader_test_link: 'Prueba de shader',
+    game_mode: 'Modo de juego',
+    mode_free: 'Juego libre',
+    mode_campaign_soon: 'Campaña (pronto)',
+    mode_survival_soon: 'Supervivencia (pronto)',
+    composition_hud: 'HUD de composición',
+    caustics_overlay: 'Cáusticas (luz)',
+    liquid_ripples: 'Ondas líquidas',
+    cell_type_overlay: 'Mostrar tipos de célula',
+    counters_needed: 'Contras necesarios',
+    counters_covered: 'Cubierto',
+    no_pathogens: 'Sin patógenos',
+    audio: 'Audio',
+    music_enabled: 'Música',
+    music_volume: 'Volumen de música',
+    sfx_volume: 'Volumen de efectos',
+    next_track: 'Pista siguiente',
+    random_split: 'División aleatoria', meta_split: 'División metaball',
+    auto_split: 'Auto-división (s)',
     friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
     wobble: 'Oscilación', bg_flow: 'Flujo de fondo', bg_scale: 'Tamaño de fondo', outline_px: 'Contorno px',
     membrane: 'Membrana', cell_size: 'Tamaño de célula', use_highlight: 'Usar color de resalte',
@@ -322,16 +985,22 @@ export const LOCALES = {
     upscale: 'Reescalar', scanlines: 'Líneas de barrido (CRT)',
     renderer_engine: 'Motor de render',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (heredado)',
-    renderer_webgpu: 'WebGPU (heredado)',
-    renderer_pixi_auto: 'Pixi (auto)',
-    renderer_pixi_webgpu: 'Pixi (WebGPU)',
-    renderer_pixi_webgl: 'Pixi (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Reiniciar simulación',
+    about: 'Acerca de', about_credits: 'Créditos', about_licences: 'Licencias de terceros', about_licences_note: 'Tres recursos de shader llevan la licencia Shadertoy CC BY-NC-SA 3.0.', about_permissive: 'Portes permisivos', about_desc: 'Simulación 2D de microbios.',
     help_title: 'Células del sistema inmunitario',
     add_cell: 'Añadir célula', add_pathogen: 'Añadir patógeno',
+    add_title: 'Añadir', add_tab_cells: 'Células', add_tab_pathogens: 'Patógenos', add_tab_theme: 'Tema',
+    spawn_banner_friends: 'Aliados', spawn_banner_prey: 'Presa', spawn_banner_foes: 'Enemigos', spawn_banner_close: 'Vale',
+    view_grid: 'Cuadrícula', view_list: 'Lista',
+    max_cells: 'Máx. células',
+    max_cells_hint: 'En el límite, los nuevos spawns y divisiones reciclan la célula más antigua.',
     palette_to_help: 'Aprende qué hace cada célula →',
     palette_bad_to_help: 'Aprende qué hace cada patógeno →',
+    debug_log: 'Registro de depuración', clear: 'Limpiar', copy: 'Copiar',
+    pause: 'Pausa', paused: 'PAUSA',
+    paused_hint: 'Pulsa espacio o la pantalla para continuar',
     nav_settings: 'Ajustes', nav_help: 'Ayuda', nav_add_cell: 'Añadir célula',
     nav_add_pathogen: 'Añadir patógeno', nav_reload: 'Recargar',
     adding: 'Añadiendo: {name}',
@@ -388,14 +1057,49 @@ export const LOCALES = {
   bar: {
     // Bayrisch / Boarisch — translated from the German entries.
     settings_title: 'Eistellunga',
-    theme: 'Thema', background: 'Hintagrund', gameplay: 'Spui',
-    splitting: 'Teilung', split_mode: 'Teilungsmodus', population: 'Population',
-    physics: 'Physik', cell_blending: 'Zoinmischung', look: 'Ausschaung',
+    bg_solid: 'Voitofarb',
+    bg_bloodstream: 'Bluadströhmung (Karmin)',
+    bg_bloodflow: 'Bluadfluss (Zinnoba)',
+    bg_cellShadow: 'Zellnschattn (Rot)',
+    bg_cartoonNight: 'Kosmische Suppm (Nachtbloh)',
+    bg_spectrum: 'Spektrum (Regnbogn)',
+    bg_lymphNode: 'Lymphknotn (Violett)',
+    bg_lung: 'Lunga (Rauch)',
+    bg_lavaFire: 'Magma (Orange)',
+    bg_reactor: 'Reakta (Saurgrea)',
+    bg_mitochondria: 'Mitochondrium (Bernstoaa)',
+    bg_neuron: 'Neuron (Elektrobloh)',
+    bg_bile: 'Goi (Chartreuse)',
+    ic_pink: 'Rosa', ic_red: 'Rot', ic_amber: 'Bernstoaa', ic_yellow: 'Goib',
+    ic_green: 'Grea', ic_cyan: 'Zyan', ic_blue: 'Bloh', ic_violet: 'Violett', ic_mono: 'Mono',
+    theme: 'Thema', interface_color: 'Schnittstelln-Farb', background: 'Hintagrund', gameplay: 'Spui',
+    theme_legacy: 'Legacy (Standard)', theme_microscope: 'Mikroskop',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Klassisch',
+    splitting: 'Teilung', population: 'Population',
+    physics: 'Physik', look: 'Ausschaung',
     performance: 'Leistung', language: 'Sproch',
     allow_pathogens: 'Bazilln daloum',
-    split_on_tap: 'Beim Drauflanga teiln', random_split: 'Zoifällige Teilung', meta_split: 'Metaball-Doaln',
-    split_push: 'Mit Schwung auseinanda', split_bond: 'Vabinda, dann driftn',
-    max_cells: 'Max. Zoin', auto_split: 'Auto-Teilung (s)',
+    pinch_rotation: 'Mit zwoa Finga drahn',
+    fullscreen: 'Vuibüd',
+    shader_test_link: 'Shoda-Test',
+    game_mode: 'Spuimodus',
+    mode_free: 'Frei spuin',
+    mode_campaign_soon: 'Kampagne (boid)',
+    mode_survival_soon: 'Survival (boid)',
+    composition_hud: 'Aufstöing-HUD',
+    caustics_overlay: 'Liachtgflimm',
+    liquid_ripples: 'Flüssigkeitswelln',
+    cell_type_overlay: 'Zoidnzaign',
+    counters_needed: 'Konter braucht ma',
+    counters_covered: 'Olls do',
+    no_pathogens: 'Koa Bazilln',
+    audio: 'Tone',
+    music_enabled: 'Musi',
+    music_volume: 'Musi-Laudstärk',
+    sfx_volume: 'Effekt-Laudstärk',
+    next_track: 'Nägstes Liadl',
+    random_split: 'Zoifällige Teilung', meta_split: 'Metaball-Doaln',
+    auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
     wobble: 'Wackln', bg_flow: 'Hintagrundgflies', bg_scale: 'Hintagrundgrässn', outline_px: 'Umrandung px',
     membrane: 'Membran', cell_size: 'Zoingrässn', use_highlight: 'Akzentfarb vawendn',
@@ -407,16 +1111,22 @@ export const LOCALES = {
     upscale: 'Aufskaliern', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Render',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (oid)',
-    renderer_webgpu: 'WebGPU (oid)',
-    renderer_pixi_auto: 'Pixi (automatisch)',
-    renderer_pixi_webgpu: 'Pixi (WebGPU)',
-    renderer_pixi_webgl: 'Pixi (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Simulation z\'rucksetzn',
+    about: 'Iwa', about_credits: 'Mitwirkn', about_licences: 'Lizenzn', about_licences_note: 'Drei Shader-Assets miassn Shadertoy-Standard-Lizenz folgn.', about_permissive: 'Permissive', about_desc: '2D-Mikrobnsimulation.',
     help_title: 'Zoin vom Immunsystem',
     add_cell: 'Zoin dazua', add_pathogen: 'Bazi dazua',
+    add_title: 'Dazua', add_tab_cells: 'Zoin', add_tab_pathogens: 'Bazi', add_tab_theme: 'Dema',
+    spawn_banner_friends: 'Spezi', spawn_banner_prey: 'Beit', spawn_banner_foes: 'Feind', spawn_banner_close: 'Bassd',
+    view_grid: 'Roastaransicht', view_list: 'Listnansicht',
+    max_cells: 'Max. Zoin',
+    max_cells_hint: 'Am Limit recycelnt nei Spawns + Doaln de äidaste Zoin.',
     palette_to_help: 'Wos macht jede Zoin? →',
     palette_bad_to_help: 'Wos macht jeda Bazi? →',
+    debug_log: 'Debug-Protokoi', clear: 'Leara', copy: 'Kopiern',
+    pause: 'Pause', paused: 'PAUSE',
+    paused_hint: 'Leertaste oder Bildschirm zum Weidamoacha',
     nav_settings: 'Eistellunga', nav_help: 'Huif', nav_add_cell: 'Zoin dazua',
     nav_add_pathogen: 'Bazi dazua', nav_reload: 'Nei lodn',
     adding: 'Dazua: {name}',
@@ -470,16 +1180,307 @@ export const LOCALES = {
     cell_toxin_label: 'Gift',
     cell_toxin_desc: 'A zackiga Giftkristoi; treibt umadum und brennt bei Kontakt.',
   },
+  hes: {
+    // Hessisch (Frankfurter / mittelhessischer Raum) — von der
+    // deutschen Übersetzung abgeleitet, leicht lesbar fürs Auge
+    // standarddeutsch geübter Leser.
+    settings_title: 'Eistellunge',
+    bg_solid: 'Vollfarb',
+    bg_bloodstream: 'Blutstroom (Karmin)',
+    bg_bloodflow: 'Blutfluß (Zinnober)',
+    bg_cellShadow: 'Zellschadde (Roht)',
+    bg_cartoonNight: 'Kosmisch Subb (Nachtblau)',
+    bg_spectrum: 'Spektrum (Reschebooche)',
+    bg_lymphNode: 'Lymphknotn (Violett)',
+    bg_lung: 'Lung (Rauch)',
+    bg_lavaFire: 'Magma (Orsch)',
+    bg_reactor: 'Reakta (Saurgrie)',
+    bg_mitochondria: 'Mitochondrium (Bernstaa)',
+    bg_neuron: 'Neuron (Elektrablau)',
+    bg_bile: 'Gall (Chartreuse)',
+    ic_pink: 'Rosa', ic_red: 'Roht', ic_amber: 'Bernstaa', ic_yellow: 'Gelb',
+    ic_green: 'Grie', ic_cyan: 'Zyan', ic_blue: 'Blau', ic_violet: 'Violett', ic_mono: 'Mono',
+    theme: 'Thema', interface_color: 'Schnittstellefarb', background: 'Hintergrund', gameplay: 'Spiel',
+    theme_legacy: 'Legacy (Standard)', theme_microscope: 'Mikroskop',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Klassisch',
+    splitting: 'Teilung', population: 'Population',
+    physics: 'Physik', look: 'Aussehe',
+    performance: 'Leistung', language: 'Sprooch',
+    allow_pathogens: 'Krankheitserreger erlaube',
+    pinch_rotation: 'Zwaa-Finger-Drehung',
+    fullscreen: 'Vollbild',
+    shader_test_link: 'Shader-Test',
+    game_mode: 'Spielmodus',
+    mode_free: 'Free Game',
+    mode_campaign_soon: 'Kampagne (gleisch)',
+    mode_survival_soon: 'Survival (gleisch)',
+    composition_hud: 'Aufstellungs-HUD',
+    caustics_overlay: 'Lichtspiel-Iwwerlach',
+    liquid_ripples: 'Flüssichkeits-Welle',
+    cell_type_overlay: 'Zelltypen weisen',
+    counters_needed: 'Konter braucht mer',
+    counters_covered: 'Alles dabei',
+    no_pathogens: 'Kaa Erreger',
+    audio: 'Audio',
+    music_enabled: 'Musik',
+    music_volume: 'Musiklautstärke',
+    sfx_volume: 'Effektlautstärke',
+    next_track: 'Nächst Stück',
+    random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
+    auto_split: 'Auto-Teilung (s)',
+    friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
+    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
+    membrane: 'Membran', cell_size: 'Zellgröß', use_highlight: 'Akzentfarb verwende',
+    mode_target: 'Zielmodus', mode_target_tip: 'Drufftippe: aussuche / Ziel setze',
+    mode_split: 'Teilungsmodus', mode_split_tip: 'Drufftippe teilt die Zell',
+    mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zell antippe, dann macht\'s puff',
+    cartoon_mode: 'Cartoon-Modus (Gesischter)', show_fps: 'FPS aazaiche', show_renderer: 'Renderer aazaiche', show_build_info: 'Build-Info aazaiche',
+    show_field: 'Metaball-Feld zaiche', render_scale: 'Renderskala',
+    upscale: 'Hochskaliere', scanlines: 'Scanlines (CRT)',
+    renderer_engine: 'Renderer',
+    renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
+    reset_sim: 'Simulation zurücksetze',
+    about: 'Iwwer', about_credits: 'Mitwirkende', about_licences: 'Drittanbieter-Lizenze', about_licences_note: 'Drei Shader-Assets folge der Shadertoy CC BY-NC-SA 3.0 Lizenz.', about_permissive: 'Permissive Portierunge', about_desc: '2D Mikrobe-Simulation.',
+    help_title: 'Zelle vom Immunsystem',
+    add_cell: 'Zell dezugeb', add_pathogen: 'Erreger dezugeb',
+    add_title: 'Dezugeb', add_tab_cells: 'Zelle', add_tab_pathogens: 'Erreger', add_tab_theme: 'Thema',
+    spawn_banner_friends: 'Kumbel', spawn_banner_prey: 'Beit', spawn_banner_foes: 'Feind', spawn_banner_close: 'Hab dich',
+    view_grid: 'Rastansicht', view_list: 'Listenansicht',
+    max_cells: 'Max. Zelle',
+    max_cells_hint: 'Am Limit recyceln neie Spawns + Teilunge die ältste Zelle.',
+    palette_to_help: 'Was machd jede Zell? →',
+    palette_bad_to_help: 'Was machd jeder Erreger? →',
+    debug_log: 'Debug-Logbuch', clear: 'Lääre', copy: 'Kopiere',
+    pause: 'Pause', paused: 'PAUSE',
+    paused_hint: 'Leertast oder Bildschirm zum Weidamache',
+    nav_settings: 'Eistellunge', nav_help: 'Hilf', nav_add_cell: 'Zell dezugeb',
+    nav_add_pathogen: 'Erreger dezugeb', nav_reload: 'Neu lade',
+    adding: 'Dezu: {name}',
+    fps_line: '{fps} fps · Zelle {n}',
+    help_group_good: 'Gut (Immunsystem)',
+    blend_none: 'Kaa', blend_overlay: 'Overlay (Standard)', blend_multiply: 'Multipliziere',
+    blend_darken: 'Abdunkele', blend_lighter: 'Heller', blend_screen: 'Aufhelle',
+    blend_softlight: 'Waaches Licht', blend_hardlight: 'Hartes Licht',
+    blend_burn: 'Nachbelichte', blend_dodge: 'Abwedele',
+    upscale_blur: 'Waachzaichne', upscale_pixel: 'Pixel (knackisch)',
+    pgroup_virus: 'Viren', pgroup_bacteria: 'Bakterien',
+    pgroup_parasite: 'Parasite', pgroup_fungus: 'Pilz', pgroup_toxin: 'Toxine',
+    cell_neutrophil_label: 'Neutrophil',
+    cell_neutrophil_desc: 'Erschte Verteidigung; verschling Bakterie per Phagozytose. Häufischste weiße Blutzell.',
+    cell_monocyte_label: 'Monozyt',
+    cell_monocyte_desc: 'Wachposchte im Blut; werd im Gewebe zu Makrophage oder dendritische Zell.',
+    cell_mast_label: 'Mastzell',
+    cell_mast_desc: 'Gewebewächter; haut Histamin raus und macht Entzündung und Allergie.',
+    cell_nk_label: 'Natürliche Killerzell',
+    cell_nk_desc: 'Patrouilliert nach virusinfizierte und Tumorzelle; daschlägt bei Kontakt ohne Vorprägung.',
+    cell_macrophage_label: 'Makrophage',
+    cell_macrophage_desc: '"Großfresser" — langlebischer Phagozyt; verdaut Erreger und zaicht den T-Zelle die Antigene.',
+    cell_dendritic_label: 'Dendritische Zell',
+    cell_dendritic_desc: 'Antigen-präsentierender Kurier; bringt Erregerprobe zu de T-Zelle in die Lymphknote.',
+    cell_basophil_label: 'Basophiler Granulozyt',
+    cell_basophil_desc: 'Kreisender Granulozyt; setzt Histamin und Heparin frei und verstärkt Entzündung.',
+    cell_platelet_label: 'Blutplättche',
+    cell_platelet_desc: 'Winzisches Zellstickche; gerinnt Blut an Wunde und hilft, Immunzelle herzurufe.',
+    cell_tcell_label: 'T-Zell',
+    cell_tcell_desc: 'Adaptiver Killer/Koordinator; daskennt spezifische Antigene und daschlägt infizierte Zelle.',
+    cell_bcell_label: 'B-Zell',
+    cell_bcell_desc: 'Adaptive Antikörperfabrik; baut Antikörper, die zu jedem Erreger passe.',
+    cell_eosinophil_label: 'Eosinophiler Granulozyt',
+    cell_eosinophil_desc: 'Spezialischt gegen Parasite; wichtig bei Allergie, haut giftige Granule raus.',
+    cell_rbc_label: 'Rote Blutzell',
+    cell_rbc_desc: 'Erythrozyt; bikonkave Scheib voll Hämoglobin — schleppt Sauerstoff durch de Körper.',
+    cell_virus_label: 'Virus',
+    cell_virus_desc: 'Spike-Eindringling; kapert Zelle, dass\'a sich do drin vermehrn kann.',
+    cell_germ_label: 'Keim',
+    cell_germ_desc: 'Allgemoaa knubbelische Mikrob — opportunistischer Erreger.',
+    cell_bacterium_label: 'Bakterium',
+    cell_bacterium_desc: 'Stäbchebakterium, schwimmt mit am peitschende Flagellum.',
+    cell_amoebaP_label: 'Amöbe (Parasit)',
+    cell_amoebaP_desc: 'Amöboider Parasit; kriescht und verschling Gewebe.',
+    cell_slime_label: 'Schlaim',
+    cell_slime_desc: 'Schlaimische Biofilm-Kugel; tropft giftische Brüh.',
+    cell_mite_label: 'Milb',
+    cell_mite_desc: 'Winzischer Krabbeler; viel klaane Bee.',
+    cell_spore_label: 'Spor',
+    cell_spore_desc: 'Pilzspor — treibt mit de Strömung und sät neues Wachstum.',
+    cell_toxin_label: 'Gift',
+    cell_toxin_desc: 'Zackischer Giftkristall; treibt umme und brennt bei Kontakt.',
+  },
+  mainz: {
+    // Mainzerisch / Meenzerisch (Stadt Mainz) — Rheinhessischer
+    // Stadtdialekt, weicher als Hessisch, weniger harte "scht"-Laute,
+    // mit Mainzer Eigenheiten ("ei guude", "babbele", "Meenz", "uff").
+    settings_title: 'Eistellunge',
+    bg_solid: 'Vollfarb',
+    bg_bloodstream: 'Bluddstroom (Karmin)',
+    bg_bloodflow: 'Bluddfloß (Zinnober)',
+    bg_cellShadow: 'Zellschadde (Roht)',
+    bg_cartoonNight: 'Kosmisch Subb (Nachtblau)',
+    bg_spectrum: 'Spektrum (Reschebooche)',
+    bg_lymphNode: 'Lymphknodde (Violett)',
+    bg_lung: 'Lung (Rauch)',
+    bg_lavaFire: 'Magma (Orsch)',
+    bg_reactor: 'Reaktor (Saurgrie)',
+    bg_mitochondria: 'Mitochondrium (Bernstaa)',
+    bg_neuron: 'Neuron (Elektroblau)',
+    bg_bile: 'Gall (Chartreuse)',
+    ic_pink: 'Rosa', ic_red: 'Roht', ic_amber: 'Bernstaa', ic_yellow: 'Gelb',
+    ic_green: 'Grie', ic_cyan: 'Zyan', ic_blue: 'Blau', ic_violet: 'Violett', ic_mono: 'Mono',
+    theme: 'Thema', interface_color: 'Schnittstellefarb', background: 'Hintergrund', gameplay: 'Spiel',
+    theme_legacy: 'Legacy (Standard)', theme_microscope: 'Mikroskop',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Klassisch',
+    splitting: 'Teilung', population: 'Population',
+    physics: 'Physik', look: 'Ausseh',
+    performance: 'Leistung', language: 'Sproch',
+    allow_pathogens: 'Krankheitserreger erlaube',
+    pinch_rotation: 'Zwaa-Finger-Drehung',
+    fullscreen: 'Vollbild',
+    shader_test_link: 'Shader-Test',
+    game_mode: 'Spielmodus',
+    mode_free: 'Free Game',
+    mode_campaign_soon: 'Kampagne (bald)',
+    mode_survival_soon: 'Survival (bald)',
+    composition_hud: 'Aufstellungs-HUD',
+    caustics_overlay: 'Lichtspiel-Drüwwer',
+    liquid_ripples: 'Flüssichkeits-Welle',
+    cell_type_overlay: 'Zelletype zeische',
+    counters_needed: 'Konter braucht mer',
+    counters_covered: 'Alles dabei',
+    no_pathogens: 'Kaa Erreger',
+    audio: 'Audio',
+    music_enabled: 'Musik',
+    music_volume: 'Musiklautstärk',
+    sfx_volume: 'Effektlautstärk',
+    next_track: 'Nächst Stück',
+    random_split: 'Zufällische Teilung', meta_split: 'Metaball-Teilung',
+    auto_split: 'Auto-Teilung (s)',
+    friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
+    wobble: 'Wackele', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
+    membrane: 'Membran', cell_size: 'Zellgröß', use_highlight: 'Akzentfarb verwenne',
+    mode_target: 'Zielmodus', mode_target_tip: 'Druffdibbe: aussuche / Ziel setze',
+    mode_split: 'Teilungsmodus', mode_split_tip: 'Druffdibbe teilt die Zell',
+    mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zell andibbe, dann gibt\'s peng',
+    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS zeische', show_renderer: 'Renderer zeische', show_build_info: 'Build-Info zeische',
+    show_field: 'Metaball-Feld zeische', render_scale: 'Renderskala',
+    upscale: 'Hochskaliere', scanlines: 'Scanlines (CRT)',
+    renderer_engine: 'Renderer',
+    renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
+    reset_sim: 'Simulation zurückstelle',
+    about: 'Iwwer', about_credits: 'Mitwirkende', about_licences: 'Drittanbieter-Lizenze', about_licences_note: 'Drei Shader-Assets folge der Shadertoy CC BY-NC-SA 3.0 Lizenz.', about_permissive: 'Permissive Portierunge', about_desc: '2D Mikrobe-Simulation.',
+    help_title: 'Zelle vum Immunsystem',
+    add_cell: 'Zell dabbeschdun', add_pathogen: 'Erreger dabbeschdun',
+    add_title: 'Dabbeschdun', add_tab_cells: 'Zelle', add_tab_pathogens: 'Erreger', add_tab_theme: 'Tema',
+    spawn_banner_friends: 'Geschwisterle', spawn_banner_prey: 'Beit', spawn_banner_foes: 'Feind', spawn_banner_close: 'Hab schun',
+    view_grid: 'Rastansicht', view_list: 'Listenansicht',
+    max_cells: 'Max. Zelle',
+    max_cells_hint: 'Am Limit recyceln neie Spawns + Teilunge die ältste Zelle.',
+    palette_to_help: 'Was macht jede Zell? →',
+    palette_bad_to_help: 'Was macht jeder Erreger? →',
+    debug_log: 'Debug-Logbuch', clear: 'Lääre', copy: 'Kopiere',
+    pause: 'Pause', paused: 'PAUSE',
+    paused_hint: 'Leertast oder Bildschirm zum Weiterbabbele',
+    nav_settings: 'Eistellunge', nav_help: 'Hilf', nav_add_cell: 'Zell dabbeschdun',
+    nav_add_pathogen: 'Erreger dabbeschdun', nav_reload: 'Nei laade',
+    adding: 'Dabbei: {name}',
+    fps_line: '{fps} fps · Zelle {n}',
+    help_group_good: 'Gut (Immunsystem)',
+    blend_none: 'Kaa', blend_overlay: 'Overlay (Standard)', blend_multiply: 'Multipliziere',
+    blend_darken: 'Abdunkele', blend_lighter: 'Heller', blend_screen: 'Aufhelle',
+    blend_softlight: 'Wääches Licht', blend_hardlight: 'Harts Licht',
+    blend_burn: 'Nachbelichte', blend_dodge: 'Abwedele',
+    upscale_blur: 'Weichzeichne', upscale_pixel: 'Pixel (knackisch)',
+    pgroup_virus: 'Viren', pgroup_bacteria: 'Bakterie',
+    pgroup_parasite: 'Parasite', pgroup_fungus: 'Pilz', pgroup_toxin: 'Toxine',
+    cell_neutrophil_label: 'Neutrophil',
+    cell_neutrophil_desc: 'Erst Verteidigung; verschlingt Bakterie per Phagozytose. Häufigst weiße Blutzell.',
+    cell_monocyte_label: 'Monozyt',
+    cell_monocyte_desc: 'Wachposte im Blut; werd im Gewebe zu Makrophage oder dendritische Zell.',
+    cell_mast_label: 'Mastzell',
+    cell_mast_desc: 'Gewebewächter; lässt Histamin raus un macht Entzündung un Allergie.',
+    cell_nk_label: 'Natürliche Killerzell',
+    cell_nk_desc: 'Patrouilliert nach virusinfizierte un Tumorzelle; macht\'se kalt ohne Vorprägung.',
+    cell_macrophage_label: 'Makrophage',
+    cell_macrophage_desc: '"Großfresser" — langlebischer Phagozyt; verdaut Erreger un weist den T-Zelle die Antigene.',
+    cell_dendritic_label: 'Dendritische Zell',
+    cell_dendritic_desc: 'Antigen-präsentierender Kurier; bringt Erregerprobe zu de T-Zelle in de Lymphknote.',
+    cell_basophil_label: 'Basophiler Granulozyt',
+    cell_basophil_desc: 'Kreisender Granulozyt; lässt Histamin un Heparin raus un verstärkt Entzündung.',
+    cell_platelet_label: 'Blutplättsche',
+    cell_platelet_desc: 'Winzisches Zellstickelsche; gerinnt Blut an Wunne un hilft, Immunzelle herzubringe.',
+    cell_tcell_label: 'T-Zell',
+    cell_tcell_desc: 'Adaptiver Killer/Koordinator; erkennt spezifische Antigene un macht infizierte Zelle kalt.',
+    cell_bcell_label: 'B-Zell',
+    cell_bcell_desc: 'Adaptive Antikörperfabrik; baut Antikörper, die zu jedem Erreger basse.',
+    cell_eosinophil_label: 'Eosinophiler Granulozyt',
+    cell_eosinophil_desc: 'Spezialist gege Parasite; wichtig bei Allergie, lässt giftische Granule raus.',
+    cell_rbc_label: 'Rote Blutzell',
+    cell_rbc_desc: 'Erythrozyt; bikonkave Scheib voll Hämoglobin — bringt Sauerstoff durch de Körper.',
+    cell_virus_label: 'Virus',
+    cell_virus_desc: 'Spike-Eindringling; kabbert Zelle, dass\'er sich do drin vermehre kann.',
+    cell_germ_label: 'Keim',
+    cell_germ_desc: 'Allgemaa knubbelische Mikrob — opportunistischer Erreger.',
+    cell_bacterium_label: 'Bakterium',
+    cell_bacterium_desc: 'Stäbschebakterium, schwimmt mit aam peitsche-de Flagellum.',
+    cell_amoebaP_label: 'Amöb (Parasit)',
+    cell_amoebaP_desc: 'Amöboider Parasit; kriescht un verschlingt Gewebe.',
+    cell_slime_label: 'Schlaim',
+    cell_slime_desc: 'Schlaimische Biofilm-Kuhl; tropft giftische Brüh.',
+    cell_mite_label: 'Milb',
+    cell_mite_desc: 'Winzischer Krabbler; viel klaa Baa.',
+    cell_spore_label: 'Spor',
+    cell_spore_desc: 'Pilzspor — treibt mit de Strömung un sät neies Wachstum.',
+    cell_toxin_label: 'Gift',
+    cell_toxin_desc: 'Zackischer Giftkristall; treibt umme un brennt bei Kontakt.',
+  },
   latin: {
     settings_title: 'Configuratio',
-    theme: 'Tema', background: 'Tergum', gameplay: 'Ludus',
-    splitting: 'Divisio', split_mode: 'Modus divisionis', population: 'Populatio',
-    physics: 'Physica', cell_blending: 'Confusio cellularum', look: 'Aspectus',
+    bg_solid: 'Color solidus',
+    bg_bloodstream: 'Sanguinis flumen (coccinum)',
+    bg_bloodflow: 'Sanguinis fluxus (cinnabar)',
+    bg_cellShadow: 'Umbra cellularis (rubrum)',
+    bg_cartoonNight: 'Iuscellum cosmicum (caeruleum nocturnum)',
+    bg_spectrum: 'Spectrum (iris)',
+    bg_lymphNode: 'Nodus lymphaticus (violaceus)',
+    bg_lung: 'Pulmo (fumus)',
+    bg_lavaFire: 'Magma (aurantium)',
+    bg_reactor: 'Reactor (viride acidum)',
+    bg_mitochondria: 'Mitochondrium (succinum)',
+    bg_neuron: 'Neuron (caeruleum electricum)',
+    bg_bile: 'Bilis (chartreuse)',
+    ic_pink: 'Roseus', ic_red: 'Ruber', ic_amber: 'Sucinus', ic_yellow: 'Gilvus',
+    ic_green: 'Viridis', ic_cyan: 'Caesius', ic_blue: 'Caeruleus', ic_violet: 'Violaceus', ic_mono: 'Unicolor',
+    theme: 'Tema', interface_color: 'Color interfaciei', background: 'Tergum', gameplay: 'Ludus',
+    theme_legacy: 'Legacy (defalta)', theme_microscope: 'Microscopium',
+    theme_cartoon: 'Cartoon', theme_kurzgesagt: 'Kurzgesagt', theme_classic: 'Classicus',
+    splitting: 'Divisio', population: 'Populatio',
+    physics: 'Physica', look: 'Aspectus',
     performance: 'Celeritas', language: 'Lingua',
     allow_pathogens: 'Pathogenes admittere',
-    split_on_tap: 'Divide tactu', random_split: 'Divisio casualis', meta_split: 'Divisio metaballi',
-    split_push: 'Pelle cum impetu', split_bond: 'Conjunge, deinde fluctuent',
-    max_cells: 'Cellulae maximae', auto_split: 'Auto-divisio (s)',
+    pinch_rotation: 'Rotatio bidigitalis',
+    fullscreen: 'Imago tota',
+    shader_test_link: 'Probatio adumbratoris',
+    game_mode: 'Modus ludendi',
+    mode_free: 'Lusus liber',
+    mode_campaign_soon: 'Expeditio (mox)',
+    mode_survival_soon: 'Superstes (mox)',
+    composition_hud: 'HUD compositionis',
+    caustics_overlay: 'Lux undans',
+    liquid_ripples: 'Undae liquidae',
+    cell_type_overlay: 'Genera cellularum',
+    counters_needed: 'Repugnatores requiruntur',
+    counters_covered: 'Plene defensus',
+    no_pathogens: 'Nullae pestes',
+    audio: 'Audio',
+    music_enabled: 'Musica',
+    music_volume: 'Volumen musicae',
+    sfx_volume: 'Volumen effectuum',
+    next_track: 'Carmen sequens',
+    random_split: 'Divisio casualis', meta_split: 'Divisio metaballi',
+    auto_split: 'Auto-divisio (s)',
     friction: 'Frictio', bounce: 'Resilientia', throw_strength: 'Vis jactus',
     wobble: 'Tremor', bg_flow: 'Fluxus tergi', bg_scale: 'Magnitudo tergi', outline_px: 'Linea (px)',
     membrane: 'Membrana', cell_size: 'Magnitudo cellulae',
@@ -492,16 +1493,22 @@ export const LOCALES = {
     upscale: 'Augmentum', scanlines: 'Lineae televisorii',
     renderer_engine: 'Machina depingendi',
     renderer_canvas: 'Canvas2D',
-    renderer_webgl: 'WebGL2 (vetus)',
-    renderer_webgpu: 'WebGPU (vetus)',
-    renderer_pixi_auto: 'Pixius (automatice)',
-    renderer_pixi_webgpu: 'Pixius (WebGPU)',
-    renderer_pixi_webgl: 'Pixius (WebGL2)',
+    renderer_webgl: 'WebGL2',
+    renderer_webgpu: 'WebGPU',
     reset_sim: 'Restituere simulationem',
+    about: 'De projecto', about_credits: 'Auctores', about_licences: 'Licentiae alienae', about_licences_note: 'Tres pelliculae sub licentia Shadertoy CC BY-NC-SA 3.0 sunt.', about_permissive: 'Translationes permissivae', about_desc: 'Simulatio microborum bidimensionalis.',
     help_title: 'Cellulae systematis immunitarii',
     add_cell: 'Adde cellulam', add_pathogen: 'Adde pathogenem',
+    add_title: 'Addere', add_tab_cells: 'Cellulae', add_tab_pathogens: 'Pathogenes', add_tab_theme: 'Thema',
+    spawn_banner_friends: 'Socii', spawn_banner_prey: 'Praeda', spawn_banner_foes: 'Hostes', spawn_banner_close: 'Intelligo',
+    view_grid: 'Visus craticulae', view_list: 'Visus indicis',
+    max_cells: 'Cellulae max.',
+    max_cells_hint: 'Cum limes attingitur, novae geneseis et divisiones cellulam vetustissimam reciclant.',
     palette_to_help: 'Disce quid quaeque cellula faciat →',
     palette_bad_to_help: 'Disce quid quisque pathogenes faciat →',
+    debug_log: 'Diarium debugationis', clear: 'Vacua', copy: 'Describe',
+    pause: 'Mora', paused: 'MORA',
+    paused_hint: 'Tange spatium aut velum ut continues',
     nav_settings: 'Configuratio', nav_help: 'Auxilium', nav_add_cell: 'Adde cellulam',
     nav_add_pathogen: 'Adde pathogenem', nav_reload: 'Iterum onerare',
     adding: 'Addendo: {name}',
@@ -597,167 +1604,166 @@ export function cellDesc(typeKey) {
 }
 
 // ---------- Themes ----------
+//
+// Trimmed in late 2026 from 26 entries → 8 (+ the 'solid' synthetic
+// background appended in BACKGROUNDS below). The four "physiological"
+// entries (lung / aurora / underwater / lavaFire) drive new procedural
+// shaders in webgl2.js / webgpu.js (kind values 4..7); canvas2d falls
+// back to flat / gradient base colours for those.
 export const THEMES = {
-  petriDish: {
-    label: 'Petri Dish',
-    bg: { kind: 'agar', base: '#f1e1a1', spotColor: 'rgba(170,120,40,0.10)', spotCount: 5, vignette: 0.18, ringColor: 'rgba(120,80,30,0.10)' },
-    outline: { color: '#2b1c0a', defaultPx: 5 },
-    ui: { panelAccent: '#a86a18' },
-  },
+  // Labels follow the "Name (colour)" convention so the user can
+  // pick by both the in-app accent name and the dominant tone.
   bloodstream: {
-    label: 'Bloodstream',
-    bg: { kind: 'gradient', topColor: '#5b101a', botColor: '#1d0306', spotColor: 'rgba(255,90,100,0.18)', spotCount: 6, vignette: 0.45, rbcSilhouettes: true },
+    label: 'Bloodstream (crimson)',
+    bg: { kind: 'gradient', topColor: '#5b101a', botColor: '#1d0306', spotColor: 'rgba(255,90,100,0.18)', spotCount: 6, vignette: 0, rbcSilhouettes: true },
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#ff6b6b' },
   },
-  neonBloom: {
-    label: 'Neon Bloom',
-    bg: { kind: 'navy-ghost', base: '#0e1840', spotColor: 'rgba(80,40,160,0.25)', spotCount: 7, vignette: 0.4 },
-    outline: { color: '#0d0420', defaultPx: 3 },
-    ui: { panelAccent: '#ff4fbf' },
+  bloodflow: {
+    label: 'Bloodflow (vermilion)',
+    // topColor/botColor match the previous hard-coded shader ramp
+    // (0.42,0.06,0.08) and (0.18,0.03,0.05) so the default look is
+    // preserved now that the bloodflow shader actually reads them.
+    bg: { kind: 'bloodflow', topColor: '#6b0f14', botColor: '#2e080d', vignette: 0 },
+    outline: { color: '#1c0306', defaultPx: 4 },
+    ui: { panelAccent: '#d63333' },
   },
-  aquaticGlow: {
-    label: 'Aquatic Glow',
-    bg: { kind: 'gradient', topColor: '#001a4a', botColor: '#00050f', spotColor: 'rgba(80,200,255,0.10)', spotCount: 4, vignette: 0.3 },
-    outline: { color: '#06122a', defaultPx: 3 },
-    ui: { panelAccent: '#5ce7ff' },
-  },
-  crayonBox: {
-    label: 'Crayon Box',
-    bg: { kind: 'flat', base: '#0a0612', spotColors: ['#ff4d4d','#ffd84d','#4d8dff','#4dd87a'], spotCount: 6, vignette: 0.25 },
-    outline: { color: '#000000', defaultPx: 5 },
-    ui: { panelAccent: '#ffd84d' },
+  cellShadow: {
+    label: 'Cell Shadow (red)',
+    // base #c83245 matches the previously hard-coded voronoi colour
+    // (vec3(200/255, 50/255, 69/255)) so the picker drives the look.
+    bg: { kind: 'cell-shadow', base: '#c83245', vignette: 0 },
+    outline: { color: '#1c0306', defaultPx: 4 },
+    ui: { panelAccent: '#c83246' },
   },
   cartoonNight: {
-    label: 'Cartoon Night',
-    bg: { kind: 'flat', base: '#0c1a3a', spotColors: ['#ff7ab8','#ffb84d','#5fe3d2','#ff5d6e'], spotCount: 6, vignette: 0.30 },
+    label: 'Cosmic Soup (navy)',
+    bg: { kind: 'flat', base: '#0c1a3a', spotColors: ['#ff7ab8','#ffb84d','#5fe3d2','#ff5d6e'], spotCount: 6, vignette: 0 },
     outline: { color: '#04081a', defaultPx: 5 },
     ui: { panelAccent: '#5fe3d2' },
   },
-  glowStick: {
-    label: 'Glow Stick',
-    bg: { kind: 'flat', base: '#000000', spotColors: ['#ffea00','#ff00aa','#00ff88','#00d8ff'], spotCount: 7, vignette: 0.50 },
-    outline: { color: '#000000', defaultPx: 3 },
-    ui: { panelAccent: '#ffea00' },
-  },
-  bedtime: {
-    label: 'Bedtime Stories',
-    bg: { kind: 'gradient', topColor: '#0e0a2c', botColor: '#1c123e', spotColors: ['#fff4c2','#ffe0a3','#cdbcff','#bff5ff'], spotCount: 8, vignette: 0.45 },
-    outline: { color: '#0c0a22', defaultPx: 3 },
-    ui: { panelAccent: '#ffe0a3' },
-  },
   spectrum: {
-    label: 'Spectrum',
-    bg: { kind: 'flat', base: '#000000', spotColors: ['#ff003c','#ff8a00','#ffd600','#3ecf6c','#3da6ff','#a855f7'], spotCount: 6, vignette: 0.30 },
+    label: 'Spectrum (rainbow)',
+    bg: { kind: 'flat', base: '#000000', spotColors: ['#ff003c','#ff8a00','#ffd600','#3ecf6c','#3da6ff','#a855f7'], spotCount: 6, vignette: 0 },
     outline: { color: '#000000', defaultPx: 4 },
     ui: { panelAccent: '#a855f7' },
   },
-  aurora: {
-    label: 'Aurora',
-    bg: { kind: 'gradient', topColor: '#03081a', botColor: '#000000', spotColors: ['#3ecf6c','#5cd6ff','#a855f7','#ff5cb8','#ffe070'], spotCount: 7, vignette: 0.40 },
-    outline: { color: '#000000', defaultPx: 3 },
-    ui: { panelAccent: '#3ecf6c' },
-  },
-  prism: {
-    label: 'Prism',
-    bg: { kind: 'flat', base: '#04020a', spotColors: ['#ff3030','#ff8800','#ffd700','#00d068','#0088ff','#7000ff'], spotCount: 6, vignette: 0.50 },
-    outline: { color: '#000000', defaultPx: 4 },
-    ui: { panelAccent: '#ff8800' },
-  },
-  pride: {
-    label: 'Pride',
-    bg: { kind: 'gradient', topColor: '#15082a', botColor: '#04010d', spotColors: ['#e40303','#ff8c00','#ffed00','#008026','#004cff','#732982'], spotCount: 6, vignette: 0.35 },
-    outline: { color: '#000000', defaultPx: 4 },
-    ui: { panelAccent: '#ff8c00' },
-  },
-  deepSpace: {
-    label: 'Deep Space',
-    bg: { kind: 'flat', base: '#000005', spotColors: ['#ffffff','#a0c0ff','#ffe0a0'], spotCount: 9, vignette: 0.60 },
-    outline: { color: '#000000', defaultPx: 3 },
-    ui: { panelAccent: '#a0c0ff' },
-  },
-  volcano: {
-    label: 'Volcano',
-    bg: { kind: 'gradient', topColor: '#3b0a05', botColor: '#0a0202', spotColors: ['#ff5a00','#ff9933','#ffe066','#ffaa44'], spotCount: 7, vignette: 0.50 },
-    outline: { color: '#1a0606', defaultPx: 4 },
-    ui: { panelAccent: '#ff5a00' },
-  },
-  forestFloor: {
-    label: 'Forest Floor',
-    bg: { kind: 'flat', base: '#091206', spotColors: ['#a8d250','#ffd24d','#5ad27a','#cfe07f'], spotCount: 6, vignette: 0.45 },
-    outline: { color: '#04080d', defaultPx: 4 },
-    ui: { panelAccent: '#a8d250' },
-  },
-  cyberGrid: {
-    label: 'Cyber Grid',
-    bg: { kind: 'cybergrid', base: '#000010', spotColors: ['#00ff88','#ff00aa','#00d8ff'], spotCount: 4, vignette: 0.30, gridColor: 'rgba(0,255,170,0.18)', gridStep: 48 },
-    outline: { color: '#000000', defaultPx: 3 },
-    ui: { panelAccent: '#00ff88' },
-  },
   lymphNode: {
-    label: 'Lymph Node',
-    bg: { kind: 'gradient', topColor: '#2a0e3a', botColor: '#0a0410', spotColor: 'rgba(160,120,200,0.15)', spotCount: 5, vignette: 0.40, decor: 'lymphocytes' },
+    label: 'Lymph Node (violet)',
+    bg: { kind: 'gradient', topColor: '#2a0e3a', botColor: '#0a0410', spotColor: 'rgba(160,120,200,0.15)', spotCount: 5, vignette: 0 },
     outline: { color: '#0a0410', defaultPx: 4 },
     ui: { panelAccent: '#bd93e2' },
   },
-  thymus: {
-    label: 'Thymus',
-    bg: { kind: 'gradient', topColor: '#401218', botColor: '#100204', spotColor: 'rgba(220,90,110,0.18)', spotCount: 6, vignette: 0.45, decor: 'lobules' },
-    outline: { color: '#0a0102', defaultPx: 4 },
-    ui: { panelAccent: '#e95870' },
-  },
-  boneMarrow: {
-    label: 'Bone Marrow',
-    bg: { kind: 'gradient', topColor: '#44290a', botColor: '#190a02', spotColor: 'rgba(255,180,90,0.18)', spotCount: 5, vignette: 0.40, decor: 'matrix' },
-    outline: { color: '#0a0501', defaultPx: 4 },
-    ui: { panelAccent: '#ffb95c' },
-  },
-  heart: {
-    label: 'Heart',
-    bg: { kind: 'gradient', topColor: '#4a0a0a', botColor: '#110202', spotColor: 'rgba(255,60,60,0.18)', spotCount: 4, vignette: 0.50, decor: 'pulse' },
-    outline: { color: '#0a0202', defaultPx: 4 },
-    ui: { panelAccent: '#ff4040' },
-  },
-  gut: {
-    label: 'Gut',
-    bg: { kind: 'gradient', topColor: '#3a1010', botColor: '#100404', spotColor: 'rgba(220,140,140,0.16)', spotCount: 5, vignette: 0.40, decor: 'villi' },
-    outline: { color: '#0a0202', defaultPx: 4 },
-    ui: { panelAccent: '#e08688' },
-  },
   lung: {
-    label: 'Lung',
-    bg: { kind: 'gradient', topColor: '#082040', botColor: '#020618', spotColor: 'rgba(150,200,255,0.18)', spotCount: 5, vignette: 0.40, decor: 'alveoli' },
+    label: 'Lung (smoke)',
+    // topColor/botColor match the previously hard-coded hot/cool ramp
+    // (0.510,0.204,0.016) / (0.529,0.808,0.980) so the default smoke
+    // look is preserved now that the lung shader reads u_top / u_bot.
+    bg: { kind: 'lung', base: '#1a1118', topColor: '#823404', botColor: '#87cefa', spotCount: 0, vignette: 0 },
     outline: { color: '#02080f', defaultPx: 4 },
-    ui: { panelAccent: '#5cb0ff' },
+    ui: { panelAccent: '#ff9aa8' },
   },
-  brain: {
-    label: 'Brain',
-    bg: { kind: 'gradient', topColor: '#2a142e', botColor: '#100612', spotColor: 'rgba(255,200,255,0.15)', spotCount: 6, vignette: 0.50, decor: 'neurons' },
-    outline: { color: '#08020a', defaultPx: 3 },
-    ui: { panelAccent: '#e0a0ff' },
+  aurora: {
+    label: 'Aurora (green/violet)',
+    // topColor/botColor mix into the ribbon hue — defaults match the
+    // previously hard-coded green (0.24,0.95,0.52) and violet
+    // (0.55,0.35,0.95). base is the night-sky tint below the ribbons.
+    bg: { kind: 'aurora', base: '#050a18', topColor: '#3df285', botColor: '#8c59f2', vignette: 0 },
+    outline: { color: '#020410', defaultPx: 4 },
+    ui: { panelAccent: '#3df285' },
   },
-  kidney: {
-    label: 'Kidney',
-    bg: { kind: 'gradient', topColor: '#2c0e08', botColor: '#0c0402', spotColor: 'rgba(255,140,90,0.16)', spotCount: 5, vignette: 0.45, decor: 'tubules' },
-    outline: { color: '#0a0202', defaultPx: 4 },
-    ui: { panelAccent: '#ff9070' },
+  underwater: {
+    label: 'Underwater (caustic)',
+    // botColor is the deep wash, topColor is the bright caustic peak —
+    // defaults match the previously hard-coded deep (0.04,0.16,0.30)
+    // and bright (0.60,0.95,1.00).
+    bg: { kind: 'underwater', base: '#020a18', topColor: '#99f2ff', botColor: '#0a2950', vignette: 0 },
+    outline: { color: '#020a18', defaultPx: 4 },
+    ui: { panelAccent: '#99f2ff' },
   },
-  skin: {
-    label: 'Skin',
-    bg: { kind: 'gradient', topColor: '#3c1c0c', botColor: '#100804', spotColor: 'rgba(255,200,160,0.18)', spotCount: 4, vignette: 0.35, decor: 'hair' },
-    outline: { color: '#0a0402', defaultPx: 4 },
-    ui: { panelAccent: '#e8a878' },
+  lavaFire: {
+    label: 'Magma (orange)',
+    // base/bot/top/peak ramp now reads u_base/u_bot/u_top in the lava
+    // shader. Defaults match the previous hard-coded stops
+    // (0.05,0.01,0.00)/(0.50,0.03,0.01)/(1.00,0.45,0.05) so the look
+    // is preserved out of the box; peak is derived as clamp(top*2).
+    bg: { kind: 'lava', base: '#0d0300', topColor: '#ff730d', botColor: '#800803', spotCount: 0, vignette: 0 },
+    outline: { color: '#1a0606', defaultPx: 4 },
+    ui: { panelAccent: '#ff5a00' },
   },
-  liver: {
-    label: 'Liver',
-    bg: { kind: 'gradient', topColor: '#2a0e0a', botColor: '#0a0202', spotColor: 'rgba(180,80,60,0.18)', spotCount: 5, vignette: 0.50, decor: 'lobules' },
-    outline: { color: '#0a0202', defaultPx: 4 },
-    ui: { panelAccent: '#c85a3c' },
+  // ── New palettes (2026) — common themes the project lacked.
+  mitochondria: {
+    // Warm amber on deep brown — mitochondrial inner-membrane palette.
+    label: 'Mitochondria (amber)',
+    bg: { kind: 'gradient', topColor: '#3a1c0a', botColor: '#100602', spotColor: 'rgba(255,160,60,0.20)', spotCount: 6, vignette: 0 },
+    outline: { color: '#1c0a02', defaultPx: 4 },
+    ui: { panelAccent: '#ffa040' },
+  },
+  neuron: {
+    // Electric blue on near-black — synapse / action-potential feel.
+    label: 'Neuron (electric blue)',
+    bg: { kind: 'gradient', topColor: '#0a1830', botColor: '#020610', spotColor: 'rgba(80,180,255,0.22)', spotCount: 5, vignette: 0 },
+    outline: { color: '#020610', defaultPx: 3 },
+    ui: { panelAccent: '#50b4ff' },
+  },
+  bile: {
+    // Chartreuse on deep olive — bile / gallbladder palette.
+    label: 'Bile (chartreuse)',
+    bg: { kind: 'gradient', topColor: '#1c2810', botColor: '#080c04', spotColor: 'rgba(180,220,80,0.18)', spotCount: 4, vignette: 0 },
+    outline: { color: '#080c04', defaultPx: 4 },
+    ui: { panelAccent: '#b4dc50' },
+  },
+  // Gray-Scott reaction-diffusion. The renderer maintains two
+  // half-resolution ping-pong textures, runs N step iterations per
+  // visible frame, and refreshes a few uniform-random B-concentration
+  // seed discs every ~10 s. WebGL2 + WebGPU implement; canvas2d falls
+  // back to the base colour. See .claude/plan/04-reactor-bg.md.
+  reactor: {
+    label: 'Reactor (acid green)',
+    // seedCount  — random discs placed per reseed event (1..8).
+    // reseedSec  — seconds between random reseeds ("Randomisation").
+    // simSpeed   — Gray-Scott step iterations per frame ("Time"; 0 = paused).
+    // base/botColor/topColor — dark→mid→hot ramp on B-concentration.
+    //   Defaults match the previous hard-coded stops
+    //   (0.02,0.06,0.04)/(0.10,0.40,0.20)/(0.49,1.00,0.54) so the
+    //   acid-green look is preserved now that the kind-8 display
+    //   shader reads u_base/u_bot/u_top.
+    bg: { kind: 'reactor', base: '#051010', botColor: '#1a6633', topColor: '#7dff8a', vignette: 0, seedCount: 6, reseedSec: 10, simSpeed: 5 },
+    outline: { color: '#0a1816', defaultPx: 4 },
+    ui: { panelAccent: '#7eff8a' },
   },
 };
 
+// Interface-accent palette — small standalone table separate from
+// the scene-render THEMES table. Each entry only carries what the
+// UI consumes: a label (for the dropdown), the accent colour (CSS
+// --accent), and a contrast colour (--accent-ink) for icons /
+// text on the accent background.
+export const INTERFACE_ACCENTS = {
+  pink:   { label: 'Pink',   accent: '#ff7a93', accentInk: '#2a0b14' },
+  red:    { label: 'Red',    accent: '#ff5a5a', accentInk: '#2a0606' },
+  amber:  { label: 'Amber',  accent: '#ffa040', accentInk: '#2a1606' },
+  yellow: { label: 'Yellow', accent: '#ffd166', accentInk: '#2a2406' },
+  green:  { label: 'Green',  accent: '#7eff8a', accentInk: '#062a0d' },
+  cyan:   { label: 'Cyan',   accent: '#5fe3d2', accentInk: '#062a26' },
+  blue:   { label: 'Blue',   accent: '#5ab8ff', accentInk: '#06162a' },
+  violet: { label: 'Violet', accent: '#bd93f9', accentInk: '#180a2a' },
+  mono:   { label: 'Mono',   accent: '#e8e8e8', accentInk: '#1a1a1a' },
+};
+
+// Returns the active interface-accent — { label, accent, accentInk }.
+// Falls back to pink if S.interfaceColor is stale or unknown (the
+// loadSettings migration shim should already have remapped legacy
+// theme-key values, this is the runtime safety net).
+export function currentInterfaceColor() {
+  return INTERFACE_ACCENTS[S.interfaceColor] || INTERFACE_ACCENTS.pink;
+}
+
+// Backwards-compat alias for callers that read the palette via the
+// old name. They still get the scene-render THEME (not the accent)
+// so existing background-related callers don't break.
 export function currentTheme() {
-  return THEMES[S.theme] || THEMES.petriDish;
+  return THEMES[S.background] || THEMES.bloodstream;
 }
 
 // Effective highlight colour for selection visuals. When the user toggle is
@@ -831,7 +1837,43 @@ export const BACKGROUNDS = (() => {
 })();
 
 export function currentBackground() {
-  return BACKGROUNDS[S.background] || BACKGROUNDS[S.theme] || BACKGROUNDS.solid;
+  return BACKGROUNDS[S.background] || BACKGROUNDS[S.interfaceColor] || BACKGROUNDS.solid;
+}
+
+// Layer stack the renderers iterate. If S.bgLayers is non-empty,
+// each entry is a fully-formed bg blob plus { opacity, blend,
+// enabled }. If empty, fall back to a single-layer stack derived
+// from the legacy S.background preset key — preserves N=1 parity
+// with the single-bg pipeline. See .claude/plan/10-bg-layer-stack.md.
+export function currentBgLayers() {
+  if (Array.isArray(S.bgLayers) && S.bgLayers.length > 0) {
+    return S.bgLayers.filter(l => l.enabled !== false);
+  }
+  const bg = currentBackground();
+  return [{ ...bg, opacity: 1, blend: 'normal', enabled: true }];
+}
+
+// Wrap a preset key into the single-layer bgLayers shape the
+// renderers iterate. The multi-layer UI (plan #10 PR B) was
+// reverted — the bg now selects exactly one shader at a time,
+// but renderers still iterate currentBgLayers() so the array
+// shape is preserved as a 1-element array.
+let _bgLayerIdSeq = 1;
+export function makeBgLayerId() {
+  return 'l_' + Date.now().toString(36) + '_' + (_bgLayerIdSeq++);
+}
+export function bgLayerFromPreset(key) {
+  const bg = BACKGROUNDS[key] || BACKGROUNDS.solid;
+  return {
+    id: makeBgLayerId(),
+    opacity: 1,
+    blend: 'normal',
+    enabled: true,
+    ...bg,
+  };
+}
+export function bgLayersFromPreset(key) {
+  return [bgLayerFromPreset(key)];
 }
 
 // ---------- Cell types ----------
@@ -1119,7 +2161,7 @@ export const PATHOGEN_GROUPS = [
 ];
 
 // ---------- Constants ----------
-export const SPLIT_DURATION = 1.8;
+export const SPLIT_DURATION = 0.9;   // 2× faster than the original 1.8 s
 export const BOND_DURATION = 2.0;
 export const CELL_RADIUS = 52;
 export const NUCLEUS_RATIO = 0.30;
@@ -1129,7 +2171,7 @@ export const MARGIN = 80;
 export const MARGIN_SPRING = 5;
 export const DOWNSAMPLE = 0.5;
 export const WOBBLE_VERTS = 32;
-export const MIN_SCALE = 0.25;
+export const MIN_SCALE = 0.125;     // 2× more zoom-out range vs. the original 0.25
 export const MAX_SCALE = 4;
 export const DRAG_THRESHOLD = 6;
 export const HASH_CELL = 120;

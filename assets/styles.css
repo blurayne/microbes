@@ -37,7 +37,13 @@ html, body {
   height: 44px;
   border-radius: 50%;
   border: 2px solid #000;
-  background: var(--accent);
+  /* 50%-transparent themed bg + backdrop blur — glassy chrome that
+     keeps the accent identity while letting the scene shimmer
+     through. The accent colour is mixed with transparent so the
+     blur reveals the bg under each FAB. */
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
   color: var(--accent-ink);
   display: grid;
   place-items: center;
@@ -47,14 +53,109 @@ html, body {
   font: 700 18px/1 system-ui, sans-serif;
   transition: transform 120ms ease;
 }
+/* FAB stack — paletteBad removed (unified add-dialog covers
+   pathogens too), so help/pause/eye each shift down by one slot.
+   body.no-bad overrides are gone — the dialog gates pathogens
+   internally via S.allowBadGuys. */
 #gear       { bottom: 16px; }
 #reload     { bottom: 66px; }
 #palette    { bottom: 116px; font-size: 22px; }
-#paletteBad { bottom: 166px; font-size: 22px; background: #c72020; color: #fff; }
-#help       { bottom: 216px; }
-body.no-bad #paletteBad,
-body.no-bad #paletteBadDialog { display: none; }
-body.no-bad #help { bottom: 166px; }
+#help       { bottom: 166px; }
+#pause      { bottom: 216px; padding: 0; }
+#pause svg  { width: 22px; height: 22px; display: block; }
+#eyeToggle  { bottom: 266px; }
+#pause[aria-pressed="true"] {
+  background: #ffd166;
+  color: #000;
+}
+#eyeToggle svg { width: 22px; height: 22px; display: block; }
+#eyeToggle[aria-pressed="true"] {
+  background: var(--accent-warm, #ffd166);
+  color: #000;
+}
+
+/* Settings gear: the inline SVG sits inside a grid-centred 44 px FAB.
+   Pin its size to 24 px so it doesn't get squeezed by font metrics
+   when descender lines push the row taller than 44 px on some
+   mobile browsers. */
+#gear svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+/* Mode-button SVG icons all use currentColor + fit the 40 px
+   round chassis at 22 px. Background + colour come from the
+   shared .mode-btn rules below — the legacy black-bg override
+   for split was removed (PR-fix per user spec: "every button
+   should have the background of the color theme we have
+   chosen. the icons are monochrome"). */
+.mode-btn svg {
+  width: 22px;
+  height: 22px;
+  display: block;
+}
+
+/* Pause overlay — dims the play area + shows "PAUSE" centred. */
+/* Pause overlay: blurs the entire bg via backdrop-filter, shows a
+   PAUSED title + 'tap to continue' hint, intercepts ANY click /
+   keypress to resume. While paused, body.is-paused disables every
+   other interactive element so the user can't accidentally hit
+   them through the overlay backdrop (the overlay covers the
+   whole viewport at z-index 8). */
+.pause-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 18px;
+  background: rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 8;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 180ms ease;
+  cursor: pointer;
+}
+.pause-overlay.shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+.pause-overlay .pause-text {
+  font: 700 clamp(54px, 12vw, 110px)/1 system-ui, sans-serif;
+  letter-spacing: 0.15em;
+  color: #fff;
+  text-shadow: 0 0 30px #000c, 0 0 6px #000;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.pause-overlay .pause-hint {
+  font: 600 14px/1.2 system-ui, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.85);
+  text-shadow: 0 0 12px #000c;
+  user-select: none;
+  -webkit-user-select: none;
+  text-align: center;
+  padding: 0 24px;
+}
+/* While paused: disable every interactive element EXCEPT the
+   overlay AND the pause button itself (so the user can always
+   click pause to resume — without this exception the FAB became
+   non-clickable and the only way out was to find the bare
+   overlay area, which dialogs sometimes covered). */
+body.is-paused .fab:not(#pause),
+body.is-paused #gear,
+body.is-paused #settings,
+body.is-paused .mode-btn,
+body.is-paused #helpDialog,
+body.is-paused #addDialog,
+body.is-paused #aboutDialog {
+  pointer-events: none !important;
+}
 .cell-grid-section { margin-bottom: 14px; }
 .cell-grid-section > h3 {
   margin: 0 0 6px;
@@ -152,6 +253,62 @@ body.no-bad #help { bottom: 166px; }
   border-top: 1px solid var(--line);
   padding: 12px 0;
 }
+
+/* Collapsible fieldsets — every settings group is a <details>
+   element. Start state on each is set via the `open` attribute
+   in markup. Summary acts as the section header (replaces the
+   previous <h3>); content lives below. Caret rotates on open. */
+.settings-section {
+  border-top: 1px solid var(--line);
+  padding: 8px 0;
+}
+.settings-section > summary {
+  margin: 0 0 0 0;
+  padding: 4px 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: #ffd0d8aa;
+  cursor: pointer;
+  list-style: none;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.settings-section > summary::-webkit-details-marker { display: none; }
+.settings-section > summary::after {
+  content: '›';
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%) rotate(0deg);
+  font-size: 18px;
+  color: var(--ink-dim, var(--ink));
+  transition: transform 180ms ease;
+}
+.settings-section[open] > summary::after {
+  transform: translateY(-50%) rotate(90deg);
+}
+.settings-section[open] > summary {
+  margin-bottom: 6px;
+  color: var(--accent);
+}
+/* Hint block under a settings control — small, dim, leaves room
+   above so it reads as a footnote to the preceding label. <b>mode</b>
+   tokens are tinted with the active accent. */
+.settings-panel .hint {
+  margin: 4px 4px 12px;
+  padding: 0;
+  list-style: none;
+  font-size: 11px;
+  line-height: 1.45;
+  color: #d8d0c8aa;
+}
+.settings-panel .hint li { margin: 2px 0; }
+.settings-panel .hint b {
+  color: var(--accent);
+  font-weight: 600;
+}
 .settings-panel h3 {
   margin: 0 0 8px;
   font-size: 12px;
@@ -178,6 +335,170 @@ body.no-bad #help { bottom: 166px; }
   float: right;
   font-variant-numeric: tabular-nums;
   color: var(--accent);
+}
+
+/* Indented controls revealed when a parent checkbox is on (e.g.,
+   ripple density / reach / strength under "Liquid ripples"). `hidden`
+   keeps the markup in the DOM but invisible until app.js removes it. */
+.settings-panel .sub-controls {
+  margin: 0 0 8px 16px;
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.settings-panel .sub-controls[hidden] { display: none; }
+
+/* Background single-shader config (per-kind sliders + colour swatches).
+ * Replaces the drag-drop layer-list UI from the original plan #10 PR B —
+ * only one bg shader at a time now, but the same set of per-kind
+ * editable fields (PR C) is preserved. */
+.bg-config-rows {
+  display: flex; flex-direction: column; gap: 4px;
+  margin: 8px 0 4px 0; padding: 6px 8px 6px 10px;
+  background: #00000022; border-left: 2px solid var(--line);
+  border-radius: 0 4px 4px 0;
+  font-size: 0.85em;
+}
+.bg-config-rows .bg-config-row {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  gap: 6px; align-items: center;
+}
+.bg-config-rows input[type=range] { width: 100%; }
+.bg-config-rows .val { font-family: monospace; opacity: 0.7; }
+.bg-color-swatch {
+  width: 36px; height: 22px;
+  border: 1px solid var(--line); border-radius: 4px;
+  cursor: pointer; padding: 0;
+  /* Checkerboard for alpha visibility. */
+  background-image:
+    linear-gradient(45deg, #555 25%, transparent 25%),
+    linear-gradient(-45deg, #555 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #555 75%),
+    linear-gradient(-45deg, transparent 75%, #555 75%);
+  background-size: 8px 8px;
+  background-position: 0 0, 0 4px, 4px -4px, -4px 0px;
+}
+.bg-color-swatch:hover { border-color: var(--accent); }
+
+/* HSV gamut popover (see assets/ui/color-picker.js). */
+.cp-popover {
+  position: fixed; z-index: 9999;
+  display: grid; gap: 8px;
+  padding: 10px;
+  background: #181222ee;
+  border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 12px 36px rgba(0,0,0,0.5);
+  width: 240px;
+  font-family: system-ui, sans-serif; font-size: 12px; color: var(--ink);
+}
+.cp-popover .cp-sv {
+  width: 200px; height: 160px;
+  border-radius: 4px; cursor: crosshair;
+  display: block; margin: 0 auto;
+}
+.cp-popover .cp-hue {
+  position: relative;
+  width: 100%; height: 16px;
+  border-radius: 4px;
+  background: linear-gradient(to right,
+    #f00 0%, #ff0 17%, #0f0 33%, #0ff 50%, #00f 67%, #f0f 83%, #f00 100%);
+  cursor: ew-resize;
+}
+.cp-popover .cp-hue-thumb {
+  position: absolute; top: -2px; bottom: -2px;
+  width: 4px; left: 0;
+  border: 1px solid #fff; background: #0008; border-radius: 1px;
+  pointer-events: none;
+  transform: translateX(-2px);
+}
+.cp-popover .cp-alpha {
+  position: relative;
+  width: 100%; height: 16px;
+  border-radius: 4px;
+  background:
+    repeating-conic-gradient(#444 0% 25%, #888 0% 50%) 50%/8px 8px;
+  cursor: ew-resize;
+}
+.cp-popover .cp-alpha-thumb {
+  position: absolute; top: -2px; bottom: -2px;
+  width: 4px;
+  border: 1px solid #fff; background: #0008; border-radius: 1px;
+  pointer-events: none;
+  transform: translateX(-2px);
+}
+.cp-popover .cp-input-row {
+  display: grid; grid-template-columns: auto 1fr; gap: 6px; align-items: center;
+}
+.cp-popover .cp-swatch {
+  width: 24px; height: 24px; border: 1px solid var(--line); border-radius: 4px;
+  background-image:
+    linear-gradient(45deg, #555 25%, transparent 25%),
+    linear-gradient(-45deg, #555 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #555 75%),
+    linear-gradient(-45deg, transparent 75%, #555 75%);
+  background-size: 8px 8px;
+}
+.cp-popover .cp-text {
+  background: #00000055; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 4px 6px; font-family: monospace; font-size: 12px;
+}
+.cp-popover .cp-btn-row {
+  display: flex; gap: 6px; justify-content: flex-end;
+}
+.cp-popover .cp-btn {
+  background: #00000055; color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 4px 10px; cursor: pointer; font-size: 12px;
+}
+.cp-popover .cp-btn:hover { border-color: var(--accent); }
+.cp-popover .cp-ok { background: color-mix(in srgb, var(--accent) 25%, transparent); }
+
+/* FX overlay order panel — sortable list of the three fixed-function
+ * FX overlays (noise/vignette/crosshair). Each row: drag handle,
+ * label, ▲/▼ buttons. The on/off toggle is the existing checkbox
+ * above each effect's sub-controls block; this list only owns the
+ * order. (Plan: see commit message + IDEAS.md blend-modes entry.) */
+.overlay-order-block { margin: 6px 0 10px 0; }
+.overlay-order-title { font-size: 0.85em; opacity: 0.7; margin-bottom: 4px; }
+.overlay-order-list { display: flex; flex-direction: column; gap: 4px; }
+.overlay-order-row {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto auto;
+  gap: 6px; align-items: center;
+  padding: 4px 6px;
+  background: #00000022;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: grab;
+  font-size: 0.85em;
+}
+.overlay-order-row:active { cursor: grabbing; }
+.overlay-order-row.dragging { opacity: 0.4; }
+.overlay-order-row.drag-over { border-color: var(--accent); }
+.overlay-order-row .drag-handle {
+  font-family: monospace; padding: 0 4px; user-select: none; opacity: 0.5;
+}
+.overlay-order-row .label { user-select: none; }
+.overlay-order-row .row-checkbox { margin: 0; cursor: pointer; }
+.overlay-order-row .move-btn {
+  background: none; border: 1px solid var(--line); color: var(--ink);
+  width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
+  padding: 0; line-height: 1; font-size: 12px;
+}
+.overlay-order-row .move-btn:hover:not(:disabled) { border-color: var(--accent); }
+.overlay-order-row .move-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.overlay-order-row.scene-pin {
+  cursor: default;
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.7;
+  grid-template-columns: 1fr;
+  text-align: center;
+  font-style: italic;
+}
+.sub-controls-title {
+  font-size: 0.85em; opacity: 0.7; margin: 4px 0;
 }
 
 .settings-panel select {
@@ -210,18 +531,69 @@ body.no-bad #help { bottom: 166px; }
 }
 .checks li input { margin: 0; }
 
-.actions { text-align: right; }
-#resetSim {
-  background: var(--accent);
-  color: var(--accent-ink);
-  border: 2px solid #000;
+.actions {
+  text-align: right;
+  margin-top: 12px;
+}
+
+.about-btn {
+  background: transparent;
+  color: var(--ink);
+  border: 1px solid var(--line);
   padding: 8px 14px;
-  font-weight: 700;
+  font-weight: 500;
   border-radius: 8px;
   cursor: pointer;
 }
-#resetSim:hover { filter: brightness(1.05); }
-#resetSim:active { transform: translateY(1px); }
+
+/* "Now playing" line above the music-volume slider. Label dim,
+   track name punchy in the active accent. */
+.settings-panel .music-now {
+  margin: 4px 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #d8d0c8aa;
+}
+.settings-panel .music-now-label { color: #d8d0c8aa; }
+.settings-panel #musicTrackLabel {
+  color: var(--accent);
+  font-weight: 600;
+}
+.about-btn:hover { background: #ffffff14; }
+
+.about-body { padding: 4px 0 8px; line-height: 1.55; }
+.about-desc { color: var(--ink-dim, var(--ink)); margin-bottom: 16px; }
+.about-body h3 {
+  margin: 18px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+}
+.about-body h3:first-child { margin-top: 0; }
+.about-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  font-size: 13px;
+}
+.about-list li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+.about-list li:last-child { border-bottom: none; }
+.about-list a { color: var(--accent); text-decoration: none; }
+.about-list a:hover { text-decoration: underline; }
+.about-note {
+  font-size: 12px;
+  color: var(--ink-dim, var(--ink));
+  background: rgba(255, 200, 100, 0.06);
+  border-left: 3px solid #ffd166;
+  padding: 8px 12px;
+  border-radius: 3px;
+  margin-bottom: 8px;
+}
+.about-note strong { color: #ffd166; }
 
 #build {
   position: fixed;
@@ -231,7 +603,6 @@ body.no-bad #help { bottom: 166px; }
   font: 11px/1.3 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   color: var(--ink);
   opacity: 0.55;
-  pointer-events: none;
   user-select: none;
   letter-spacing: 0.02em;
   text-shadow: 0 1px 2px #0008;
@@ -240,7 +611,41 @@ body.no-bad #help { bottom: 166px; }
   border-radius: 6px;
   display: none;
 }
-#build.on { display: block; }
+#build.on { display: block; cursor: pointer; }
+#build.on:hover { opacity: 0.85; background: #00000066; }
+
+/* Composition HUD — top-right widget listing heroes still needed
+ * to counter on-field pathogens. Hidden by default; shown when
+ * S.compositionHud is on AND there's at least one pathogen on
+ * the field (otherwise it's noise). */
+.composition-hud {
+  position: fixed;
+  top: 10px;
+  right: 12px;
+  z-index: 9;
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink);
+  background: #00000077;
+  border: 1px solid #ffffff22;
+  padding: 6px 10px;
+  border-radius: 8px;
+  pointer-events: none;
+  user-select: none;
+  text-shadow: 0 1px 2px #0008;
+  letter-spacing: 0.02em;
+  max-width: 240px;
+  display: none;
+}
+.composition-hud.on { display: block; }
+.composition-hud .title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  opacity: 0.7;
+  margin-bottom: 3px;
+}
+.composition-hud .item { white-space: nowrap; }
+.composition-hud .empty { opacity: 0.7; font-style: italic; }
 
 #fps {
   position: fixed;
@@ -265,7 +670,222 @@ body.show-build #fps.on { top: 32px; }
 #stage          { image-rendering: auto; }
 #stage.pixel    { image-rendering: pixelated; image-rendering: crisp-edges; }
 
-/* CRT-style scanline overlay above the canvas, below dialogs */
+/* Floating combat text overlay — sits above the canvas, below the
+   scanlines + dialogs. Each .ft-entry is absolutely positioned at
+   the document origin and translated into place via CSS transform
+   from JS each frame (cheaper than top/left for high-frequency
+   updates). pointer-events:none so the labels never block clicks. */
+/* Cell-type overlay (S.cellTypeOverlay / eye-toggle FAB). Each
+   .cell-tag pairs a colored ring sized to the cell's screen-space
+   radius with a small label below. Pool of <div>s reused across
+   frames; transforms drive position so we don't trigger layout. */
+.cell-tag-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  overflow: hidden;
+  contain: strict;
+}
+.cell-tag {
+  position: absolute;
+  left: 0;
+  top: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+.cell-tag-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width:  calc(var(--ring-r, 16px) * 2);
+  height: calc(var(--ring-r, 16px) * 2);
+  margin-left: calc(0px - var(--ring-r, 16px));
+  margin-top:  calc(0px - var(--ring-r, 16px));
+  border: 2px solid var(--ring-color, #fff);
+  border-radius: 50%;
+  opacity: 0.85;
+  box-shadow: 0 0 4px var(--ring-color, #fff);
+}
+.cell-tag-label {
+  position: absolute;
+  left: 0;
+  top: calc(var(--ring-r, 16px) + 6px);
+  transform: translateX(-50%);
+  font: 600 11px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0.04em;
+  /* Always white for legibility against the dark per-tag background;
+     the ring colour stays per-cell-type. */
+  color: #fff;
+  text-shadow: 0 0 4px #000c, 0 1px 2px #000;
+  white-space: nowrap;
+  padding: 2px 6px;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 3px;
+}
+
+/* Spawn banner overlay — PR-E phase 2 first-spawn callout. */
+.spawn-banner-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 7;
+}
+.spawn-banner {
+  pointer-events: auto;
+  position: absolute;
+  left: 50%;
+  top: 80px;
+  transform: translateX(-50%);
+  max-width: min(420px, 92vw);
+  padding: 14px 18px 16px;
+  background: rgba(15, 8, 22, 0.96);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--accent, #fff);
+  border-top: 3px solid var(--accent, #fff);
+  border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0,0,0,0.55);
+  color: #fff;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  animation: spawnBannerIn 220ms cubic-bezier(.2,.8,.2,1);
+}
+.spawn-banner.dismissing {
+  animation: spawnBannerOut 200ms ease forwards;
+}
+@keyframes spawnBannerIn {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to   { opacity: 1; transform: translate(-50%, 0);    }
+}
+@keyframes spawnBannerOut {
+  to   { opacity: 0; transform: translate(-50%, -8px); }
+}
+.spawn-banner header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px;
+}
+.spawn-banner h3 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: 0.01em;
+  color: var(--accent, #fff);
+}
+.spawn-banner-close {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 22px;
+  line-height: 1;
+  width: 28px; height: 28px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.spawn-banner-close:hover { background: rgba(255, 255, 255, 0.08); color: #fff; }
+.spawn-banner-row {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.spawn-banner-label {
+  color: rgba(255, 255, 255, 0.55);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  font-size: 10px;
+  align-self: center;
+}
+.spawn-banner-list {
+  display: flex; flex-wrap: wrap; gap: 4px;
+}
+.spawn-banner-empty {
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
+}
+.spawn-banner-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 2px solid var(--chip-color, #fff);
+  border-radius: 0 3px 3px 0;
+  font-size: 11px;
+  color: #fff;
+}
+.spawn-banner-cta {
+  display: block;
+  margin-top: 12px;
+  padding: 8px 14px;
+  background: var(--accent, #fff);
+  color: #0a0612;
+  border: none;
+  border-radius: 3px;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  width: 100%;
+}
+.spawn-banner-cta:hover { filter: brightness(1.08); }
+
+.floating-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 6;
+  overflow: hidden;
+  contain: strict;
+}
+.ft-entry {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font: 700 18px/1 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 6px #000c, 0 1px 2px #000;
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+  will-change: transform, opacity;
+  /* The transform anchor we use from JS sets the label's TOP-LEFT
+     to the entity's screen position; the translate(-50%, -100%) here
+     centres horizontally + lifts above so labels read as "above the
+     cell" rather than "starting at the cell's top-left". */
+  translate: -50% -100%;
+}
+.ft-text { display: block; }
+/* Tiny HP bar shown below damage labels — width 28 px, 2 px tall.
+   Fill width = current/max HP; fill colour interpolates green
+   (100 %) → yellow → orange → red (≤ 20 %). Both width + colour
+   are set inline by floating-text.js. */
+.ft-bar {
+  display: block;
+  width: 28px;
+  height: 2px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 1px;
+  overflow: hidden;
+  box-shadow: 0 0 2px #000a;
+}
+.ft-bar-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  background: #90ee90;  /* default green; overridden inline */
+}
+.ft-damage   { color: #ff6b9a; }
+.ft-heal     { color: #90ee90; }
+.ft-activate { color: #5ab8ff; }
+
+/* CRT-style scanline overlay. Opacity is driven by S.scanlinesAlpha
+   (0..1) via the --scanlines-alpha custom property — 0 hides the
+   overlay entirely, anything > 0 shows lines at that strength. */
 #scanlines {
   position: fixed;
   inset: 0;
@@ -274,10 +894,10 @@ body.show-build #fps.on { top: 32px; }
   display: none;
   background: repeating-linear-gradient(
     to bottom,
-    rgba(0,0,0,0)    0,
-    rgba(0,0,0,0)    2px,
-    rgba(0,0,0,0.32) 3px,
-    rgba(0,0,0,0.32) 4px
+    rgba(0, 0, 0, 0) 0,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, var(--scanlines-alpha, 0.32)) 3px,
+    rgba(0, 0, 0, var(--scanlines-alpha, 0.32)) 4px
   );
   mix-blend-mode: multiply;
 }
@@ -332,21 +952,36 @@ body.adding #stage    { cursor: crosshair; }
   height: 40px;
   border-radius: 50%;
   border: 2px solid #000;
-  background: #ffffff14;
-  color: var(--ink);
+  /* Themed bg + accent-ink icon → monochrome glyph on the active
+     theme colour. Active state pops via filter, not a colour swap,
+     so the contrast contract is preserved. 50% transparent + blur
+     for the glassmorphism look shared with the FAB stack. */
+  background: color-mix(in srgb, var(--accent) 50%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  color: var(--accent-ink);
   display: grid;
   place-items: center;
   cursor: pointer;
   font: 600 18px/1 system-ui, sans-serif;
   box-shadow: 0 2px 8px #0008;
-  transition: transform 100ms ease, background 120ms ease;
+  transition: transform 100ms ease, filter 120ms ease;
   padding: 0;
 }
-.mode-btn:hover  { transform: scale(1.05); }
+.mode-btn:hover  { transform: scale(1.05); filter: brightness(1.10); }
 .mode-btn:active { transform: scale(0.95); }
+/* Active state — slightly brighter + ring shadow so it reads
+   without changing the bg colour (which is already themed). */
 .mode-btn.active {
-  background: var(--accent);
-  color: var(--accent-ink);
+  filter: brightness(1.15);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18), 0 2px 8px #0008;
+}
+/* `+` FAB is the fourth peer of target / split / kill — same
+   active-ring treatment so the four mode buttons all read the
+   same way. The deeper FAB drop shadow is preserved. */
+.fab.active {
+  filter: brightness(1.15);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.18), 0 4px 12px #0008;
 }
 
 /* Generic dialog (help + palette) — same chrome as the settings dialog */
@@ -388,6 +1023,136 @@ body.adding #stage    { cursor: crosshair; }
   font-size: 24px; width: 32px; height: 32px; cursor: pointer; border-radius: 6px;
 }
 .dialog-panel .close:hover { background: #ffffff14; }
+
+/* Add-dialog: flat structure. One scrollable body with the Cells +
+   Pathogens grids inlined, a sticky footer pinning the theme
+   picker at the bottom. */
+.add-body {
+  display: block;
+}
+
+/* View-toggle in the addDialog header. Two pill buttons (grid / list)
+   sharing a single rounded background. The active button picks up the
+   accent colour; the inactive one stays dim. */
+.dialog-panel header .view-toggle {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+  margin-right: 8px;
+  padding: 2px;
+  border: 1px solid var(--line, #fff3);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.30);
+}
+.view-toggle-btn {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: var(--ink);
+  opacity: 0.55;
+  cursor: pointer;
+  display: inline-grid;
+  place-items: center;
+  transition: background 120ms ease, opacity 120ms ease, color 120ms ease;
+}
+.view-toggle-btn:hover { opacity: 0.85; }
+.view-toggle-btn[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  opacity: 1;
+}
+
+/* Grid vs list view. Body containers swap visibility per dialog class. */
+#addDialog.is-view-grid .add-body-grid { display: block; }
+#addDialog.is-view-grid .add-body-list { display: none; }
+#addDialog.is-view-list .add-body-grid { display: none; }
+#addDialog.is-view-list .add-body-list { display: block; }
+
+/* List-view rows in the unified dialog get clickable affordance —
+   tapping a row enters add-mode for that type, same as a grid tile.
+   Relations rows below the description are chip lists. */
+.add-body-list .cell-list-row {
+  cursor: pointer;
+  border-radius: 8px;
+  padding: 8px;
+  transition: background 120ms ease;
+}
+.add-body-list .cell-list-row:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.add-body-list .cell-list-row:active {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.cell-list-relations {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.3;
+}
+.cell-list-relations-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.cell-list-relations-label {
+  color: #d8d0c8aa;
+  min-width: 60px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.cell-list-relations-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cell-list-relations-list .empty {
+  color: #d8d0c855;
+  font-style: italic;
+}
+.cell-list-relations-chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--chip-color, #6663);
+  color: #fff;
+  font-size: 10.5px;
+  white-space: nowrap;
+}
+.add-section-title {
+  margin: 4px 0 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--accent, var(--ink));
+}
+.add-section-title:first-child { margin-top: 0; }
+.add-section-title + #cellGrid,
+.add-section-title + #cellGridBad {
+  margin-bottom: 16px;
+}
+.add-footer {
+  margin: 14px -20px 0;
+  padding: 14px 20px 4px;
+  border-top: 1px solid var(--line);
+  display: block;
+}
+.add-theme-row {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.add-theme-row > span {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim, var(--ink));
+}
 
 .cell-list { list-style: none; padding: 0; margin: 0; }
 .cell-list li {
@@ -448,3 +1213,102 @@ body.adding #stage    { cursor: crosshair; }
 }
 .cell-tile:hover { border-color: var(--accent); transform: translateY(-1px); }
 .cell-tile span { font-size: 11px; text-align: center; }
+.cell-tile-hp {
+  font: 600 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: color-mix(in srgb, var(--accent) 80%, #fff 20%);
+  letter-spacing: 0.04em;
+  margin-top: -2px;
+}
+
+/* Debug log viewer in settings — captures console.log/info/warn/error
+   so mobile users (no DevTools) can read runtime logs in-app. */
+.debug-log {
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  background: #00000080;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.debug-log:empty::before {
+  content: "(no log yet)";
+  color: #ffffff66;
+  font-style: italic;
+}
+.debug-log-actions {
+  display: flex;
+  gap: 8px;
+}
+.debug-log-actions button {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  background: #00000044;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.debug-log-actions button:hover {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+/* Severity tints — applied to lines via class-stamped <span>s. */
+.debug-log .lvl-warn  { color: #ffd479; }
+.debug-log .lvl-error { color: #ff8a92; }
+.debug-log .lvl-info  { color: #6cf2ff; }
+
+/* Toast — transient bottom-centre status message used for
+   clipboard confirmations and other one-shot notices. Single
+   reusable DOM node managed by assets/ui/toast.js. */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%) translateY(8px);
+  z-index: 100;
+  padding: 8px 16px;
+  background: #000000cc;
+  color: #e8e0d8;
+  border: 1px solid #ffffff22;
+  border-radius: 18px;
+  font: 13px/1.4 system-ui, sans-serif;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  max-width: 80vw;
+  text-align: center;
+}
+.toast.on {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* Off-screen navigation arrows — pointer-events: none full-
+   viewport layer; each arrow is an SVG anchored to its edge.
+   Per-edge rotation orients the triangle outward. Hidden via
+   `.hidden` while empty. */
+.nav-arrows-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+}
+.nav-arrow {
+  position: absolute;
+  filter: drop-shadow(0 1px 2px #0008);
+  transition: width 120ms ease, height 120ms ease;
+}
+.nav-arrow.hidden { display: none; }
+.nav-arrow-top    { top: 8px;    left: 50%; transform: translateX(-50%); }
+.nav-arrow-bottom { bottom: 8px; left: 50%; transform: translateX(-50%) rotate(180deg); }
+.nav-arrow-left   { left: 8px;   top: 50%;  transform: translateY(-50%) rotate(-90deg); }
+.nav-arrow-right  { right: 8px;  top: 50%;  transform: translateY(-50%) rotate(90deg); }
