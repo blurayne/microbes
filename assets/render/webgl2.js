@@ -1111,7 +1111,13 @@ const vec2 POISSON16[16] = vec2[16](
 );
 
 void main() {
-  vec2 uv = v_uv;
+  // v_uv arrives in canvas convention (v=0 at top) — see
+  // VERT_FULLSCREEN — but u_scene is a framebuffer-backed texture in
+  // GL convention (v=0 at bottom). Sampling with v_uv directly reads
+  // the scene flipped upside-down. Use gl_FragCoord (already in GL
+  // bottom-up viewport coords) for texture lookup so the duotone
+  // grade composites with the right pixel.
+  vec2 uv = gl_FragCoord.xy / u_resolution;
   // Aspect-correct radial distance so the focus zone stays circular.
   vec2 ndc = uv * 2.0 - 1.0;
   float aspect = u_resolution.x / max(1.0, u_resolution.y);
