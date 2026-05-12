@@ -2492,42 +2492,53 @@ export class WebGL2Renderer extends RendererBase {
   beginFrame() {
     const gl = this.gl;
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    // Scene render target. Set when a scene-wide post-process is on:
-    //   • caustics overlay  → always scene-wide
-    //   • liquid ripples positioned ABOVE the scene pin in
-    //     S.overlayOrder → scene-wide (runs after cells)
-    //   • liquid ripples positioned BELOW the scene pin → bg-only;
-    //     ripples RT is bound transiently inside drawBackground and
-    //     the post-pass runs there. Cells render directly to canvas.
+    // Build the post-pin chain of enabled FBO passes by walking
+    // S.overlayOrder from just-above-pin upward (= rendering order:
+    // first item is closest to the scene pin, runs first). The
+    // microscope-blur and duotone effects share one bundled shader
+    // ('sceneFx'), so they collapse to a single chain step.
+    const order = Array.isArray(S.overlayOrder) ? S.overlayOrder : [];
+    const pinIdx = order.indexOf('scene');
+    this._postChain = [];
+    if (pinIdx > 0) {
+      for (let i = pinIdx - 1; i >= 0; i--) {
+        const kind = order[i];
+        if (kind === 'ripples' && S.liquidRipples) {
+          this._postChain.push('ripples');
+        } else if (kind === 'caustics' && S.causticsOverlay) {
+          this._postChain.push('caustics');
+        } else if ((kind === 'microscope' || kind === 'duotone')
+                   && (S.microscopeBlur || S.makeItReal)) {
+          if (!this._postChain.includes('sceneFx')) this._postChain.push('sceneFx');
+        }
+      }
+    }
+    // Bg-only ripple mode: ripples is BELOW the scene pin. Bg pass
+    // writes to _rippleBgRt; ripple shader then writes to the scene
+    // target (either _postRtA if a scene-wide chain is on, or canvas).
+    const ripplesBgOnly = !!S.liquidRipples && !overlayKindRunsAfterScene('ripples');
+
+    // Ping-pong RTs for the scene-wide chain. Allocated lazily when
+    // any chain step is enabled; freed when none are.
     this._sceneFbo = null;
-    this._scenePostProc = null;
-    const useRipples       = !!S.liquidRipples;
-    const ripplesSceneWide = useRipples && overlayKindRunsAfterScene('ripples');
-    const useCaustics      = !!S.causticsOverlay && !ripplesSceneWide;
-    const useSceneFx       = (!!S.microscopeBlur || !!S.makeItReal) && !ripplesSceneWide && !useCaustics;
-    if (ripplesSceneWide) {
-      this._rippleEnsureRt();
+    if (this._postChain.length > 0) {
+      this._postEnsureRts();
+      for (const kind of this._postChain) {
+        if (kind === 'ripples')  this._rippleEnsureProg();
+        if (kind === 'caustics') this._causticEnsureProg();
+        if (kind === 'sceneFx')  this._sceneFxEnsureProg();
+      }
+      this._postSource = this._postRtA;
+      this._sceneFbo = this._postSource.fbo;
+    } else if (this._postRtA) {
+      this._postDestroyRts();
+    }
+    if (ripplesBgOnly) {
+      this._rippleBgEnsureRt();
       this._rippleEnsureProg();
-      this._sceneFbo = this._rippleRt.fbo;
-      this._scenePostProc = 'ripples';
-    } else if (useCaustics) {
-      this._causticEnsureRt();
-      this._causticEnsureProg();
-      this._sceneFbo = this._causticRt.fbo;
-      this._scenePostProc = 'caustics';
-    } else if (useSceneFx) {
-      this._sceneFxEnsureRt();
-      this._sceneFxEnsureProg();
-      this._sceneFbo = this._sceneFxRt.fbo;
-      this._scenePostProc = 'sceneFx';
+    } else if (this._rippleBgRt) {
+      this._rippleBgDestroy();
     }
-    // Lazy-release RTs the user disabled mid-session.
-    const ripplesBgOnly = useRipples && !ripplesSceneWide;
-    if (!ripplesSceneWide && !ripplesBgOnly && this._rippleRt) {
-      this._rippleDestroy();
-    }
-    if (!useCaustics && this._causticRt) this._causticDestroy();
-    if (!useSceneFx && this._sceneFxRt) this._sceneFxDestroy();
     gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
   }
 
@@ -2667,23 +2678,13 @@ export class WebGL2Renderer extends RendererBase {
     this._reactorProgsReady = false;
   }
 
-  // ── Caustics overlay (S.causticsOverlay) ──
-  // Lazy-allocated full-canvas RGBA8 RT (LINEAR filter so the
-  // caustic UV-displacement sample doesn't pixelate). The bg pass
-  // renders into this when the toggle is on; FRAG_CAUSTIC_BG then
-  // samples from it on a fullscreen post-pass to the default fb.
-  _causticEnsureRt() {
+  // ── Post-FX ping-pong RTs (shared) ──
+  // Two canvas-sized RGBA8 FBOs alternated between by every
+  // post-pin overlay. Each chain step reads from `_postSource`
+  // and writes to the other RT, then we swap. The last step
+  // writes straight to the default framebuffer.
+  _postMakeRt(w, h) {
     const gl = this.gl;
-    // Match the canvas drawing buffer (dpr * renderScale), NOT CSS-px:
-    // sampling at CSS-px size on a HiDPI display previously left only the
-    // top-left quarter of the screen showing caustics.
-    const w = this.canvas.width | 0;
-    const h = this.canvas.height | 0;
-    if (this._causticRt && this._causticRt.w === w && this._causticRt.h === h) return;
-    if (this._causticRt) {
-      gl.deleteFramebuffer(this._causticRt.fbo);
-      gl.deleteTexture(this._causticRt.tex);
-    }
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
@@ -2696,8 +2697,28 @@ export class WebGL2Renderer extends RendererBase {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
-    this._causticRt = { fbo, tex, w, h };
+    return { fbo, tex, w, h };
   }
+  _postEnsureRts() {
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
+    if (this._postRtA && this._postRtA.w === w && this._postRtA.h === h) return;
+    this._postDestroyRts();
+    this._postRtA = this._postMakeRt(w, h);
+    this._postRtB = this._postMakeRt(w, h);
+  }
+  _postDestroyRts() {
+    const gl = this.gl;
+    if (this._postRtA) { gl.deleteFramebuffer(this._postRtA.fbo); gl.deleteTexture(this._postRtA.tex); this._postRtA = null; }
+    if (this._postRtB) { gl.deleteFramebuffer(this._postRtB.fbo); gl.deleteTexture(this._postRtB.tex); this._postRtB = null; }
+    this._postSource = null;
+  }
+
+  // ── Caustics overlay (S.causticsOverlay) ──
+  // Shader-only helper. RT allocation lives in _postEnsureRts; the
+  // shader samples whichever ping-pong RT is currently the chain
+  // source and writes to the other (or to the default framebuffer
+  // for the last chain step).
   _causticEnsureProg() {
     if (this._causticProg) return;
     const gl = this.gl;
@@ -2712,11 +2733,6 @@ export class WebGL2Renderer extends RendererBase {
   }
   _causticDestroy() {
     const gl = this.gl;
-    if (this._causticRt) {
-      gl.deleteFramebuffer(this._causticRt.fbo);
-      gl.deleteTexture(this._causticRt.tex);
-      this._causticRt = null;
-    }
     if (this._causticProg) {
       gl.deleteProgram(this._causticProg);
       this._causticProg = null;
@@ -2725,32 +2741,8 @@ export class WebGL2Renderer extends RendererBase {
   }
 
   // ── Microscope FX post-pass (S.microscopeBlur + S.makeItReal) ──
-  // Shared RT slot for scene-wide blur + duotone color grade. Mutually
-  // exclusive with caustics + ripples-scene-wide (one RT slot for any
-  // scene-wide post). Lazily allocated; lazily destroyed.
-  _sceneFxEnsureRt() {
-    const gl = this.gl;
-    const w = this.canvas.width | 0;
-    const h = this.canvas.height | 0;
-    if (this._sceneFxRt && this._sceneFxRt.w === w && this._sceneFxRt.h === h) return;
-    if (this._sceneFxRt) {
-      gl.deleteFramebuffer(this._sceneFxRt.fbo);
-      gl.deleteTexture(this._sceneFxRt.tex);
-    }
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    const fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    this._sceneFxRt = { fbo, tex, w, h };
-  }
+  // Bundled shader for scene-wide blur + duotone color grade. Shares
+  // the ping-pong RTs with the rest of the post chain.
   _sceneFxEnsureProg() {
     if (this._sceneFxProg) return;
     const gl = this.gl;
@@ -2771,11 +2763,6 @@ export class WebGL2Renderer extends RendererBase {
   }
   _sceneFxDestroy() {
     const gl = this.gl;
-    if (this._sceneFxRt) {
-      gl.deleteFramebuffer(this._sceneFxRt.fbo);
-      gl.deleteTexture(this._sceneFxRt.tex);
-      this._sceneFxRt = null;
-    }
     if (this._sceneFxProg) {
       gl.deleteProgram(this._sceneFxProg);
       this._sceneFxProg = null;
@@ -2784,33 +2771,32 @@ export class WebGL2Renderer extends RendererBase {
   }
 
   // ── Liquid-ripples overlay (S.liquidRipples) ──
-  // Shares the bg-RT plumbing with caustics: the bg pass renders to
-  // an offscreen RGBA8 FBO, then a fullscreen ripple shader samples
-  // it with per-cell UV displacement and writes to the default fb.
-  // Cells render on top after this pass so the ripples appear in the
-  // liquid-bg around them, not on the cells themselves.
-  _rippleEnsureRt() {
-    const gl = this.gl;
+  // Two code paths depending on ripples' position vs the scene pin
+  // in S.overlayOrder:
+  //   • Below pin → bg-only. drawBackground writes bg to _rippleBgRt
+  //     and the ripple shader writes to the active scene target
+  //     (either canvas or _postRtA when a scene-wide chain is on).
+  //     Cells then render on top.
+  //   • Above pin → joins the scene-wide post chain as a normal
+  //     ping-pong step using _postRtA/_postRtB (the shared chain RTs).
+  _rippleBgEnsureRt() {
     const w = this.canvas.width | 0;
     const h = this.canvas.height | 0;
-    if (this._rippleRt && this._rippleRt.w === w && this._rippleRt.h === h) return;
-    if (this._rippleRt) {
-      gl.deleteFramebuffer(this._rippleRt.fbo);
-      gl.deleteTexture(this._rippleRt.tex);
+    if (this._rippleBgRt && this._rippleBgRt.w === w && this._rippleBgRt.h === h) return;
+    if (this._rippleBgRt) {
+      const gl = this.gl;
+      gl.deleteFramebuffer(this._rippleBgRt.fbo);
+      gl.deleteTexture(this._rippleBgRt.tex);
     }
-    const tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    const fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.bindTexture(gl.TEXTURE_2D, null);
-    this._rippleRt = { fbo, tex, w, h };
+    this._rippleBgRt = this._postMakeRt(w, h);
+  }
+  _rippleBgDestroy() {
+    const gl = this.gl;
+    if (this._rippleBgRt) {
+      gl.deleteFramebuffer(this._rippleBgRt.fbo);
+      gl.deleteTexture(this._rippleBgRt.tex);
+      this._rippleBgRt = null;
+    }
   }
   // FX overlay program (noise / vignette / crosshair). Single shader
   // shared across all three effects; the JS driver sets `u_effect` +
@@ -2915,11 +2901,6 @@ export class WebGL2Renderer extends RendererBase {
   }
   _rippleDestroy() {
     const gl = this.gl;
-    if (this._rippleRt) {
-      gl.deleteFramebuffer(this._rippleRt.fbo);
-      gl.deleteTexture(this._rippleRt.tex);
-      this._rippleRt = null;
-    }
     if (this._rippleProg) {
       gl.deleteProgram(this._rippleProg);
       this._rippleProg = null;
@@ -2989,15 +2970,15 @@ export class WebGL2Renderer extends RendererBase {
     }
 
     // Bg-only ripple mode (ripples positioned below the scene pin):
-    // redirect the entire bg stack into the ripple RT, then run the
-    // ripple post-pass back to canvas. Scene-wide mode (ripples above
-    // the pin) is handled in endFrame() instead.
+    // redirect the entire bg stack into the bg-ripple RT, then run
+    // the ripple post-pass to the active scene target. Scene-wide
+    // mode (ripples above the pin) is handled in endFrame() instead.
     const bgOnlyRipples = !!S.liquidRipples && !overlayKindRunsAfterScene('ripples');
     if (bgOnlyRipples) {
-      this._rippleEnsureRt();
+      this._rippleBgEnsureRt();
       this._rippleEnsureProg();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, this._rippleRt.fbo);
-      gl.viewport(0, 0, this._rippleRt.w, this._rippleRt.h);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._rippleBgRt.fbo);
+      gl.viewport(0, 0, this._rippleBgRt.w, this._rippleBgRt.h);
     }
 
     if (layers.length === 0) {
@@ -3022,11 +3003,13 @@ export class WebGL2Renderer extends RendererBase {
 
     if (bgOnlyRipples && this._rippleProg) {
       const cellCount = this._rippleCollectCells();
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      // Write the rippled bg to the active scene target — either
+      // the scene-wide chain head (_postRtA) or the default fb.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo || null);
       gl.viewport(0, 0, this.canvas.width, this.canvas.height);
       gl.useProgram(this._rippleProg);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this._rippleRt.tex);
+      gl.bindTexture(gl.TEXTURE_2D, this._rippleBgRt.tex);
       gl.uniform1i(this._rippleU.bg, 0);
       gl.uniform1f(this._rippleU.time, t);
       gl.uniform2f(this._rippleU.res, this.canvas.width, this.canvas.height);
@@ -4008,34 +3991,47 @@ export class WebGL2Renderer extends RendererBase {
   }
 
   endFrame() {
-    // Composite the scene RT to canvas through the active post-pass,
-    // then layer the FX overlays (noise / vignette / crosshair) on
-    // top. FX overlays run even when no scene-wide post-process is
-    // active — bg+cells already wrote to canvas in that case, so the
-    // overlay just composites against the existing pixels.
+    // Walk the post-pin overlay chain (built in beginFrame): each
+    // enabled FBO pass reads from _postSource and writes to the
+    // other ping-pong RT, then we swap. The last step writes
+    // straight to the default framebuffer. Finally the cheap FX
+    // blends (noise / vignette / crosshair) composite on top via
+    // glBlendFunc — they're not part of the FBO chain.
     const t = this._lastFrameSec || 0;
     const gl = this.gl;
-    if (this._sceneFbo && this._scenePostProc) {
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    if (this._postChain && this._postChain.length > 0 && this._postSource) {
       gl.disable(gl.BLEND);
       gl.bindVertexArray(this._bgVao);
-      this._endFrameScenePostPass(t);
+      for (let i = 0; i < this._postChain.length; i++) {
+        const kind = this._postChain[i];
+        const isLast = (i === this._postChain.length - 1);
+        const dst = isLast ? null
+                           : (this._postSource === this._postRtA ? this._postRtB : this._postRtA);
+        const dstFbo = dst ? dst.fbo : null;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
+        gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+        this._runPostPass(kind, this._postSource.tex, t);
+        if (!isLast) this._postSource = dst;
+      }
       gl.enable(gl.BLEND);
       gl.bindVertexArray(null);
+      this._postChain = [];
+      this._postSource = null;
       this._sceneFbo = null;
-      this._scenePostProc = null;
     }
     this._fxOverlayDraw(t);
   }
 
-  _endFrameScenePostPass(t) {
+  // Run a single post-pin chain step. Reads from `srcTex` (the
+  // ping-pong source RT bound by the caller); writes to whatever
+  // framebuffer is currently bound.
+  _runPostPass(kind, srcTex, t) {
     const gl = this.gl;
-    if (this._scenePostProc === 'ripples' && this._rippleProg) {
+    if (kind === 'ripples' && this._rippleProg) {
       const cellCount = this._rippleCollectCells();
       gl.useProgram(this._rippleProg);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this._rippleRt.tex);
+      gl.bindTexture(gl.TEXTURE_2D, srcTex);
       gl.uniform1i(this._rippleU.bg, 0);
       gl.uniform1f(this._rippleU.time, t);
       gl.uniform2f(this._rippleU.res, this.canvas.width, this.canvas.height);
@@ -4046,10 +4042,10 @@ export class WebGL2Renderer extends RendererBase {
                    S.rippleReach ?? 0.7,
                    S.rippleStrength ?? 1.0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    } else if (this._scenePostProc === 'caustics' && this._causticProg) {
+    } else if (kind === 'caustics' && this._causticProg) {
       gl.useProgram(this._causticProg);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this._causticRt.tex);
+      gl.bindTexture(gl.TEXTURE_2D, srcTex);
       gl.uniform1i(this._causticU.bg, 0);
       gl.uniform1f(this._causticU.time, t);
       gl.uniform2f(this._causticU.res, this.canvas.width, this.canvas.height);
@@ -4058,10 +4054,10 @@ export class WebGL2Renderer extends RendererBase {
                    S.causticTintG ?? 1.35,
                    S.causticTintB ?? 0.5);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    } else if (this._scenePostProc === 'sceneFx' && this._sceneFxProg) {
+    } else if (kind === 'sceneFx' && this._sceneFxProg) {
       gl.useProgram(this._sceneFxProg);
       gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, this._sceneFxRt.tex);
+      gl.bindTexture(gl.TEXTURE_2D, srcTex);
       gl.uniform1i(this._sceneFxU.scene, 0);
       gl.uniform2f(this._sceneFxU.res, this.canvas.width, this.canvas.height);
       gl.uniform1f(this._sceneFxU.blurOn,       S.microscopeBlur ? 1 : 0);
