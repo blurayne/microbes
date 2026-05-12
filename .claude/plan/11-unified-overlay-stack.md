@@ -231,9 +231,10 @@ Split across four sub-PRs so each can land + revert cleanly.
 
 ## Branch
 
-- PR A: `claude/overlay-stack-schema`
-- PR B: `claude/overlay-stack-ui`
-- PR C: `claude/overlay-stack-drop-ripple-scope`
-- PR D: `claude/overlay-stack-chained-pipeline`
+- PR A: `claude/overlay-stack-schema` (merged #161)
+- PR B: `claude/overlay-stack-ui` (merged #162)
+- PR C: `claude/overlay-stack-drop-ripple-scope` (merged #163)
+- PR D: `claude/overlay-stack-chained-pipeline` — **WebGL2 only**. Caustics + microscope/duotone + scene-wide ripples can now coexist via a ping-pong chain over the post-pin section of S.overlayOrder.
+- PR D2 (follow-up): mirror the chain into WebGPU. Canvas2D stays single-pass (cheap blends only).
 
 Each branches off `main` after the previous merges.
