@@ -13,6 +13,7 @@
 import {
   S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
   currentBackground, currentBgLayers, currentTheme, currentHighlightColor, cellColors, frac,
+  overlayFxOrder, overlayKindRunsAfterScene,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
@@ -2500,7 +2501,7 @@ export class WebGL2Renderer extends RendererBase {
     this._sceneFbo = null;
     this._scenePostProc = null;
     const useRipples       = !!S.liquidRipples;
-    const ripplesSceneWide = useRipples && S.rippleScope !== 'bg';
+    const ripplesSceneWide = useRipples && overlayKindRunsAfterScene('ripples');
     const useCaustics      = !!S.causticsOverlay && !ripplesSceneWide;
     const useSceneFx       = (!!S.microscopeBlur || !!S.makeItReal) && !ripplesSceneWide && !useCaustics;
     if (ripplesSceneWide) {
@@ -2520,7 +2521,8 @@ export class WebGL2Renderer extends RendererBase {
       this._scenePostProc = 'sceneFx';
     }
     // Lazy-release RTs the user disabled mid-session.
-    if (!ripplesSceneWide && !(useRipples && S.rippleScope === 'bg') && this._rippleRt) {
+    const ripplesBgOnly = useRipples && !ripplesSceneWide;
+    if (!ripplesSceneWide && !ripplesBgOnly && this._rippleRt) {
       this._rippleDestroy();
     }
     if (!useCaustics && this._causticRt) this._causticDestroy();
@@ -2847,14 +2849,13 @@ export class WebGL2Renderer extends RendererBase {
   // intensity; the shader branches internally on `u_effect`.
   _fxOverlayDraw(t) {
     // Three fixed-function FX overlays composited on top of the
-    // scene framebuffer. Order comes from S.fxOrder so the user can
-    // reorder via the sortable list (Settings → Overlays). Each
-    // entry checks its own enabled-toggle. Per-frame read of S.*
-    // means reorders + toggles take effect on the next draw with
-    // no pipeline reset needed.
-    const order = Array.isArray(S.fxOrder) && S.fxOrder.length === 3
-      ? S.fxOrder
-      : ['noise', 'vignette', 'crosshair'];
+    // scene framebuffer. Order comes from overlayFxOrder() — the FX
+    // subset of S.overlayOrder — so the user can reorder via the
+    // sortable list (Settings → Overlays). Each entry checks its
+    // own enabled-toggle. Per-frame read of S.* means reorders +
+    // toggles take effect on the next draw with no pipeline reset
+    // needed.
+    const order = overlayFxOrder();
     const anyOn = order.some(k => {
       if (k === 'noise')     return !!S.staticNoise;
       if (k === 'vignette')  return !!S.vignette;
@@ -2986,10 +2987,11 @@ export class WebGL2Renderer extends RendererBase {
       this._reactorDestroy();
     }
 
-    // Bg-only ripple mode (rippleScope='bg'): redirect the entire bg
-    // stack into the ripple RT, then run the ripple post-pass back to
-    // canvas. Scene-wide mode is handled in endFrame() instead.
-    const bgOnlyRipples = !!S.liquidRipples && S.rippleScope === 'bg';
+    // Bg-only ripple mode (ripples positioned below the scene pin):
+    // redirect the entire bg stack into the ripple RT, then run the
+    // ripple post-pass back to canvas. Scene-wide mode (ripples above
+    // the pin) is handled in endFrame() instead.
+    const bgOnlyRipples = !!S.liquidRipples && !overlayKindRunsAfterScene('ripples');
     if (bgOnlyRipples) {
       this._rippleEnsureRt();
       this._rippleEnsureProg();

@@ -9,6 +9,8 @@ import {
   T, cellLabel, cellDesc,
   currentTheme, currentBackground, currentInterfaceColor, colorNameFor,
   bgLayerFromPreset, bgLayersFromPreset, makeBgLayerId,
+  overlayFxOrder, setOverlayFxOrder,
+  overlayKindRunsAfterScene, setOverlayKindSide,
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { openColorPicker } from './ui/color-picker.js';
@@ -909,9 +911,10 @@ applyRippleControlsVis();
 // the value-label sync that bindRange handles.
 const rippleScopeEl = document.getElementById('rippleScope');
 if (rippleScopeEl) {
-  rippleScopeEl.value = (S.rippleScope === 'bg') ? 'bg' : 'scene';
+  rippleScopeEl.value = overlayKindRunsAfterScene('ripples') ? 'scene' : 'bg';
   rippleScopeEl.addEventListener('change', () => {
-    S.rippleScope = (rippleScopeEl.value === 'bg') ? 'bg' : 'scene';
+    const side = rippleScopeEl.value === 'bg' ? 'before' : 'after';
+    setOverlayKindSide('ripples', side);
     saveSettings();
   });
 }
@@ -960,20 +963,18 @@ bindCheckbox('crosshairToggle', 'crosshair');
 
 // FX overlay order: sortable list of the three fixed-function FX
 // overlays (noise/vignette/crosshair). Drag-and-drop reorder OR
-// up/down buttons. The renderers iterate S.fxOrder each frame so
-// changes take effect on the next draw — no pipeline reset needed.
-// On/off toggles + per-effect sliders stay where they are above;
-// this list only owns the draw order.
+// up/down buttons. The renderers iterate overlayFxOrder() each
+// frame so changes take effect on the next draw — no pipeline
+// reset needed. On/off toggles + per-effect sliders stay where
+// they are above; this list only owns the draw order. The
+// underlying source-of-truth is S.overlayOrder; this UI is the
+// "FX subset" view of it until PR B unifies the list.
 const fxOrderListEl = document.getElementById('fxOrderList');
-const FX_ORDER_KINDS = ['noise', 'vignette', 'crosshair'];
 function renderFxOrderList() {
   if (!fxOrderListEl) return;
-  if (!Array.isArray(S.fxOrder) || S.fxOrder.length !== FX_ORDER_KINDS.length) {
-    S.fxOrder = [...FX_ORDER_KINDS];
-    saveSettings();
-  }
+  const fxOrder = overlayFxOrder();
   fxOrderListEl.innerHTML = '';
-  S.fxOrder.forEach((kind, index) => {
+  fxOrder.forEach((kind, index) => {
     const row = document.createElement('div');
     row.className = 'fx-order-row';
     row.draggable = true;
@@ -1004,7 +1005,7 @@ function renderFxOrderList() {
     down.className = 'move-btn';
     down.textContent = '▼';
     down.title = T('fx_move_down') || 'Move down';
-    down.disabled = index === S.fxOrder.length - 1;
+    down.disabled = index === fxOrder.length - 1;
     down.addEventListener('click', () => moveFxOrder(index, index + 1));
     row.appendChild(down);
 
@@ -1038,11 +1039,14 @@ function renderFxOrderList() {
 }
 let _fxDragFromIndex = -1;
 function moveFxOrder(from, to) {
-  if (from < 0 || from >= S.fxOrder.length) return;
-  if (to < 0 || to >= S.fxOrder.length) return;
+  const current = overlayFxOrder();
+  if (from < 0 || from >= current.length) return;
+  if (to < 0 || to >= current.length) return;
   if (from === to) return;
-  const moved = S.fxOrder.splice(from, 1)[0];
-  S.fxOrder.splice(to, 0, moved);
+  const next = current.slice();
+  const moved = next.splice(from, 1)[0];
+  next.splice(to, 0, moved);
+  setOverlayFxOrder(next);
   saveSettings();
   renderFxOrderList();
 }

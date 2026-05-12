@@ -20,6 +20,7 @@
 import {
   S, FACE, CELL_TYPES, WOBBLE_VERTS, THETA_TABLE,
   currentBackground, currentBgLayers, currentTheme, currentHighlightColor, cellColors, frac,
+  overlayFxOrder, overlayKindRunsAfterScene,
 } from '../core/state.js';
 import { shapeVertex } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
@@ -2982,13 +2983,11 @@ export class WebGPURenderer extends RendererBase {
   }
 
   _fxOverlayDraw(t) {
-    // Order from S.fxOrder so the user can reorder via Settings →
-    // Overlays. Mirror of webgl2.js _fxOverlayDraw. Per-frame read
-    // means reorders + toggles take effect on the next draw; no
-    // pipeline reset needed.
-    const order = Array.isArray(S.fxOrder) && S.fxOrder.length === 3
-      ? S.fxOrder
-      : ['noise', 'vignette', 'crosshair'];
+    // Order from overlayFxOrder() — the FX subset of S.overlayOrder
+    // — so the user can reorder via Settings → Overlays. Mirror of
+    // webgl2.js _fxOverlayDraw. Per-frame read means reorders +
+    // toggles take effect on the next draw; no pipeline reset needed.
+    const order = overlayFxOrder();
     const anyOn = order.some(k =>
       (k === 'noise' && S.staticNoise) ||
       (k === 'vignette' && S.vignette) ||
@@ -3344,7 +3343,7 @@ export class WebGPURenderer extends RendererBase {
     this._sceneView = this._frameView;
     this._scenePostProc = null;
     const useRipples       = !!S.liquidRipples;
-    const ripplesSceneWide = useRipples && S.rippleScope !== 'bg';
+    const ripplesSceneWide = useRipples && overlayKindRunsAfterScene('ripples');
     const useCaustics      = !!S.causticsOverlay && !ripplesSceneWide;
     const useSceneFx       = (!!S.microscopeBlur || !!S.makeItReal) && !ripplesSceneWide && !useCaustics;
     if (ripplesSceneWide) {
@@ -3363,7 +3362,8 @@ export class WebGPURenderer extends RendererBase {
       this._sceneView = this._sceneFxRt.view;
       this._scenePostProc = 'sceneFx';
     }
-    if (!ripplesSceneWide && !(useRipples && S.rippleScope === 'bg') && this._rippleBgRt) {
+    const ripplesBgOnly = useRipples && !ripplesSceneWide;
+    if (!ripplesSceneWide && !ripplesBgOnly && this._rippleBgRt) {
       this._rippleBgDestroy();
     }
     if (!useCaustics && this._causticBgRt) this._causticBgDestroy();
@@ -3401,11 +3401,11 @@ export class WebGPURenderer extends RendererBase {
       this._reactorDestroy();
     }
 
-    // Bg-only ripple mode (rippleScope='bg'): redirect the entire bg
-    // stack into the ripple RT, then run the ripple post-pass straight
-    // back to _frameView. Scene-wide mode is the default and handled
-    // by endFrame().
-    const bgOnlyRipples = !!S.liquidRipples && S.rippleScope === 'bg';
+    // Bg-only ripple mode (ripples below the scene pin): redirect
+    // the entire bg stack into the ripple RT, then run the ripple
+    // post-pass straight back to _frameView. Scene-wide mode
+    // (ripples above the pin) is handled by endFrame() instead.
+    const bgOnlyRipples = !!S.liquidRipples && !overlayKindRunsAfterScene('ripples');
     let bgTarget = this._sceneView;
     if (bgOnlyRipples) {
       this._rippleBgEnsureRt();
