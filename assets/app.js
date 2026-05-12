@@ -14,6 +14,7 @@ import {
 } from './core/state.js';
 import { openColorPicker } from './ui/color-picker.js';
 import { showToast, copyToClipboard } from './ui/toast.js';
+import { takeScreenshot } from './ui/screenshot.js';
 import { NavArrows } from './ui/nav-arrows.js';
 import { Sim } from './core/sim.js';
 import {
@@ -570,6 +571,15 @@ function setPaused(p) {
 // setPaused is defined) rather than inside applyOverridesToSim so
 // the pause-state singleton stays the one source of truth.
 if (URL_OVERRIDES.pose) setPaused(true);
+// `?screenshot=1` URL override → fire `_screenshotNow()` after the
+// first couple of frames so the paused pose has rendered + the cell
+// has settled. Two rAFs is a defensive belt-and-braces: one to flush
+// pause state, one to settle the renderer's first paint.
+if (URL_OVERRIDES.screenshot) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => { _screenshotNow(); });
+  });
+}
 if (pauseBtn) {
   pauseBtn.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -611,6 +621,21 @@ const aboutBtn = document.getElementById('aboutBtn');
 if (aboutBtn) aboutBtn.addEventListener('click', () => openOnly(aboutDialog));
 const copyBuildBtn = document.getElementById('copyBuildBtn');
 if (copyBuildBtn) copyBuildBtn.addEventListener('click', copyBuildSha);
+// Screenshot helper — both a footer button AND a global so DevTools
+// users can grab a frame without opening Settings. See
+// assets/ui/screenshot.js for the dump format (PNG + JSON sidecar).
+async function _screenshotNow() {
+  try {
+    const stamp = await takeScreenshot({ S, sim, renderer });
+    showToast(T('toast_screenshot_saved') || `Screenshot saved (${stamp})`);
+  } catch (err) {
+    console.warn('[screenshot] failed:', err);
+    showToast(T('toast_screenshot_failed') || 'Screenshot failed');
+  }
+}
+const screenshotBtn = document.getElementById('screenshotBtn');
+if (screenshotBtn) screenshotBtn.addEventListener('click', _screenshotNow);
+if (typeof window !== 'undefined') window.__SCREENSHOT__ = _screenshotNow;
 _hookDebugLogButtons();
 
 function openOnly(target) {
