@@ -110,6 +110,7 @@ export const DEFAULTS = {
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
   showObjectCount: false,   // append live cell + particle count to the FPS line
+  navArrows: true,          // edge-of-screen arrows pointing at off-screen cells
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
   friction: 0.80,
@@ -647,7 +648,7 @@ export const LOCALES = {
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
     mode_kill: 'Kill mode', mode_kill_tip: 'Tap a cell to make it explode',
-    cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS', show_renderer: 'Show renderer', show_build_info: 'Show build info', show_object_count: 'Show object count',
+    cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS', show_renderer: 'Show renderer', show_build_info: 'Show build info', show_object_count: 'Show object count', nav_arrows: 'Off-screen arrows',
     copy_build: 'Copy build SHA', toast_build_copied: 'Build SHA copied to clipboard', toast_build_copy_failed: 'Copy failed', build_stamp_copy_hint: 'Click to copy full build SHA',
     show_field: 'Show metaball field', render_scale: 'Render scale',
     upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
@@ -838,7 +839,7 @@ export const LOCALES = {
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
     mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zelle antippen, sie zerplatzt',
-    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen', show_object_count: 'Objektanzahl anzeigen',
+    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen', show_object_count: 'Objektanzahl anzeigen', nav_arrows: 'Pfeile außerhalb des Bildes',
     copy_build: 'Build-SHA kopieren', toast_build_copied: 'Build-SHA in Zwischenablage kopiert', toast_build_copy_failed: 'Kopieren fehlgeschlagen', build_stamp_copy_hint: 'Klicken, um die vollständige Build-SHA zu kopieren',
     show_field: 'Metaball-Feld zeigen', render_scale: 'Renderskala',
     upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',

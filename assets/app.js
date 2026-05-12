@@ -14,6 +14,7 @@ import {
 } from './core/state.js';
 import { openColorPicker } from './ui/color-picker.js';
 import { showToast, copyToClipboard } from './ui/toast.js';
+import { NavArrows } from './ui/nav-arrows.js';
 import { Sim } from './core/sim.js';
 import { CELL_RELATIONS } from './core/cell-relations.js';
 import { defaultHp, getRule } from './core/sim-rules.js';
@@ -146,6 +147,7 @@ const sim = new Sim();
 const floatingText = new FloatingText(document.getElementById('floatingText'));
 const cellTags = new CellTagOverlay(document.getElementById('cellTagLayer'));
 const spawnBanner = new SpawnBanner(document.getElementById('spawnBannerLayer'));
+const navArrows = new NavArrows(document.body);
 
 async function tryWebGPU() {
   const r = new WebGPURenderer(canvas, sim);
@@ -1283,6 +1285,9 @@ applyBuildInfoVis(S.showBuildInfo);
 // throttled tick and appends "· N objs" to the line when on. With
 // the FPS overlay hidden, the count is hidden too.
 bindCheckbox('showObjectCount', 'showObjectCount');
+// Off-screen navigation arrows: just the toggle persistence; the
+// frame-loop hook (updateNavArrows) reads S.navArrows each tick.
+bindCheckbox('navArrows', 'navArrows');
 
 // splitMode radios removed from settings late 2026; field still
 // honoured by sim.js (default 'bondDrift' from DEFAULTS).
@@ -1919,6 +1924,17 @@ function updateCompositionHud(ts) {
   compHudEl.classList.add('on');
 }
 
+// Off-screen navigation arrows. Same 250 ms throttle pattern as the
+// composition HUD; per-frame iteration of sim.cells is cheap (single
+// worldToScreen call + a few branches per cell) but the DOM writes
+// would be wasteful at full 60 Hz.
+let _navArrowsThrottle = 0;
+function updateNavArrows(ts) {
+  if (ts - _navArrowsThrottle < 250) return;
+  _navArrowsThrottle = ts;
+  navArrows.update(sim, !!S.navArrows);
+}
+
 function frame(ts) {
   // Pause: freeze ts at the moment pause started so shader u_time stops
   // advancing too. Renderer + sim see the frozen value; lastTs is held
@@ -1972,6 +1988,7 @@ function frame(ts) {
 
   updateFPS(dt, ts);
   updateCompositionHud(ts);
+  updateNavArrows(ts);
 
   requestAnimationFrame(frame);
 }
