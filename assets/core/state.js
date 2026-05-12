@@ -173,7 +173,7 @@ export const KNOWN_THEME_KEYS = [
 // drive the bg shader. Used by both S.background validation and by
 // the legacy interface-colour migration (any saved interfaceColor
 // that's a bg key gets re-pointed to a sensible accent below).
-const KNOWN_BACKGROUND_KEYS = [
+export const KNOWN_BACKGROUND_KEYS = [
   'bloodstream', 'bloodflow', 'cellShadow',
   'cartoonNight', 'spectrum', 'lymphNode',
   'lung', 'aurora', 'underwater',

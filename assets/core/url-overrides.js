@@ -13,9 +13,12 @@
 // change persists as normal (no special suppression — the override is
 // just a one-tick patch).
 
-import { CELL_TYPES, KNOWN_THEME_KEYS } from './state.js';
+import { CELL_TYPES, KNOWN_THEME_KEYS, KNOWN_BACKGROUND_KEYS } from './state.js';
 
 const VALID_RENDERERS = new Set(['canvas2d', 'webgl2', 'webgpu']);
+// `?bg=solid` is also accepted — it's the synthetic flat fallback
+// the loadSettings shim already treats as a valid background key.
+const VALID_BG_KEYS = new Set(['solid', ...KNOWN_BACKGROUND_KEYS]);
 
 function readParams() {
   // SSR / test environments may not have `window.location`; guard so
@@ -56,6 +59,13 @@ function parseOverrides() {
     console.warn(`[url-overrides] unknown renderer=${renderer}`);
   }
 
+  const bg = p.get('bg');
+  if (bg && VALID_BG_KEYS.has(bg)) {
+    out.bg = bg;
+  } else if (bg) {
+    console.warn(`[url-overrides] unknown bg=${bg}`);
+  }
+
   if (p.has('pose')) out.pose = parseBool(p.get('pose'));
   if (p.has('extended')) out.extended = parseBool(p.get('extended'));
   if (p.has('screenshot')) out.screenshot = parseBool(p.get('screenshot'));
@@ -77,6 +87,10 @@ export function applyOverridesToSettings(S) {
   }
   if (URL_OVERRIDES.renderer) {
     S.renderer = URL_OVERRIDES.renderer;
+    changed = true;
+  }
+  if (URL_OVERRIDES.bg) {
+    S.background = URL_OVERRIDES.bg;
     changed = true;
   }
   if (URL_OVERRIDES.extended === true) {

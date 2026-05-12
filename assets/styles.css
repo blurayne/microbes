@@ -1380,4 +1380,32 @@ body.adding #stage    { cursor: crosshair; }
      edges naturally; for left + right we accept slightly rotated
      digits to keep the rule simple — the count is still legible. */
 }
+
+/* ---- Clean-pose mode (URL ?pose=1) ----
+   Hides every chrome layer so the canvas renders the cell pass
+   only — exact-match diffing against shader-test (cell-zoo iframes,
+   Playwright snapshots, side-by-side compare). Applied via
+   document.body.classList.add('is-pose-clean') in assets/app.js
+   when URL_OVERRIDES.pose is true. The sim is still frozen by
+   setPaused(true); we just hide the visual indication of that
+   pause + every other overlay. */
+body.is-pose-clean .pause-overlay,
+body.is-pose-clean .fab,
+body.is-pose-clean #gear,
+body.is-pose-clean #settings,
+body.is-pose-clean #addDialog,
+body.is-pose-clean #helpDialog,
+body.is-pose-clean #aboutDialog,
+body.is-pose-clean #scanlines,
+body.is-pose-clean .floating-layer,
+body.is-pose-clean .nav-arrows-layer,
+body.is-pose-clean .cell-tag-layer,
+body.is-pose-clean .spawn-banner-layer,
+body.is-pose-clean #build,
+body.is-pose-clean .composition-hud,
+body.is-pose-clean .mode-btn,
+body.is-pose-clean #fps,
+body.is-pose-clean .toast {
+  display: none !important;
+}
 .nav-arrow-badge.hidden { display: none; }
