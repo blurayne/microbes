@@ -1,0 +1,63 @@
+name: Visual tests (Playwright)
+
+on:
+  pull_request:
+    paths:
+      - 'assets/**'
+      - 'docs/cell-zoo.html'
+      - 'docs/shader-test.html'
+      - 'tests/visual/**'
+      - 'index.html'
+      - 'playwright.config.js'
+      - 'package.json'
+      - '.github/workflows/visual-test.yml'
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Install JS deps. package-lock.json isn't committed yet —
+      # `npm ci` would fail without it, so use `npm install` (still
+      # cheap; only @playwright/test is in devDependencies).
+      - name: Install deps
+        run: npm install
+
+      # Playwright's `--with-deps` step pulls the right libs for
+      # the chosen browser (Chromium → libnss3, fonts, etc.) so
+      # the ubuntu-latest runner has everything it needs.
+      - name: Install Chromium + system deps
+        run: npx playwright install --with-deps chromium
+
+      - name: Run visual tests
+        env:
+          CI: true
+        run: npm run test:visual
+
+      # On any failure: capture the HTML report + per-test traces
+      # (diff images live inside) so reviewers can sanity-check
+      # which cell × theme regressed.
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
