@@ -37,6 +37,14 @@ const TRIANGLE_POINTS = '50,8 88,92 12,92';
 // room. Lower → more arrows but better positional fidelity; higher →
 // fewer arrows but they drift further from any single cell.
 const CLUSTER_GAP_PX = 60;
+// Schmitt-trigger split threshold for the hysteresis pass: once two
+// items have been part of the SAME cluster in the previous tick, we
+// resist splitting them until their gap exceeds SPLIT_GAP_PX rather
+// than the lower CLUSTER_GAP_PX. Set to 1.5× the merge threshold —
+// wide enough to absorb single-cell drift around a boundary, narrow
+// enough that a genuinely diverging pair still splits within a frame
+// or two. See ALGORITHMS.md → "Hysteresis / temporal stability".
+const SPLIT_GAP_PX = 90;
 // Inset from each screen edge so the arrow doesn't graze the chrome.
 const EDGE_INSET_PX = 8;
 // Min DOM-element pool size for anchored mode (we grow on demand).
@@ -177,6 +185,10 @@ export class NavArrows {
   }
   _hideAnchored() {
     for (const a of this.anchoredPool) a.wrap.classList.add('hidden');
+    // Drop hysteresis state too — when anchored mode comes back on, the
+    // first tick should cluster from scratch instead of inheriting from
+    // whatever the camera was looking at before the toggle.
+    this._prevAnchoredCentroids = null;
   }
 
   // Public: called once per frame-loop tick from app.js. `enabled` is
@@ -324,6 +336,54 @@ export class NavArrows {
         clusters.unshift(merged);
       }
     }
+
+    // --- Schmitt-trigger hysteresis on cluster splits ----------------
+    // The greedy pass is memoryless: a cell that drifts a few px
+    // across CLUSTER_GAP_PX can flip a cluster between merged and
+    // split states on every tick. To resist that flicker we look at
+    // the cluster centroids carried over from the previous tick and
+    // ask: were these two adjacent NEW clusters both inside the
+    // catchment radius (≤ CLUSTER_GAP_PX) of the SAME previous-tick
+    // centroid? If so, they were a single cluster last frame, and we
+    // only allow the split to take effect once the gap has widened
+    // past SPLIT_GAP_PX (1.5× CLUSTER_GAP_PX). Below that, fold them
+    // back together — visually identical to having stayed merged.
+    if (this._prevAnchoredCentroids && this._prevAnchoredCentroids.length > 0
+        && clusters.length > 1) {
+      const prevs = this._prevAnchoredCentroids;
+      // For each new cluster find the nearest previous centroid that
+      // is still within the merge-catchment radius. -1 means "no
+      // ancestor" — these are new clusters with no hysteresis state.
+      const nearestPrev = clusters.map(c => {
+        const mean = c.sumS / c.count;
+        let best = -1, bestDist = CLUSTER_GAP_PX;
+        for (let j = 0; j < prevs.length; j++) {
+          const d = Math.abs(mean - prevs[j]);
+          if (d < bestDist) { bestDist = d; best = j; }
+        }
+        return best;
+      });
+      // Walk pairs from right to left so splice() doesn't invalidate
+      // indices we still need to visit.
+      for (let i = clusters.length - 1; i >= 1; i--) {
+        if (nearestPrev[i] === -1 || nearestPrev[i] !== nearestPrev[i - 1]) continue;
+        const a = clusters[i - 1], b = clusters[i];
+        const gap = (b.sumS / b.count) - (a.sumS / a.count);
+        if (gap >= SPLIT_GAP_PX) continue;
+        // Same ancestor + gap below split threshold → re-merge.
+        a.sumS  += b.sumS;
+        a.count += b.count;
+        a.good  += b.good;
+        a.bad   += b.bad;
+        a.lastS  = b.lastS;
+        clusters.splice(i, 1);
+        nearestPrev.splice(i, 1);
+      }
+    }
+    // Persist the post-hysteresis centroids for next tick. We store
+    // means directly (not the full cluster) because the only thing we
+    // care about next frame is positional nearest-prev lookup.
+    this._prevAnchoredCentroids = clusters.map(c => c.sumS / c.count);
 
     // Grow pool if we have more clusters than DOM elements.
     while (this.anchoredPool.length < clusters.length) this._growAnchoredPool();
