@@ -19,6 +19,8 @@ export const TEST_KIND = {
   // pathogens
   virus: 5,       bacterium: 6,   amoebaP: 7,    spore: 8,
   germ: 17,       slime: 18,      mite: 19,      toxin: 20,
+  // extended (S.extendedCells gates Add-dialog visibility)
+  eukaryote: 0,
 };
 
 export function testKindFor(cellType) {

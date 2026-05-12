@@ -2146,6 +2146,30 @@ export const CELL_TYPES = {
     colors: { cytoTop: '#bdf3ff', cytoBot: '#ff5cb1', nucleus: '#3a0533', nucleusHi: '#fff', accent: '#3aa0c7' },
     description: 'Jagged toxin crystal that drifts and burns on contact.',
   },
+  // Extended (non-game) cell — added to the game so the shader-test
+  // kind 0 ("eukaryote · generic") has a host visual in the live
+  // renderer. Gated by S.extendedCells (added in #189); the Add
+  // dialog hides it unless the user opts in. Foes match its
+  // shader-test grouping (anything that would attack a generic body
+  // cell — viruses infect, bacteria/slime erode). Drift AI = no
+  // pursuit, no attack — a passive specimen used for visual tests
+  // + cell-zoo demos.
+  // Colours come straight from shader-test cytoColor(0) = (0.78,
+  // 0.55, 0.66) ≈ #c78ca8, a warm rosy-mauve. cytoTop/cytoBot
+  // bracket that hue so the radial gradient on canvas2d still
+  // reads cleanly.
+  eukaryote: {
+    label: 'Eukaryote', category: 'good', extended: true, sizeMul: 1.15,
+    body: { kind: 'round', aspect: 1.0 },
+    nucleus: { kind: 'round' },
+    decoration: { kind: 'none' },
+    granules: 8,
+    splitFactor: 1.0, brownianMul: 1.0,
+    move: { patrolSpeed: 30, attackSpeed: 30, patrolAccel: 60, alarmAccel: 60, weight: 1.0, friction: 1.1, hostility: 'idle' },
+    field: { blur: 6, contrast: 18, wobbleMul: 0.6 },
+    colors: { cytoTop: '#e6b8c8', cytoBot: '#a06b80', nucleus: '#4a2638', nucleusHi: '#f8dde6', accent: '#7a3e58' },
+    description: 'Generic eukaryotic body cell — a passive specimen carried over from shader-test (kind 0) for visual-port tests. Phagocytes leave it alone; viruses, bacteria and slime moulds will erode it.',
+  },
 };
 
 export function cellColors(cell) {
@@ -2154,9 +2178,13 @@ export function cellColors(cell) {
 }
 
 export function pickRandomActiveType() {
+  // Extended cells (eukaryote etc.) are NEVER picked by the random-
+  // spawn fallback so they don't show up in normal Free-Game play.
+  // They're surfaced only via the Add dialog when S.extendedCells is
+  // on, or via the cell-zoo / URL-param visual-test flow.
   const list = (Array.isArray(S.activeTypes) && S.activeTypes.length)
-    ? S.activeTypes.filter(k => CELL_TYPES[k])
-    : Object.keys(CELL_TYPES);
+    ? S.activeTypes.filter(k => CELL_TYPES[k] && !CELL_TYPES[k].extended)
+    : Object.keys(CELL_TYPES).filter(k => !CELL_TYPES[k].extended);
   return list[Math.floor(Math.random() * list.length)] || 'neutrophil';
 }
 
