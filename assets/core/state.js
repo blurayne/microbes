@@ -90,8 +90,8 @@ export const DEFAULTS = {
   // hardness (0 soft, 1 abrupt). WebGL2 + WebGPU only.
   microscopeBlur: false,
   microscopeFocus: 0.35,
-  microscopeBlurStrength: 0.5,
-  microscopeFalloff: 0.5,
+  microscopeBlurStrength: 0.04,
+  microscopeFalloff: 0.04,
   // "Make it real" microscope-photo color grade: maps scene luminance
   // along a duotone gradient between hue1 (shadows) and hue2 (highlights),
   // with a saturation knob. Hues are 0..1 around the wheel (0 red, 0.33
@@ -374,17 +374,21 @@ export function loadSettings() {
     );
     delete parsed.fxOrder;
     delete parsed.rippleScope;
-    // Microscope post-FX sliders all live on [0, 1].
-    const clamp01 = (v, fallback) => {
+    // Microscope post-FX + duotone sliders. Focus + hues + saturation
+    // live on [0, 1]; blur strength + falloff have tighter ceilings
+    // (0.5 / 0.35) tuned in late 2026 — the prior [0, 1] range made
+    // values past 0.1 produce visibly bad bokeh. Old saved settings
+    // that exceeded the new ceiling get clamped down on load.
+    const clampTo = (v, fallback, max = 1) => {
       const n = typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-      return Math.max(0, Math.min(1, n));
+      return Math.max(0, Math.min(max, n));
     };
-    parsed.microscopeFocus         = clamp01(parsed.microscopeFocus,         DEFAULTS.microscopeFocus);
-    parsed.microscopeBlurStrength  = clamp01(parsed.microscopeBlurStrength,  DEFAULTS.microscopeBlurStrength);
-    parsed.microscopeFalloff       = clamp01(parsed.microscopeFalloff,       DEFAULTS.microscopeFalloff);
-    parsed.makeItRealHue1          = clamp01(parsed.makeItRealHue1,          DEFAULTS.makeItRealHue1);
-    parsed.makeItRealHue2          = clamp01(parsed.makeItRealHue2,          DEFAULTS.makeItRealHue2);
-    parsed.makeItRealSaturation    = clamp01(parsed.makeItRealSaturation,    DEFAULTS.makeItRealSaturation);
+    parsed.microscopeFocus         = clampTo(parsed.microscopeFocus,         DEFAULTS.microscopeFocus);
+    parsed.microscopeBlurStrength  = clampTo(parsed.microscopeBlurStrength,  DEFAULTS.microscopeBlurStrength, 0.5);
+    parsed.microscopeFalloff       = clampTo(parsed.microscopeFalloff,       DEFAULTS.microscopeFalloff,      0.35);
+    parsed.makeItRealHue1          = clampTo(parsed.makeItRealHue1,          DEFAULTS.makeItRealHue1);
+    parsed.makeItRealHue2          = clampTo(parsed.makeItRealHue2,          DEFAULTS.makeItRealHue2);
+    parsed.makeItRealSaturation    = clampTo(parsed.makeItRealSaturation,    DEFAULTS.makeItRealSaturation);
     // One-time migration after PR #147 shipped broken: force all
     // overlay toggles OFF on first load so users who toggled them on
     // before this fix don't see a stale (now-different) effect. They
