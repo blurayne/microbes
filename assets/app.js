@@ -499,7 +499,6 @@ const helpDialog = addDialog;
 // sensible — they're now both views into the same merged dialog.
 const paletteDialog = addDialog;
 const paletteBadDialog = addDialog;
-const helpBtn = document.getElementById('help');
 const paletteBtn = document.getElementById('palette');
 // #paletteBad FAB was removed (PR #?? — unified add-dialog); the
 // const stays as null so other references that filter Boolean
@@ -509,7 +508,7 @@ const reloadBtn = document.getElementById('reload');
 const pauseBtn = document.getElementById('pause');
 const eyeBtn = document.getElementById('eyeToggle');
 const pauseOverlay = document.getElementById('pauseOverlay');
-const fabs = [gearBtn, helpBtn, paletteBtn, paletteBadBtn, reloadBtn, pauseBtn, eyeBtn].filter(Boolean);
+const fabs = [gearBtn, paletteBtn, paletteBadBtn, reloadBtn, pauseBtn, eyeBtn].filter(Boolean);
 
 // Eye-toggle: flips S.cellTypeOverlay. Persists in settings; the
 // per-frame cellTags.render() pass reads S directly so no listener
@@ -609,15 +608,6 @@ function closeAll() {
 
 gearBtn.addEventListener('click', () => {
   settingsEl.classList.contains('hidden') ? openOnly(settingsEl) : closeAll();
-});
-// ? FAB → unified dialog forced to list view (the legacy help dialog
-// was merged into addDialog as its list mode).
-if (helpBtn) helpBtn.addEventListener('click', () => {
-  if (addDialog.classList.contains('hidden')) {
-    setAddDialogView('list');
-    renderAddDialogContents();
-    openOnly(addDialog);
-  } else closeAll();
 });
 // Render BOTH grids when the dialog opens (cells always, pathogens
 // only when S.allowBadGuys). Also toggles the pathogens section
