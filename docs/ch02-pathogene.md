@@ -462,6 +462,35 @@
         <strong>Wichtig:</strong> Toxine machen das Spiel taktisch komplexer. Wenn der Spieler Mast Cells und Basophile nicht in seinem Roster hat, akkumulieren Toxine und vergiften das Schlachtfeld.
       </div>
     </section>
+
+    <section class="tier-group" style="margin-top: 40px;">
+      <h2 class="tier-title" style="margin-bottom: 6px;">§02.6 Übersichtstabelle — Pathogene</h2>
+      <p style="color: var(--ink-dim); font-size: 12px; line-height: 1.5; margin-bottom: 12px; max-width: 700px;">
+        Kompakte Liste der spielrelevanten Erreger mit Counter-Empfehlung. Detail-Karten + Schwächen siehe §02.1–§02.5. Die <code>data-foes</code>-Listen der Karten oben sind die kanonische Quelle für die <code>CELL_RELATIONS</code>-Tabelle in <code>assets/core/cell-relations.js</code>.
+      </p>
+      <div class="speed-table">
+        <table>
+          <thead>
+            <tr><th>Pathogen</th><th>Klasse</th><th>Größe</th><th>Geschwindigkeit</th><th>Hauptkonter</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-virus);"></span>Standard-Virus</span></td><td><span class="badge badge-pathogen">Virus</span></td><td>0.02–0.3 μm</td><td><span class="speed-bar"><span class="active"></span><span class="active"></span><span class="active"></span><span class="active"></span><span></span></span></td><td>NK · T-Killer · B-Zelle (Antikörper)</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-corona);"></span>Coronavirus</span></td><td><span class="badge badge-pathogen">Virus</span></td><td>0.1 μm</td><td><span class="speed-bar"><span class="active"></span><span class="active"></span><span class="active"></span><span class="active"></span><span></span></span></td><td>B-Zelle (Spike-Antikörper) · NK</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-flu);"></span>Influenza</span></td><td><span class="badge badge-pathogen">Virus</span></td><td>0.08–0.12 μm</td><td><span class="speed-bar"><span class="active"></span><span class="active"></span><span class="active"></span><span class="active"></span><span class="active"></span></span></td><td>T-Killer · NK</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-phage);"></span>Bacteriophage</span></td><td><span class="badge badge-pathogen">Virus</span></td><td>0.05 μm</td><td><span class="speed-bar"><span class="active"></span><span class="active"></span><span class="active"></span><span></span><span></span></span></td><td>Macrophage · Neutrophil (frisst die Wirtsbakterien)</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-retro);"></span>Retrovirus (Boss)</span></td><td><span class="badge badge-boss">Boss</span></td><td>0.1 μm</td><td><span class="speed-bar"><span class="active"></span><span class="active"></span><span class="active"></span><span></span><span></span></span></td><td>T-Killer · B-Zelle · Dendritic (Memory)</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-germ);"></span>Germ</span></td><td><span class="badge badge-pathogen">Bakterium</span></td><td>1–2 μm</td><td><span class="speed-bar"><span class="active"></span><span></span><span></span><span></span><span></span></span></td><td>Neutrophil · Macrophage</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-bact);"></span>Bacterium</span></td><td><span class="badge badge-pathogen">Bakterium</span></td><td>1–5 μm</td><td><span class="speed-bar"><span class="active"></span><span class="active"></span><span></span><span></span><span></span></span></td><td>Neutrophil · Macrophage · B-Zelle</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-amoeba);"></span>Amoeba</span></td><td><span class="badge badge-pathogen">Parasit</span></td><td>10–50 μm</td><td><span class="speed-bar"><span class="active"></span><span></span><span></span><span></span><span></span></span></td><td>Macrophage · Eosinophil</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-mite);"></span>Mite</span></td><td><span class="badge badge-pathogen">Parasit</span></td><td>200–400 μm</td><td><span class="speed-bar"><span class="active"></span><span></span><span></span><span></span><span></span></span></td><td>Eosinophil · Mast Cell</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-slime);"></span>Slime Mold</span></td><td><span class="badge badge-pathogen">Pilz</span></td><td>1–100 mm Kolonie</td><td><span class="speed-bar"><span class="active"></span><span></span><span></span><span></span><span></span></span></td><td>Neutrophil · Macrophage · Eosinophil</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-spore);"></span>Spore</span></td><td><span class="badge badge-pathogen">Pilz</span></td><td>2–10 μm</td><td><span class="speed-bar"><span class="active"></span><span class="active"></span><span></span><span></span><span></span></span></td><td>Neutrophil · Eosinophil · B-Zelle</td></tr>
+            <tr><td><span class="cell-tag"><span class="cell-dot" style="background: var(--p-toxin);"></span>Toxin</span></td><td><span class="badge badge-pathogen">Toxin</span></td><td>—</td><td><span class="speed-bar"><span class="active"></span><span></span><span></span><span></span><span></span></span></td><td>B-Zelle (neutralisierende AK) · Mast · Basophil</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="callout">Counter-Empfehlungen folgen den <code>data-foes</code>-Listen der Detail-Karten — siehe §10 für die genauen DPS-Werte und §12 für eine Quick-Reference nach Phase.</div>
+    </section>
   </div>
 
   <!-- =============================================== -->
