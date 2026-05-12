@@ -231,6 +231,19 @@ body.is-paused #aboutDialog {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  /* Pin the header to the top of the scrollable panel so the title +
+     close button stay reachable no matter how far the user scrolls.
+     Negative margins + padding cancel the panel's own 16px/20px
+     padding on those three sides, so the sticky bar spans edge-to-
+     edge and the bottom border tucks under the first section. The
+     solid panel bg keeps content from showing through. */
+  position: sticky;
+  top: -16px;
+  z-index: 2;
+  margin: -16px -20px 12px;
+  padding: 16px 20px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
 }
 .settings-panel h2 {
   margin: 0;
