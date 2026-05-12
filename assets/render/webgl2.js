@@ -2847,8 +2847,11 @@ export class WebGL2Renderer extends RendererBase {
     // sortable list (Settings → Overlays). Each entry checks its
     // own enabled-toggle. Per-frame read of S.* means reorders +
     // toggles take effect on the next draw with no pipeline reset
-    // needed.
-    const order = overlayFxOrder();
+    // needed. The list is reversed before iteration to honour the
+    // UI's "Stack (top runs last)" semantics: top-of-list FX
+    // composites last (= visually on top), matching the post-pin
+    // FBO chain's bottom-to-top walk.
+    const order = overlayFxOrder().slice().reverse();
     const anyOn = order.some(k => {
       if (k === 'noise')     return !!S.staticNoise;
       if (k === 'vignette')  return !!S.vignette;
