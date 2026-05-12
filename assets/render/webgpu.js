@@ -1202,9 +1202,13 @@ fn fxHash(p: vec2<f32>) -> f32 {
     effectCol = vec3<f32>(0.05, 0.10, 0.20);
     effectMask = pow(smoothstep(0.6, 1.0, r), 2.0);
   } else {
-    // Crosshair — always normal blend. Ring fits the shorter viewport
-    // axis with 5% padding (radius = min(W,H) * 0.475) so it scales
-    // with the canvas while staying circular at any aspect ratio.
+    // Crosshair — cyan ring + cross. Sets effectCol + effectMask and
+    // falls through to the regular mode==1 (normal-blend) return
+    // below. An earlier version used an early return inside this
+    // else arm; that produced an invisible crosshair on WebGPU
+    // (some WGSL to SPIR-V compilers appeared to zero the output
+    // when a return lived inside an else branch), while WebGL2's
+    // GLSL compiler handled the same shape fine.
     let px = frag.xy - res * 0.5;
     let armLen: f32 = 14.0;
     let thick: f32  = 1.0;
@@ -1213,7 +1217,8 @@ fn fxHash(p: vec2<f32>) -> f32 {
     let vert  = select(0.0, 1.0, abs(px.x) < thick && abs(px.y) < armLen);
     let ring  = select(0.0, 0.6, abs(length(px) - ringR) < thick);
     let a = max(max(horiz, vert), ring);
-    return vec4<f32>(vec3<f32>(0.42, 0.95, 1.0), a * 0.6);
+    effectCol  = vec3<f32>(0.42, 0.95, 1.0);
+    effectMask = a * 0.6;
   }
   let s = intensity * effectMask;
   if (mode == 1) {
