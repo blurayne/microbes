@@ -2455,6 +2455,150 @@ if (causticsChk) {
   params.caustics = causticsChk.checked ? 1 : 0;
 }
 
+// ── URL query-param overrides ────────────────────────────────
+// Lets the game's cell-zoo.html + Playwright rig drive shader-test
+// with the SAME query string they pass to the live game. Result:
+// for any (cell, theme, bg) tuple the same URL works on both pages
+// and produces diff-friendly frames.
+//
+// Param table:
+//   ?cellType=KEY    name OR integer 0..20. Names match the game's
+//                    CELL_TYPES keys (virus, bacterium, neutrophil,
+//                    …). Falls back silently to current value on
+//                    unknown.
+//   ?theme=KEY       microscope|cartoon|kurzgesagt|classic OR 0..3.
+//                    Game's `legacy` maps to `microscope` since
+//                    shader-test has no legacy mode.
+//   ?bg=KEY          shader-test bg name OR integer 0..6 OR game bg
+//                    key. game's `solid` (black-ish) maps to 6
+//                    (black · isolation).
+//   ?pose=1          stop the rAF loop after the first frame so the
+//                    snapshot is reproducible.
+//   ?t=NUMBER        clamp the time uniform to this value (with
+//                    pose=1) — useful for diffing animated frames.
+//   ?screenshot=1    auto-download a PNG one rAF tick after first
+//                    paint. Filename includes the (cell, theme, bg)
+//                    tuple.
+//
+// All overrides are URL-only — no localStorage / cookies are
+// touched. The page can still be used interactively after a query-
+// string boot.
+const __SHADER_TEST_OVERRIDES = (() => {
+  const q = new URLSearchParams(window.location.search);
+  if (![...q.keys()].length) return {};
+
+  // Name → integer table for celltype. Matches assets/core/cell-kinds.js
+  // TEST_KIND so the same names line up on both pages.
+  const CELL_NAME_TO_INT = {
+    eukaryote: 0,  macrophage: 1, neutrophil: 2, nk: 3,         bcell: 4,
+    virus: 5,      bacterium: 6,  amoebaP: 7,    spore: 8,      monocyte: 9,
+    mast: 10,      dendritic: 11, basophil: 12,  platelet: 13,  tcell: 14,
+    eosinophil: 15, rbc: 16,      germ: 17,      slime: 18,     mite: 19,
+    toxin: 20,
+  };
+  const THEME_NAME_TO_INT = {
+    legacy: 0,           // shader-test has no legacy — map to microscope
+    microscope: 0, cartoon: 1, kurzgesagt: 2, classic: 3,
+  };
+  // shader-test bg ints: 0=bloodflow 1=lung 2=heart 3=brain 4=marrow
+  //                      5=cellshadow 6=black
+  const BG_NAME_TO_INT = {
+    bloodflow: 0, lung: 1, heart: 2, brain: 3,
+    marrow: 4, cellshadow: 5, 'cell-shadow': 5,
+    black: 6, isolation: 6,
+    // Game bg key aliases — map to the closest shader-test int.
+    solid: 6,                // game's flat dark ≈ black isolation
+    bloodstream: 0,          // game bloodstream ≈ shader-test bloodflow
+    cellShadow: 5,
+    // Game-only kinds with no shader-test equivalent → black (cleanest
+    // diff surface). Playwright tests should pin bg explicitly.
+    aurora: 6, underwater: 6, lavaFire: 6, reactor: 6,
+    neuron: 6, bile: 6, mitochondria: 6, lymphNode: 6,
+    spectrum: 6, cartoonNight: 6,
+  };
+
+  function resolveInt(raw, nameMap, maxInt) {
+    if (raw == null) return null;
+    const asInt = parseInt(raw, 10);
+    if (!Number.isNaN(asInt) && asInt >= 0 && asInt <= maxInt) return asInt;
+    if (Object.prototype.hasOwnProperty.call(nameMap, raw)) return nameMap[raw];
+    return null;
+  }
+
+  return {
+    cellType:   resolveInt(q.get('cellType'), CELL_NAME_TO_INT, 20),
+    theme:      resolveInt(q.get('theme'),    THEME_NAME_TO_INT, 3),
+    bg:         resolveInt(q.get('bg'),       BG_NAME_TO_INT, 6),
+    pose:       q.get('pose') === '1' || q.get('pose') === 'true',
+    screenshot: q.get('screenshot') === '1' || q.get('screenshot') === 'true',
+    t:          q.get('t') != null ? parseFloat(q.get('t')) : null,
+  };
+})();
+
+// Apply overrides to the selects + params object. Done immediately
+// so the first rAF tick already reflects the URL.
+if (__SHADER_TEST_OVERRIDES.cellType != null) {
+  celltypeSel.value = String(__SHADER_TEST_OVERRIDES.cellType);
+  params.cellType = __SHADER_TEST_OVERRIDES.cellType;
+}
+if (__SHADER_TEST_OVERRIDES.theme != null) {
+  themeSel.value = String(__SHADER_TEST_OVERRIDES.theme);
+  params.theme = __SHADER_TEST_OVERRIDES.theme;
+}
+if (__SHADER_TEST_OVERRIDES.bg != null) {
+  bgkindSel.value = String(__SHADER_TEST_OVERRIDES.bg);
+  params.bgKind = __SHADER_TEST_OVERRIDES.bg;
+}
+
+// ── Screenshot helper ────────────────────────────────────────
+// Calls `canvas.toBlob('image/png')` → downloads via a hidden
+// anchor. Works for BOTH the WebGPU and WebGL2 backends because
+// the user-agent's compositor reads the canvas swap-chain
+// regardless of which context is bound. Exposed as
+// `window.__SHADER_TEST_SCREENSHOT__()` so the Playwright rig +
+// browser DevTools can both call it.
+function __takeShaderTestShot() {
+  const c = document.getElementById('stage');
+  if (!c || typeof c.toBlob !== 'function') {
+    console.error('[shader-test] #stage canvas missing or toBlob unsupported');
+    return Promise.reject(new Error('canvas missing'));
+  }
+  return new Promise((resolve, reject) => {
+    c.toBlob((blob) => {
+      if (!blob) { reject(new Error('toBlob returned null')); return; }
+      const stamp = (() => {
+        const d = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+             + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+      })();
+      const cellInt = params.cellType | 0;
+      const themeInt = params.theme | 0;
+      const bgInt = params.bgKind | 0;
+      const name = `shader-test-c${cellInt}-t${themeInt}-bg${bgInt}-${stamp}.png`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name; a.style.display = 'none';
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 0);
+      resolve(stamp);
+    }, 'image/png');
+  });
+}
+if (typeof window !== 'undefined') window.__SHADER_TEST_SCREENSHOT__ = __takeShaderTestShot;
+
+// Keyboard shortcut: press 's' to capture (unless typing in an input).
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 's' && e.key !== 'S') return;
+  const t = e.target;
+  if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+  __takeShaderTestShot();
+});
+
+// Pose mode + auto-screenshot: hooked inside the existing render
+// loop (see boot()). The boot/loop reads __SHADER_TEST_OVERRIDES
+// on each tick and gates accordingly.
+
 // ── Drag + pinch/wheel: move and resize the cell ────────────
 // Pointer events handle both mouse and touch. CSS `touch-action:
 // none` on #stage stops the browser's default scroll/zoom from
@@ -3135,10 +3279,30 @@ function updateFps(now) {
 
   fpsLast = performance.now();
   const start = fpsLast;
+  // Pose / screenshot URL-overrides — see __SHADER_TEST_OVERRIDES
+  // block earlier in this script. `?pose=1` freezes the rAF chain
+  // after the first paint so the snapshot is reproducible; `?t=N`
+  // locks the time uniform; `?screenshot=1` auto-grabs the first
+  // settled frame as a PNG download.
+  const _ov = (typeof __SHADER_TEST_OVERRIDES === 'object' && __SHADER_TEST_OVERRIDES) || {};
+  const _poseT = (_ov.t != null) ? _ov.t : 0;
+  let _firstPainted = false;
   function loop(now) {
-    const t = (now - start) / 1000;
+    const t = _ov.pose ? _poseT : (now - start) / 1000;
     renderer.frame(t);
     updateFps(now);
+    if (!_firstPainted) {
+      _firstPainted = true;
+      // Auto-screenshot inside the SAME rAF tick the first frame
+      // was drawn. WebGPU canvases release their swap-chain texture
+      // once the rAF callback returns, so we kick off toBlob before
+      // that happens; the browser serialises the readback against
+      // the compositor internally so the PNG matches the frame.
+      if (_ov.screenshot && typeof __takeShaderTestShot === 'function') {
+        __takeShaderTestShot();
+      }
+    }
+    if (_ov.pose) return;       // freeze the rAF chain on pose=1
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
