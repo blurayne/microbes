@@ -88,13 +88,15 @@ for item in items sorted by s:
 
 Each cluster carries:
 
-| field    | meaning                                              |
-|----------|------------------------------------------------------|
-| `count`  | number of cells merged                               |
-| `good`   | good-category cells                                  |
-| `bad`    | bad-category (pathogen) cells                        |
-| `sumS`   | running sum of `s` (for mean position computation)   |
-| `lastS`  | `s` of the most-recently-joined item                 |
+| field          | meaning                                                          |
+|----------------|------------------------------------------------------------------|
+| `count`        | number of cells merged                                           |
+| `good`         | good-category cells                                              |
+| `bad`          | bad-category (pathogen) cells                                    |
+| `sumS`         | running sum of `s` (for mean position computation)               |
+| `lastS`        | `s` of the most-recently-joined item                             |
+| `sumScreenX`   | running sum of cell screen-x (for arrow-bearing computation)     |
+| `sumScreenY`   | running sum of cell screen-y (for arrow-bearing computation)     |
 
 This is **single-linkage agglomerative clustering with a fixed cutoff
 distance** — but because the input is 1D and sorted, the dendrogram
@@ -125,8 +127,15 @@ For each cluster:
 * Position = `perimeterPoint(sumS / count, W, H)` (the cluster's mean
   perimeter parameter, mapped back to a screen pixel + edge tag).
 * Inset by 8 px from the edge so the arrow doesn't graze the chrome.
-* Rotate to point outward (0° / 90° / 180° / −90° for top / right /
-  bottom / left).
+* **Rotation = bearing toward the cluster's mean off-screen position.**
+  Each cell's projected `(screenX, screenY)` (off-screen by definition)
+  is summed into the cluster alongside `sumS`. The arrow's CSS rotation
+  comes from `atan2(meanScreenY − posY, meanScreenX − posX) + 90°`,
+  where the `+ 90°` rotates the triangle SVG (tip at local `+y`-up) so
+  that `0° = tip up`, `90° = tip right`, `180° = down`, `−90° = left`.
+  The arrow points at the actual centroid of the cells, not just
+  perpendicular-to-edge — useful at corners and for clusters whose
+  cells are spread out in screen space.
 * Hue lerps red↔green by `good / total` (matches the floating-mode
   mapping).
 * Saturation lerps 50 % → 100 % over `total ∈ [1, 32]`.
@@ -168,28 +177,61 @@ Total **O(n log n)** with small constants — comfortable at the
   user without a badge anyway — and the badge undoes most of the
   visual benefit of nudging the icons.
 
-### Hysteresis / temporal stability — current state and follow-ups
+### Hysteresis / temporal stability — Schmitt-trigger pass
 
-The greedy threshold is **memoryless**: each tick re-computes
-clusters from scratch. That's fine when cells are well-separated,
-but a cell sitting near a cluster boundary can flicker between
-joining the cluster and being its own cluster as it drifts a few
-pixels around the threshold.
+The greedy threshold pass on its own is **memoryless**: each tick
+re-computes clusters from scratch. A cell sitting right at the
+`CLUSTER_GAP_PX` boundary can flip between "joining the cluster" and
+"being its own cluster" as it drifts a few pixels per tick. The
+result on screen is a one-cell cluster appearing and vanishing at
+4 Hz next to its neighbour.
 
-In practice the 4 Hz throttle and `CLUSTER_GAP_PX = 60` (much bigger
-than per-tick drift) keep that quiet. If it ever becomes visible the
-fix is to add **hysteresis**: track the previous tick's clusters
-keyed by approximate centroid `s` and use a wider cutoff (e.g.
-`1.5 × CLUSTER_GAP_PX`) when *deciding to split* an existing
-cluster, but the normal cutoff when *deciding to merge*. That mirrors
-the Schmitt-trigger pattern used elsewhere in the codebase for
-camera-state thresholds.
+To suppress that we run a **Schmitt-trigger pass** after the greedy
+clustering and the wrap-around merge:
+
+1. Carry over `prevAnchoredCentroids` — the mean `s` of every
+   cluster produced last tick.
+2. For each new cluster compute its mean `s` and find the nearest
+   previous centroid within `CLUSTER_GAP_PX`. Record that as the
+   "ancestor index" (or −1 for no ancestor).
+3. Walk adjacent cluster pairs `(clusters[i-1], clusters[i])` from
+   right to left. If both share the same ancestor *and* their gap
+   is below the wider `SPLIT_GAP_PX = 1.5 × CLUSTER_GAP_PX`, re-merge
+   them. Use right-to-left order so `splice()` doesn't invalidate
+   the indices we still need to visit.
+4. Persist the post-merge centroids as the next tick's
+   `prevAnchoredCentroids`.
+
+The two thresholds form the classic Schmitt-trigger pair: the
+**merge threshold** decides when two items belong together this
+tick (greedy pass, `CLUSTER_GAP_PX`), and the **split threshold**
+decides when an *existing* pair has separated enough to actually
+break (`SPLIT_GAP_PX`). Between them is a stable band where the
+cluster's previous decision carries forward, which is exactly the
+behaviour we want for cells dithering across the threshold.
+
+Edge cases handled:
+
+* **First tick / mode toggle.** `prevAnchoredCentroids` is `null`
+  before any cluster has been produced, and `_hideAnchored` resets
+  it to `null` when the user switches off anchored mode. The first
+  tick after either event falls back to the greedy result with no
+  hysteresis applied.
+* **Cluster count drops or grows.** Centroids that no longer have a
+  nearby new cluster simply don't influence anything — they age out
+  in a single tick. New clusters with no ancestor (-1) are not
+  candidates for hysteresis-merge, so they enter the system at full
+  greedy resolution.
+
+State carried across ticks is one `number[]` of cluster centroids —
+typically ≤ a dozen entries.
 
 ### Tuning knobs (in `assets/ui/nav-arrows.js`)
 
 | constant            | value | effect                                       |
 |---------------------|-------|----------------------------------------------|
 | `CLUSTER_GAP_PX`    | 60    | bigger → fewer, larger clusters              |
+| `SPLIT_GAP_PX`      | 90    | bigger → wider hysteresis band (slower splits) |
 | `EDGE_INSET_PX`     | 8     | distance from the actual screen edge         |
 | `ANCHORED_POOL_MIN` | 4     | initial DOM-element pool size (grows on demand) |
 

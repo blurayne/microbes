@@ -37,6 +37,14 @@ const TRIANGLE_POINTS = '50,8 88,92 12,92';
 // room. Lower → more arrows but better positional fidelity; higher →
 // fewer arrows but they drift further from any single cell.
 const CLUSTER_GAP_PX = 60;
+// Schmitt-trigger split threshold for the hysteresis pass: once two
+// items have been part of the SAME cluster in the previous tick, we
+// resist splitting them until their gap exceeds SPLIT_GAP_PX rather
+// than the lower CLUSTER_GAP_PX. Set to 1.5× the merge threshold —
+// wide enough to absorb single-cell drift around a boundary, narrow
+// enough that a genuinely diverging pair still splits within a frame
+// or two. See ALGORITHMS.md → "Hysteresis / temporal stability".
+const SPLIT_GAP_PX = 90;
 // Inset from each screen edge so the arrow doesn't graze the chrome.
 const EDGE_INSET_PX = 8;
 // Min DOM-element pool size for anchored mode (we grow on demand).
@@ -133,16 +141,6 @@ function perimeterPoint(s, W, H) {
   /* otherwise on left edge */ return { edge: 'left',   x: 0,                       y: H - (r - 2 * W - H) };
 }
 
-// Outward-pointing rotation in degrees for each edge.
-function edgeRotationDeg(edge) {
-  switch (edge) {
-    case 'top':    return 0;       // tip up
-    case 'right':  return 90;
-    case 'bottom': return 180;
-    case 'left':   return -90;
-    default:       return 0;
-  }
-}
 
 export class NavArrows {
   constructor(parent) {
@@ -177,6 +175,10 @@ export class NavArrows {
   }
   _hideAnchored() {
     for (const a of this.anchoredPool) a.wrap.classList.add('hidden');
+    // Drop hysteresis state too — when anchored mode comes back on, the
+    // first tick should cluster from scratch instead of inheriting from
+    // whatever the camera was looking at before the toggle.
+    this._prevAnchoredCentroids = null;
   }
 
   // Public: called once per frame-loop tick from app.js. `enabled` is
@@ -276,7 +278,12 @@ export class NavArrows {
       const sArc = perimeterParam(proj.edge, proj.x, proj.y, W, H);
       const meta = CELL_TYPES[c.type];
       const cat = meta && meta.category;
-      items.push({ s: sArc, cat });
+      // screenX / screenY = the cell's actual (off-screen) projected
+      // position. Carried through clustering so the arrow can be
+      // rotated to point at the cluster's average off-screen position
+      // rather than perpendicular-to-edge — gives the user a real
+      // directional bearing toward the cells.
+      items.push({ s: sArc, cat, screenX: s.x, screenY: s.y });
     }
     items.sort((a, b) => a.s - b.s);
 
@@ -288,6 +295,8 @@ export class NavArrows {
         if (it.cat === 'bad') cur.bad++; else cur.good++;
         cur.sumS += it.s;
         cur.lastS = it.s;
+        cur.sumScreenX += it.screenX;
+        cur.sumScreenY += it.screenY;
       } else {
         clusters.push({
           count: 1,
@@ -295,6 +304,8 @@ export class NavArrows {
           bad:  it.cat === 'bad' ? 1 : 0,
           sumS: it.s,
           lastS: it.s,
+          sumScreenX: it.screenX,
+          sumScreenY: it.screenY,
         });
       }
     }
@@ -318,12 +329,64 @@ export class NavArrows {
           // negative-side from 0.
           sumS:  (first.sumS) + (last.sumS - perim * last.count),
           lastS: first.lastS,
+          sumScreenX: first.sumScreenX + last.sumScreenX,
+          sumScreenY: first.sumScreenY + last.sumScreenY,
         };
         clusters.shift();
         clusters.pop();
         clusters.unshift(merged);
       }
     }
+
+    // --- Schmitt-trigger hysteresis on cluster splits ----------------
+    // The greedy pass is memoryless: a cell that drifts a few px
+    // across CLUSTER_GAP_PX can flip a cluster between merged and
+    // split states on every tick. To resist that flicker we look at
+    // the cluster centroids carried over from the previous tick and
+    // ask: were these two adjacent NEW clusters both inside the
+    // catchment radius (≤ CLUSTER_GAP_PX) of the SAME previous-tick
+    // centroid? If so, they were a single cluster last frame, and we
+    // only allow the split to take effect once the gap has widened
+    // past SPLIT_GAP_PX (1.5× CLUSTER_GAP_PX). Below that, fold them
+    // back together — visually identical to having stayed merged.
+    if (this._prevAnchoredCentroids && this._prevAnchoredCentroids.length > 0
+        && clusters.length > 1) {
+      const prevs = this._prevAnchoredCentroids;
+      // For each new cluster find the nearest previous centroid that
+      // is still within the merge-catchment radius. -1 means "no
+      // ancestor" — these are new clusters with no hysteresis state.
+      const nearestPrev = clusters.map(c => {
+        const mean = c.sumS / c.count;
+        let best = -1, bestDist = CLUSTER_GAP_PX;
+        for (let j = 0; j < prevs.length; j++) {
+          const d = Math.abs(mean - prevs[j]);
+          if (d < bestDist) { bestDist = d; best = j; }
+        }
+        return best;
+      });
+      // Walk pairs from right to left so splice() doesn't invalidate
+      // indices we still need to visit.
+      for (let i = clusters.length - 1; i >= 1; i--) {
+        if (nearestPrev[i] === -1 || nearestPrev[i] !== nearestPrev[i - 1]) continue;
+        const a = clusters[i - 1], b = clusters[i];
+        const gap = (b.sumS / b.count) - (a.sumS / a.count);
+        if (gap >= SPLIT_GAP_PX) continue;
+        // Same ancestor + gap below split threshold → re-merge.
+        a.sumS  += b.sumS;
+        a.count += b.count;
+        a.good  += b.good;
+        a.bad   += b.bad;
+        a.lastS  = b.lastS;
+        a.sumScreenX += b.sumScreenX;
+        a.sumScreenY += b.sumScreenY;
+        clusters.splice(i, 1);
+        nearestPrev.splice(i, 1);
+      }
+    }
+    // Persist the post-hysteresis centroids for next tick. We store
+    // means directly (not the full cluster) because the only thing we
+    // care about next frame is positional nearest-prev lookup.
+    this._prevAnchoredCentroids = clusters.map(c => c.sumS / c.count);
 
     // Grow pool if we have more clusters than DOM elements.
     while (this.anchoredPool.length < clusters.length) this._growAnchoredPool();
@@ -340,7 +403,7 @@ export class NavArrows {
 
   _renderAnchoredCluster(slot, cluster, W, H) {
     const { wrap, poly, badge } = slot;
-    const { count, good, bad, sumS } = cluster;
+    const { count, good, bad, sumS, sumScreenX, sumScreenY } = cluster;
     if (count <= 0) {
       wrap.classList.add('hidden');
       return;
@@ -354,6 +417,19 @@ export class NavArrows {
     if (pt.edge === 'left')   posX = EDGE_INSET_PX;
     if (pt.edge === 'right')  posX = W - EDGE_INSET_PX;
 
+    // Rotate the arrow tip toward the cluster's mean off-screen cell
+    // position so the indicator shows a real bearing, not just an
+    // outward-from-edge stub. atan2 on the (anchor → cluster-mean)
+    // vector gives the angle of that vector measured from +x; the
+    // SVG triangle's natural orientation is tip-up (= -y), so a +90°
+    // offset converts the angle into the CSS rotate() value where
+    // 0° = up, 90° = right, 180° = down, -90° = left.
+    const avgScreenX = sumScreenX / count;
+    const avgScreenY = sumScreenY / count;
+    const dirX = avgScreenX - posX;
+    const dirY = avgScreenY - posY;
+    const angleDeg = Math.atan2(dirY, dirX) * 180 / Math.PI + 90;
+
     const total = good + bad;
     const t = Math.min(1, Math.max(0, (total - 1) / 31));
     const sat = 50 + 50 * t;
@@ -364,13 +440,13 @@ export class NavArrows {
 
     wrap.classList.remove('hidden');
     // translate(-50%, -50%) centres the SVG on (posX, posY); the
-    // rotation then orients the tip outward.
+    // rotation aims the tip at the cluster's mean off-screen position.
     wrap.style.left = `${posX.toFixed(1)}px`;
     wrap.style.top  = `${posY.toFixed(1)}px`;
     wrap.style.transform =
-      `translate(-50%, -50%) rotate(${edgeRotationDeg(pt.edge)}deg)`;
+      `translate(-50%, -50%) rotate(${angleDeg.toFixed(1)}deg)`;
     // SVG dimensions (pre-rotation: thickness × length, tip pointing
-    // along local +Y → after rotation, tip points outward).
+    // along local +Y → after rotation, tip points at the cluster).
     wrap.style.setProperty('--nav-arrow-thickness', `${thickness.toFixed(1)}px`);
     wrap.style.setProperty('--nav-arrow-length',    `${length.toFixed(1)}px`);
 

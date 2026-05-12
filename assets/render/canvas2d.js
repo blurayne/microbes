@@ -1148,7 +1148,12 @@ export class Canvas2DRenderer extends RendererBase {
         ctx.strokeStyle = theme.outline.color;
 
         if (cfg.eyes >= 1) {
-          const FACE_SCALE = 1.2;
+          // 1.2 = baseline cartoon-face multiplier (unchanged since the
+          // feature shipped). Multiplied by the user slider S.faceScale
+          // so the same constant tunes eye radius, pupil radius and
+          // horizontal eye spread together — parity with the WebGL2 +
+          // WebGPU face shaders which read u_faceScale / vp_time.w.
+          const FACE_SCALE = 1.2 * (S.faceScale != null ? S.faceScale : 1);
           const eyeR = cr * cfg.eyeR * FACE_SCALE;
           const eyeY = cy + cr * cfg.eyeY;
           const pupilR = cr * cfg.pupilR * FACE_SCALE;
@@ -1183,7 +1188,10 @@ export class Canvas2DRenderer extends RendererBase {
 
         if (mouthKind && mouthKind !== 'none') {
           const mY = cy + cr * 0.18;
-          const mW = cr * 0.34 * 1.2;
+          // Mouth half-extent: 0.34 (cfg baseline) × 1.2 (cartoon
+          // multiplier) × S.faceScale so the user slider scales mouth
+          // width in lockstep with eye radius.
+          const mW = cr * 0.34 * 1.2 * (S.faceScale != null ? S.faceScale : 1);
           const cc = cellColors(c);
           ctx.lineWidth = lw * 1.3;
           ctx.lineCap = 'round';   // soft endpoints (matches GPU shader's smoothstep fix)

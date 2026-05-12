@@ -53,17 +53,18 @@ html, body {
   font: 700 18px/1 system-ui, sans-serif;
   transition: transform 120ms ease;
 }
-/* FAB stack — paletteBad removed (unified add-dialog covers
-   pathogens too), so help/pause/eye each shift down by one slot.
-   body.no-bad overrides are gone — the dialog gates pathogens
-   internally via S.allowBadGuys. */
+/* FAB stack — help (?) button removed (its list-view shortcut into
+   the unified add-dialog is reachable from the palette FAB), so
+   pause/eye shift up by one slot. paletteBad was removed earlier
+   when the unified add-dialog absorbed pathogens. body.no-bad
+   overrides are gone — the dialog gates pathogens internally via
+   S.allowBadGuys. */
 #gear       { bottom: 16px; }
 #reload     { bottom: 66px; }
 #palette    { bottom: 116px; font-size: 22px; }
-#help       { bottom: 166px; }
-#pause      { bottom: 216px; padding: 0; }
+#pause      { bottom: 166px; padding: 0; }
 #pause svg  { width: 22px; height: 22px; display: block; }
-#eyeToggle  { bottom: 266px; }
+#eyeToggle  { bottom: 216px; }
 #pause[aria-pressed="true"] {
   background: #ffd166;
   color: #000;
@@ -164,6 +165,14 @@ body.is-paused #aboutDialog {
   letter-spacing: 0.08em;
   color: #ffd0d8aa;
 }
+/* Bad-cells side of the add dialog: a stronger, redder headline so
+   the pathogen sections read as visually distinct from the friendly
+   side (which keeps the muted pink). Full opacity + a hotter red
+   hue; the rule scopes to #cellGridBad so other grid sections
+   (e.g. help dialog) aren't affected. */
+#cellGridBad .cell-grid-section > h3 {
+  color: #ff4d5e;
+}
 .cell-grid-section > .cell-grid { margin-bottom: 0; }
 
 .palette-footer {
@@ -231,6 +240,19 @@ body.is-paused #aboutDialog {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+  /* Pin the header to the top of the scrollable panel so the title +
+     close button stay reachable no matter how far the user scrolls.
+     Negative margins + padding cancel the panel's own 16px/20px
+     padding on those three sides, so the sticky bar spans edge-to-
+     edge and the bottom border tucks under the first section. The
+     solid panel bg keeps content from showing through. */
+  position: sticky;
+  top: -16px;
+  z-index: 2;
+  margin: -16px -20px 12px;
+  padding: 16px 20px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
 }
 .settings-panel h2 {
   margin: 0;
@@ -544,6 +566,12 @@ body.is-paused #aboutDialog {
   font-weight: 500;
   border-radius: 8px;
   cursor: pointer;
+  /* Anchor + button share this class so the GitHub link in .actions
+     looks identical to the Copy build / About buttons next to it.
+     text-decoration: none kills the anchor underline; inline-block
+     lets the border + padding lay out the same way a <button> does. */
+  text-decoration: none;
+  display: inline-block;
 }
 
 /* "Now playing" line above the music-volume slider. Label dim,
