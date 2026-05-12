@@ -1344,6 +1344,9 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   }
 
   // Lung — Smoke FBM port (Apache 2.0, FatumR). See WebGL2 comment.
+  // hot/cool ramp reads u.top.rgb / u.bot.rgb so the picker actually
+  // drives the smoke palette. Default state colours match the previous
+  // hard-coded stops.
   if (kind == 4) {
     // 0.00714 — re-tuned to 0.7× current (was 0.0050).
     let plungP = worldPx * 0.00714 + vec2<f32>(0.0, time * 0.08);
@@ -1353,9 +1356,7 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     let n2 = bgFbm(plungP + vec2<f32>(n1));
     let n3 = bgFbm(plungP + vec2<f32>(time * 0.04, 0.0) + vec2<f32>(n2));
     let v = breath * n3;
-    let hot  = vec3<f32>(0.510, 0.204, 0.016);
-    let cool = vec3<f32>(0.529, 0.808, 0.980);
-    col = mix(col, mix(hot, cool, clamp(v, 0.0, 1.0)), 0.85);
+    col = mix(col, mix(u.top.rgb, u.bot.rgb, clamp(v, 0.0, 1.0)), vec3<f32>(0.85));
   }
 
   // ---- Bloodflow (kind 9): shader-test bloodflow default port. ----
@@ -1390,8 +1391,10 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     }
     let csV = -(1.0 / 32.0) * log(max(csSum, 1e-6));
     let csIntensity = 0.03 / pow(max(1.2 - sqrt(max(csV, 0.0)), 0.05), 3.0);
-    let csBaseCol = vec3<f32>(200.0/255.0, 50.0/255.0, 69.0/255.0);
-    col = mix(col, clamp(csBaseCol * csIntensity, vec3<f32>(0.0), vec3<f32>(2.0)), vec3<f32>(0.95));
+    // csBaseCol reads u.base.rgb so the picker drives the voronoi
+    // tint. Default state base (#c83245) matches the previous
+    // hard-coded colour vec3(200/255, 50/255, 69/255).
+    col = mix(col, clamp(u.base.rgb * csIntensity, vec3<f32>(0.0), vec3<f32>(2.0)), vec3<f32>(0.95));
   }
   // ---- Aurora borealis: vertical green/violet ribbons (kind 5) ----
   if (kind == 5) {
@@ -1513,14 +1516,15 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   // pass). Decodes (A * 0.05, B, 0, 1), ramps an acid-green palette on
   // the B concentration. Mirrors webgl2.js FRAG_BG kind == 8 branch.
   if (kind == 8) {
+    // dark/mid/hot ramp reads u.base.rgb / u.bot.rgb / u.top.rgb so
+    // the picker drives the palette. Default state colours match the
+    // previous hard-coded stops (0.02,0.06,0.04) / (0.10,0.40,0.20) /
+    // (0.49,1.00,0.54 = panel accent #7eff8a).
     let rxColor = textureSample(reactorTex, reactorSamp, uv);
     let rxConc = rxColor.rg / vec2<f32>(0.05, 1.0);
     let bN = clamp(rxConc.y * 1.6, 0.0, 1.0);
-    let dark = vec3<f32>(0.02, 0.06, 0.04);
-    let mid  = vec3<f32>(0.10, 0.40, 0.20);
-    let hot  = vec3<f32>(0.49, 1.00, 0.54);   // panel accent #7eff8a
-    col = mix(mix(dark, mid, smoothstep(0.0, 0.45, bN)),
-              hot, smoothstep(0.45, 0.92, bN));
+    col = mix(mix(u.base.rgb, u.bot.rgb, smoothstep(0.0, 0.45, bN)),
+              u.top.rgb, smoothstep(0.45, 0.92, bN));
   }
 
   // Vignette: darken the corners. Aspect-corrected so the falloff

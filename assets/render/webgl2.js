@@ -747,6 +747,9 @@ void main() {
     // 0.00714 — user re-tuned the lung to 0.7× current (was 0.0050
     // after the original "0.2× scale" step). Features visibly bigger
     // than the prior tweak, still finer than the initial 0.0010.
+    // hot/cool ramp reads u_top / u_bot so the picker actually drives
+    // the smoke palette. Default state colours match the previous
+    // hard-coded stops (0.510,0.204,0.016) / (0.529,0.808,0.980).
     vec2 plungP = worldPx * 0.00714 + vec2(0.0, u_time * 0.08);
     float breath = 0.55 + 0.20 * sin(u_time * 0.6);
     float n0 = bgFbm(plungP * 0.5);
@@ -754,9 +757,7 @@ void main() {
     float n2 = bgFbm(plungP + n1);
     float n3 = bgFbm(plungP + vec2(u_time * 0.04, 0.0) + n2);
     float v = breath * n3;
-    vec3 hot  = vec3(0.510, 0.204, 0.016);
-    vec3 cool = vec3(0.529, 0.808, 0.980);
-    col = mix(col, mix(hot, cool, clamp(v, 0.0, 1.0)), 0.85);
+    col = mix(col, mix(u_top, u_bot, clamp(v, 0.0, 1.0)), 0.85);
   }
 
   // ---- Bloodflow (kind 9): port of shader-test's 'bloodflow ·
@@ -798,8 +799,10 @@ void main() {
     }
     float cs_v = -(1.0 / 32.0) * log(max(cs_sum, 1e-6));
     float cs_intensity = 0.03 / pow(max(1.2 - sqrt(max(cs_v, 0.0)), 0.05), 3.0);
-    vec3 cs_baseCol = vec3(200.0/255.0, 50.0/255.0, 69.0/255.0);
-    col = mix(col, clamp(cs_baseCol * cs_intensity, 0.0, 2.0), 0.95);
+    // cs_baseCol reads u_base so the picker drives the voronoi tint.
+    // Default state base (#c83245) matches the previous hard-coded
+    // colour vec3(200/255, 50/255, 69/255).
+    col = mix(col, clamp(u_base * cs_intensity, 0.0, 2.0), 0.95);
   }
   // ---- Aurora borealis: vertical ribbons of green/violet (kind 5) ----
   // Ribbon density driven by domain-warped fbm; brightness peaks in
@@ -944,14 +947,15 @@ void main() {
   // tint where A ≈ 1 stays untouched. Step + seed shaders run in their
   // own off-screen passes — see _reactorStep / _reactorSeed.
   if (u_kind == 8) {
+    // dark/mid/hot ramp reads u_base / u_bot / u_top so the picker
+    // actually drives the acid-green palette. Default state colours
+    // match the previous hard-coded stops (0.02,0.06,0.04) /
+    // (0.10,0.40,0.20) / (0.49,1.00,0.54 = panel accent #7eff8a).
     vec4 rxColor = texture(u_reactorTex, v_uv);
     vec2 rxConc = rxColor.rg / vec2(0.05, 1.0);
     float bN = clamp(rxConc.y * 1.6, 0.0, 1.0);
-    vec3 dark = vec3(0.02, 0.06, 0.04);
-    vec3 mid  = vec3(0.10, 0.40, 0.20);
-    vec3 hot  = vec3(0.49, 1.00, 0.54);   // panel accent #7eff8a
-    col = mix(mix(dark, mid, smoothstep(0.0, 0.45, bN)),
-              hot, smoothstep(0.45, 0.92, bN));
+    col = mix(mix(u_base, u_bot, smoothstep(0.0, 0.45, bN)),
+              u_top, smoothstep(0.45, 0.92, bN));
   }
 
   // Vignette: darken the corners. Aspect-corrected so the falloff
