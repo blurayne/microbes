@@ -10,9 +10,13 @@ file in sync.
 
 ## Open
 
-- [ ] **Unified overlay stack (checkbox-in-row, chained FBO pipeline)** — [`.claude/plan/11-unified-overlay-stack.md`](./.claude/plan/11-unified-overlay-stack.md) — split into PRs A–D; see plan file.
+_(none)_
 
 ## Done
+
+- [x] **Background-size slider (uniform feature scale across all bg patterns)** — [`.claude/plan/12-bg-scale-slider.md`](./.claude/plan/12-bg-scale-slider.md) (#178)
+
+- [x] **Unified overlay stack (checkbox-in-row, chained FBO pipeline)** — [`.claude/plan/11-unified-overlay-stack.md`](./.claude/plan/11-unified-overlay-stack.md) (PR A #161 · PR B #162 · PR C #163 · PR D #164 · PR D2 #168)
 
 - [x] **Background layer stack (drag-drop compositable bgs)** — [`.claude/plan/10-bg-layer-stack.md`](./.claude/plan/10-bg-layer-stack.md) (PR A #143 · PR B #151 · PR C #152 · PR D #153)
 
