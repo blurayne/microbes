@@ -969,17 +969,17 @@ if (vignetteBlendEl) {
 // reset needed.
 const overlayOrderListEl = document.getElementById('overlayOrderList');
 const OVERLAY_KIND_META = {
-  duotone:    { stateField: 'makeItReal',      labelKey: 'overlay_kind_duotone',    onChange: () => applyMakeItRealVis() },
-  noise:      { stateField: 'staticNoise',     labelKey: 'overlay_kind_noise',      onChange: () => applyStaticNoiseVis() },
-  vignette:   { stateField: 'vignette',        labelKey: 'overlay_kind_vignette',   onChange: () => applyVignetteVis() },
-  crosshair:  { stateField: 'crosshair',       labelKey: 'overlay_kind_crosshair',  onChange: () => {} },
-  microscope: { stateField: 'microscopeBlur',  labelKey: 'overlay_kind_microscope', onChange: () => applyMicroscopeBlurVis() },
-  caustics:   { stateField: 'causticsOverlay', labelKey: 'overlay_kind_caustics',   onChange: () => applyCausticsControlsVis() },
-  celltype:   { stateField: 'cellTypeOverlay', labelKey: 'overlay_kind_celltype',   onChange: () => {
+  duotone:    { stateField: 'makeItReal',      labelKey: 'overlay_kind_duotone',    subId: 'makeItRealControls',     onChange: () => applyMakeItRealVis() },
+  noise:      { stateField: 'staticNoise',     labelKey: 'overlay_kind_noise',      subId: 'staticNoiseControls',    onChange: () => applyStaticNoiseVis() },
+  vignette:   { stateField: 'vignette',        labelKey: 'overlay_kind_vignette',   subId: 'vignetteControls',       onChange: () => applyVignetteVis() },
+  crosshair:  { stateField: 'crosshair',       labelKey: 'overlay_kind_crosshair',  subId: null,                     onChange: () => {} },
+  microscope: { stateField: 'microscopeBlur',  labelKey: 'overlay_kind_microscope', subId: 'microscopeBlurControls', onChange: () => applyMicroscopeBlurVis() },
+  caustics:   { stateField: 'causticsOverlay', labelKey: 'overlay_kind_caustics',   subId: 'causticsControls',       onChange: () => applyCausticsControlsVis() },
+  celltype:   { stateField: 'cellTypeOverlay', labelKey: 'overlay_kind_celltype',   subId: null,                     onChange: () => {
     // Keep the eye-FAB's aria-pressed in sync with the list checkbox.
     if (eyeBtn) eyeBtn.setAttribute('aria-pressed', String(!!S.cellTypeOverlay));
   } },
-  ripples:    { stateField: 'liquidRipples',   labelKey: 'overlay_kind_ripples',    onChange: () => applyRippleControlsVis() },
+  ripples:    { stateField: 'liquidRipples',   labelKey: 'overlay_kind_ripples',    subId: 'rippleControls',         onChange: () => applyRippleControlsVis() },
 };
 let _overlayDragFromIndex = -1;
 function renderOverlayOrderList() {
@@ -1066,6 +1066,15 @@ function renderOverlayOrderList() {
     });
 
     overlayOrderListEl.appendChild(row);
+    // Inline sub-controls: move the existing slider/blend block (if
+    // any) from wherever it lives in the DOM to directly under this
+    // row. We move the same node each time so the bindRange-attached
+    // event listeners survive the relocation. The block stays
+    // `hidden` until its overlay is enabled (apply*ControlsVis).
+    if (meta.subId) {
+      const sub = document.getElementById(meta.subId);
+      if (sub) overlayOrderListEl.appendChild(sub);
+    }
   });
 }
 function moveOverlayOrder(from, to) {
