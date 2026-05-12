@@ -46,11 +46,6 @@ export const DEFAULTS = {
   cellTypeOverlay: false,   // eye-toggle: per-cell ring + text label identifying the cell type. HTML overlay above the canvas; renderer-agnostic.
   causticsOverlay: false,   // water-turbulence post-process applied on top of the rendered background. WebGL2 + WebGPU only; Canvas2D is a no-op.
   liquidRipples: false,     // bg post-process: each on-screen cell radiates concentric ripples that distort the background — reads as cells moving through liquid. WebGL2 + WebGPU only; Canvas2D is a no-op.
-  // Scope of the ripple distortion. 'scene' (default) distorts the
-  // whole rendered scene (bg + cells + particles + antibodies);
-  // 'bg' restricts it to the background layer only — cells render
-  // crisply on top, ripples only show in the liquid around them.
-  rippleScope: 'scene',
   // Caustics tint — modulates the green/teal cast added on top of
   // the rendered scene. Defaults reproduce the historical (0, 1.35,
   // 0.5) bias; lower values toward 0 fade toward neutral white.
@@ -66,14 +61,28 @@ export const DEFAULTS = {
   vignetteIntensity: 0.6,
   vignetteBlend: 'additive',
   crosshair: false,              // small cyan + at viewport centre
-  // FX overlay draw order. The three fixed-function FX overlays
-  // chain via canvas blends — each samples what's already on the
-  // framebuffer, so order is user-visible (e.g., noise over
-  // crosshair vs crosshair over noise look different). User-
-  // reorderable via the sortable list in Settings → Overlays;
-  // renderers iterate this array each frame, so reorder takes
-  // effect on the next draw without any explicit pipeline reset.
-  fxOrder: ['noise', 'vignette', 'crosshair'],
+  // Unified overlay draw order. Every overlay (FX blends + FBO
+  // passes + the HTML cell-type overlay) is a single entry in
+  // this array. The 'scene' entry is a fixed pin marking where
+  // the cell pass runs: overlays *above* the pin run after cells
+  // (full-scene post-process); overlays *below* the pin run
+  // before cells (bg-only post-process). The pin can't be
+  // dragged or removed; the migration shim in loadSettings
+  // collapses the old fxOrder + rippleScope into this array.
+  // Renderers read overlayFxOrder() / overlayKindRunsAfterScene()
+  // helpers — they don't touch the array directly.
+  overlayOrder: [
+    'duotone',     // duotone color grade (S.makeItReal)
+    'noise',       // film-grain (S.staticNoise)
+    'vignette',    // microscope corner-tint (S.vignette)
+    'crosshair',   // viewport centre crosshair (S.crosshair)
+    'microscope',  // variable-radius blur (S.microscopeBlur)
+    'caustics',    // water-turbulence tint (S.causticsOverlay)
+    'celltype',    // HTML cell-type label overlay (S.cellTypeOverlay)
+    'ripples',     // liquid ripples (S.liquidRipples) — above the pin = full-scene scope (matches legacy default)
+    'scene',       // ← fixed scene pin (cells render here)
+                   //   drag an overlay below this line to make it run BEFORE cells (bg-only)
+  ],
   // Microscope distortion: scene-wide variable-radius blur. Sharp
   // center (focus zone) with progressively blurrier edges. Knobs:
   // focus = sharp-zone radius as fraction of min(W,H)/2; strength =
@@ -187,6 +196,104 @@ const VALID_RENDER_SCALES = [1, 0.5, 0.25, 0.125];
 // settings dropdown shows them as disabled "(soon)" entries.
 const KNOWN_GAME_MODES = ['free'];
 
+// Overlay-stack kinds. Order in this list is incidental; the
+// authoritative draw order is the per-user S.overlayOrder array.
+// 'scene' is the fixed cell-pass pin — exactly one entry per array.
+const OVERLAY_FX_KINDS    = ['noise', 'vignette', 'crosshair'];
+const OVERLAY_SCENE_PIN   = 'scene';
+const KNOWN_OVERLAY_KINDS = [
+  'duotone', 'noise', 'vignette', 'crosshair',
+  'microscope', 'caustics', 'celltype',
+  'ripples',
+  OVERLAY_SCENE_PIN,
+];
+
+// Validate / normalise an overlayOrder array in-place style: takes
+// the raw user value (or undefined) plus optional legacy fxOrder +
+// rippleScope and returns a clean array containing every known
+// overlay kind exactly once, with the scene pin present exactly
+// once. Unknown entries are dropped; duplicates collapse to the
+// first occurrence; missing kinds are appended at their default
+// position relative to the pin.
+function normaliseOverlayOrder(rawOrder, legacyFxOrder, legacyRippleScope) {
+  const defaults = DEFAULTS.overlayOrder;
+  let order = Array.isArray(rawOrder) ? rawOrder.slice() : null;
+
+  if (!order) {
+    // No saved overlayOrder — synthesise from defaults + legacy fields.
+    order = defaults.slice();
+    if (Array.isArray(legacyFxOrder)) {
+      // Splice the FX-subset positions to follow the legacy order.
+      const fxSet = new Set(OVERLAY_FX_KINDS);
+      const slots = [];
+      order.forEach((k, i) => { if (fxSet.has(k)) slots.push(i); });
+      legacyFxOrder.forEach((k, j) => {
+        if (OVERLAY_FX_KINDS.includes(k) && slots[j] !== undefined) {
+          order[slots[j]] = k;
+        }
+      });
+    }
+    if (legacyRippleScope === 'bg') {
+      // Move 'ripples' from above the pin (default) to below.
+      const ri = order.indexOf('ripples');
+      const si = order.indexOf(OVERLAY_SCENE_PIN);
+      if (ri >= 0 && si >= 0 && ri < si) {
+        order.splice(ri, 1);
+        const newPinIdx = order.indexOf(OVERLAY_SCENE_PIN);
+        order.splice(newPinIdx + 1, 0, 'ripples');
+      }
+    }
+  }
+
+  // Drop unknown kinds.
+  order = order.filter(k => KNOWN_OVERLAY_KINDS.includes(k));
+
+  // Collapse duplicates (first occurrence wins).
+  const seen = new Set();
+  order = order.filter(k => {
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  // Append any missing kinds at their default position relative to
+  // the scene pin (above if they're above in DEFAULTS, below if below).
+  const presentSet = new Set(order);
+  const defPinIdx = defaults.indexOf(OVERLAY_SCENE_PIN);
+  for (const k of KNOWN_OVERLAY_KINDS) {
+    if (presentSet.has(k)) continue;
+    if (k === OVERLAY_SCENE_PIN) continue; // handled below
+    const defIdx = defaults.indexOf(k);
+    if (defIdx < defPinIdx) {
+      // Default position is above the pin — insert at the top of
+      // the above-pin section (preserves "post-process" semantics).
+      const pinIdx = order.indexOf(OVERLAY_SCENE_PIN);
+      if (pinIdx >= 0) order.splice(pinIdx, 0, k);
+      else order.unshift(k);
+    } else {
+      order.push(k);
+    }
+    presentSet.add(k);
+  }
+
+  // Scene pin must appear exactly once.
+  if (!presentSet.has(OVERLAY_SCENE_PIN)) {
+    // No pin in user order — insert at the same position as in DEFAULTS.
+    let insertAt = defPinIdx;
+    if (insertAt > order.length) insertAt = order.length;
+    order.splice(insertAt, 0, OVERLAY_SCENE_PIN);
+  }
+
+  return order;
+}
+
+export const OVERLAY_KIND_LIST  = KNOWN_OVERLAY_KINDS;
+export const OVERLAY_FX_LIST    = OVERLAY_FX_KINDS;
+export const OVERLAY_SCENE_KEY  = OVERLAY_SCENE_PIN;
+// Exported for unit tests only; production code goes through
+// loadSettings(). Underscore prefix marks "internal-but-visible".
+export const _normaliseOverlayOrder = normaliseOverlayOrder;
+
 export function loadSettings() {
   if (typeof localStorage === 'undefined') return { ...DEFAULTS };
   try {
@@ -250,22 +357,22 @@ export function loadSettings() {
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
     const validMetaOutlineModes = ['edge', 'sdf', 'polygon'];
     if (!validMetaOutlineModes.includes(parsed.metaOutlineMode)) parsed.metaOutlineMode = DEFAULTS.metaOutlineMode;
-    const validRippleScopes = ['scene', 'bg'];
-    if (!validRippleScopes.includes(parsed.rippleScope)) parsed.rippleScope = DEFAULTS.rippleScope;
     const validAddDialogViews = ['grid', 'list'];
     if (!validAddDialogViews.includes(parsed.addDialogView)) parsed.addDialogView = DEFAULTS.addDialogView;
     const validBlendModes = ['normal', 'multiply', 'additive'];
     if (!validBlendModes.includes(parsed.staticNoiseBlend)) parsed.staticNoiseBlend = DEFAULTS.staticNoiseBlend;
     if (!validBlendModes.includes(parsed.vignetteBlend))    parsed.vignetteBlend    = DEFAULTS.vignetteBlend;
-    // fxOrder: must be a permutation of the three known FX overlay
-    // ids. Missing / wrong-shape / unknown entries → reset to default.
-    const FX_ORDER_KINDS = ['noise', 'vignette', 'crosshair'];
-    if (!Array.isArray(parsed.fxOrder)
-        || parsed.fxOrder.length !== FX_ORDER_KINDS.length
-        || parsed.fxOrder.some(k => !FX_ORDER_KINDS.includes(k))
-        || new Set(parsed.fxOrder).size !== FX_ORDER_KINDS.length) {
-      parsed.fxOrder = [...DEFAULTS.fxOrder];
-    }
+    // Overlay stack: collapse legacy fxOrder + rippleScope into the
+    // unified overlayOrder array. The shim runs every load — old
+    // values are read once, then both legacy fields are deleted from
+    // the parsed blob so they no longer round-trip through saveSettings.
+    parsed.overlayOrder = normaliseOverlayOrder(
+      parsed.overlayOrder,
+      parsed.fxOrder,
+      parsed.rippleScope,
+    );
+    delete parsed.fxOrder;
+    delete parsed.rippleScope;
     // Microscope post-FX sliders all live on [0, 1].
     const clamp01 = (v, fallback) => {
       const n = typeof v === 'number' && Number.isFinite(v) ? v : fallback;
@@ -346,6 +453,66 @@ export function saveSettings() {
 }
 
 export const S = loadSettings();
+
+// ---------- Overlay-stack helpers ----------
+// Renderers + UI talk to S.overlayOrder through these helpers
+// instead of indexing the array directly. Keeps the "scene pin
+// is at most one entry" invariant out of every call site.
+
+// Returns the FX-blend subset of overlayOrder in user order
+// (e.g. ['vignette','noise','crosshair']). Used by renderers
+// that still iterate just the cheap-blend FX trio.
+export function overlayFxOrder() {
+  const order = Array.isArray(S.overlayOrder) ? S.overlayOrder : [];
+  return order.filter(k => OVERLAY_FX_KINDS.includes(k));
+}
+
+// Replace the FX-kind positions inside S.overlayOrder with the
+// supplied permutation, preserving every non-FX entry's slot.
+// Used by the legacy fxOrder UI in app.js so reorders survive
+// until PR B replaces the UI entirely.
+export function setOverlayFxOrder(newFxOrder) {
+  if (!Array.isArray(newFxOrder)) return;
+  const order = S.overlayOrder;
+  if (!Array.isArray(order)) return;
+  const slots = [];
+  order.forEach((k, i) => { if (OVERLAY_FX_KINDS.includes(k)) slots.push(i); });
+  newFxOrder.forEach((k, j) => {
+    if (OVERLAY_FX_KINDS.includes(k) && slots[j] !== undefined) {
+      order[slots[j]] = k;
+    }
+  });
+}
+
+// True iff `kind` is positioned above the scene pin in
+// overlayOrder — i.e. runs as a full-scene post-process after
+// the cell pass. Returns false when the kind appears below the
+// pin (bg-only) or isn't present at all.
+export function overlayKindRunsAfterScene(kind) {
+  const order = Array.isArray(S.overlayOrder) ? S.overlayOrder : [];
+  const ki = order.indexOf(kind);
+  const si = order.indexOf(OVERLAY_SCENE_PIN);
+  if (ki < 0 || si < 0) return false;
+  return ki < si;
+}
+
+// Move the entry `kind` to the requested side of the scene pin.
+// `side` is 'after' (above pin = full-scene) or 'before'
+// (below pin = bg-only). No-op if `kind` is the pin itself.
+export function setOverlayKindSide(kind, side) {
+  if (kind === OVERLAY_SCENE_PIN) return;
+  const order = S.overlayOrder;
+  if (!Array.isArray(order)) return;
+  const ki = order.indexOf(kind);
+  if (ki < 0) return;
+  const wantsAfter = side === 'after';
+  const currentlyAfter = overlayKindRunsAfterScene(kind);
+  if (wantsAfter === currentlyAfter) return;
+  order.splice(ki, 1);
+  const pin = order.indexOf(OVERLAY_SCENE_PIN);
+  if (wantsAfter) order.splice(pin, 0, kind);                // just above
+  else            order.splice(pin + 1, 0, kind);            // just below
+}
 
 // First-run language auto-detect; only fires when no preference was saved.
 if (!S._langSet) {
