@@ -112,6 +112,7 @@ export const DEFAULTS = {
   showFPS: false,
   showObjectCount: false,   // append live cell + particle count to the FPS line
   navArrows: true,          // edge-of-screen arrows pointing at off-screen cells
+  navMode: 'floating',      // 'floating' = 4 fixed-edge aggregate arrows; 'anchored' = per-cell arrows sliding along the screen edge, with 1D-greedy clustering when crowded. Default keeps the original UX.
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
   friction: 0.80,
@@ -356,6 +357,8 @@ export function loadSettings() {
     // Migrate legacy renderer values (pixi / pixi-webgpu / pixi-webgl2) to
     // the new default. Pixi support was removed in favour of native WebGPU.
     if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
+    const validNavModes = ['floating', 'anchored'];
+    if (!validNavModes.includes(parsed.navMode)) parsed.navMode = DEFAULTS.navMode;
     const validMetaRtModes = ['bbox', 'fullCanvas', 'sharedMax'];
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
     const validMetaOutlineModes = ['edge', 'sdf', 'polygon'];
@@ -654,6 +657,7 @@ export const LOCALES = {
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
     mode_kill: 'Kill mode', mode_kill_tip: 'Tap a cell to make it explode',
     cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS', show_renderer: 'Show renderer', show_build_info: 'Show build info', show_object_count: 'Show object count', nav_arrows: 'Off-screen arrows',
+    nav_mode: 'Arrow mode', nav_mode_floating: 'Floating (4 fixed)', nav_mode_anchored: 'Anchored (slide along edge)',
     copy_build: 'Copy build SHA', toast_build_copied: 'Build SHA copied to clipboard', toast_build_copy_failed: 'Copy failed', build_stamp_copy_hint: 'Click to copy full build SHA',
     show_field: 'Show metaball field', render_scale: 'Render scale',
     upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
@@ -845,6 +849,7 @@ export const LOCALES = {
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
     mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zelle antippen, sie zerplatzt',
     cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen', show_object_count: 'Objektanzahl anzeigen', nav_arrows: 'Pfeile außerhalb des Bildes',
+    nav_mode: 'Pfeilmodus', nav_mode_floating: 'Schwebend (4 fest)', nav_mode_anchored: 'Verankert (am Rand entlang)',
     copy_build: 'Build-SHA kopieren', toast_build_copied: 'Build-SHA in Zwischenablage kopiert', toast_build_copy_failed: 'Kopieren fehlgeschlagen', build_stamp_copy_hint: 'Klicken, um die vollständige Build-SHA zu kopieren',
     show_field: 'Metaball-Feld zeigen', render_scale: 'Renderskala',
     upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',

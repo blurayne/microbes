@@ -1289,6 +1289,19 @@ bindCheckbox('showObjectCount', 'showObjectCount');
 // Off-screen navigation arrows: just the toggle persistence; the
 // frame-loop hook (updateNavArrows) reads S.navArrows each tick.
 bindCheckbox('navArrows', 'navArrows');
+// Arrow mode select — 'floating' = 4 fixed edge arrows (original),
+// 'anchored' = per-cell arrows sliding along the screen edge with
+// greedy 1D clustering. NavArrows.update reads S.navMode directly.
+const navModeSel = document.getElementById('navMode');
+if (navModeSel) {
+  navModeSel.value = S.navMode;
+  navModeSel.addEventListener('change', () => {
+    if (navModeSel.value === 'floating' || navModeSel.value === 'anchored') {
+      S.navMode = navModeSel.value;
+      saveSettings();
+    }
+  });
+}
 
 // splitMode radios removed from settings late 2026; field still
 // honoured by sim.js (default 'bondDrift' from DEFAULTS).
