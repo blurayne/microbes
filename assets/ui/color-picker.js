@@ -9,8 +9,8 @@
 //
 // Layout:
 //   ┌──────────────────────────┐
-//   │ [SV square (256×256)]    │
-//   │ [Hue strip]              │
+//   │ [SV square (200×160)]    │
+//   │ [Hue strip — horizontal] │
 //   │ [Alpha slider]  (opt.)   │
 //   │ [Hex input] [swatch]     │
 //   │ [Cancel]    [OK]         │
@@ -160,8 +160,9 @@ export function openColorPicker({ initial, allowAlpha = false, anchor, onChange,
   const svCtx = svCanvas.getContext('2d');
   popover.appendChild(svCanvas);
 
-  // Hue strip (vertical band, 1D — drawn as a CSS gradient,
-  // overlaid with a draggable thumb).
+  // Hue strip (horizontal band, 1D — drawn as a CSS gradient,
+  // overlaid with a draggable thumb). Matches the alpha slider
+  // axis so both sliders read the same way.
   const hueStrip = document.createElement('div');
   hueStrip.className = 'cp-hue';
   const hueThumb = document.createElement('div');
@@ -283,7 +284,7 @@ export function openColorPicker({ initial, allowAlpha = false, anchor, onChange,
   }
 
   function refreshHue() {
-    hueThumb.style.top = (h * 100) + '%';
+    hueThumb.style.left = (h * 100) + '%';
   }
 
   function refreshText() {
@@ -325,7 +326,7 @@ export function openColorPicker({ initial, allowAlpha = false, anchor, onChange,
   // Hue drag.
   function huePointer(e) {
     const r = hueStrip.getBoundingClientRect();
-    h = clamp01((e.clientY - r.top) / r.height);
+    h = clamp01((e.clientX - r.left) / r.width);
     refreshAll();
   }
   hueStrip.addEventListener('pointerdown', (e) => {

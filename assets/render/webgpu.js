@@ -1344,6 +1344,9 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   }
 
   // Lung — Smoke FBM port (Apache 2.0, FatumR). See WebGL2 comment.
+  // hot/cool ramp reads u.top.rgb / u.bot.rgb so the picker actually
+  // drives the smoke palette. Default state colours match the previous
+  // hard-coded stops.
   if (kind == 4) {
     // 0.00714 — re-tuned to 0.7× current (was 0.0050).
     let plungP = worldPx * 0.00714 + vec2<f32>(0.0, time * 0.08);
@@ -1353,19 +1356,21 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     let n2 = bgFbm(plungP + vec2<f32>(n1));
     let n3 = bgFbm(plungP + vec2<f32>(time * 0.04, 0.0) + vec2<f32>(n2));
     let v = breath * n3;
-    let hot  = vec3<f32>(0.510, 0.204, 0.016);
-    let cool = vec3<f32>(0.529, 0.808, 0.980);
-    col = mix(col, mix(hot, cool, clamp(v, 0.0, 1.0)), 0.85);
+    col = mix(col, mix(u.top.rgb, u.bot.rgb, clamp(v, 0.0, 1.0)), vec3<f32>(0.85));
   }
 
   // ---- Bloodflow (kind 9): shader-test bloodflow default port. ----
+  // Colour ramp reads u.bot → u.top → 1.5×u.top so the in-app
+  // picker actually drives the look. Default state colours are
+  // calibrated to match the previous hard-coded ramp.
   if (kind == 9) {
     // 0.012 — bloodflow 0.1× (features 10× smaller than original).
     let bfP = worldPx * 0.012 + vec2<f32>(time * 0.04, time * 0.03);
     let bfN = bgFbm(bfP);
     let bfRbc = bgFbm(worldPx * 0.0030 + vec2<f32>(0.0, time * 0.15));
-    var bfBase = mix(vec3<f32>(0.18, 0.03, 0.05), vec3<f32>(0.42, 0.06, 0.08), vec3<f32>(bfN));
-    bfBase = mix(bfBase, vec3<f32>(0.62, 0.10, 0.14), vec3<f32>(smoothstep(0.55, 0.75, bfRbc) * 0.5));
+    let bfHi = clamp(u.top.rgb * 1.5, vec3<f32>(0.0), vec3<f32>(1.0));
+    var bfBase = mix(u.bot.rgb, u.top.rgb, vec3<f32>(bfN));
+    bfBase = mix(bfBase, bfHi, vec3<f32>(smoothstep(0.55, 0.75, bfRbc) * 0.5));
     col = mix(col, bfBase, vec3<f32>(0.85));
   }
   // ---- Cell shadow (kind 10): voronoi port. CC BY-NC-SA 3.0. ----
@@ -1386,8 +1391,10 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     }
     let csV = -(1.0 / 32.0) * log(max(csSum, 1e-6));
     let csIntensity = 0.03 / pow(max(1.2 - sqrt(max(csV, 0.0)), 0.05), 3.0);
-    let csBaseCol = vec3<f32>(200.0/255.0, 50.0/255.0, 69.0/255.0);
-    col = mix(col, clamp(csBaseCol * csIntensity, vec3<f32>(0.0), vec3<f32>(2.0)), vec3<f32>(0.95));
+    // csBaseCol reads u.base.rgb so the picker drives the voronoi
+    // tint. Default state base (#c83245) matches the previous
+    // hard-coded colour vec3(200/255, 50/255, 69/255).
+    col = mix(col, clamp(u.base.rgb * csIntensity, vec3<f32>(0.0), vec3<f32>(2.0)), vec3<f32>(0.95));
   }
   // ---- Aurora borealis: vertical green/violet ribbons (kind 5) ----
   if (kind == 5) {
@@ -1415,17 +1422,17 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   }
 
   // ---- Lava / fire: boiling fbm (kind 7) ----
+  // Hot gradient: base → bot → top → peak (clamped 2×u.top) so the
+  // picker drives all the hot tendrils. Default state colours match
+  // the previous hard-coded ramp.
   if (kind == 7) {
     var p = worldPx * 0.005;
     p.y = p.y - time * 1.2;
     let n = bgFbm(p + vec2<f32>(bgFbm(p * 0.5 + vec2<f32>(time * 0.05, time * 0.05))));
-    let black   = vec3<f32>(0.05, 0.01, 0.00);
-    let deepRed = vec3<f32>(0.50, 0.03, 0.01);
-    let orange  = vec3<f32>(1.00, 0.45, 0.05);
-    let yellow  = vec3<f32>(1.00, 0.92, 0.50);
-    var hot = mix(black, deepRed, smoothstep(0.20, 0.45, n));
-    hot     = mix(hot,   orange,  smoothstep(0.45, 0.70, n));
-    hot     = mix(hot,   yellow,  smoothstep(0.70, 0.95, n));
+    let peak = clamp(u.top.rgb * 2.0, vec3<f32>(0.0), vec3<f32>(1.0));
+    var hot = mix(u.base.rgb, u.bot.rgb, smoothstep(0.20, 0.45, n));
+    hot     = mix(hot,       u.top.rgb, smoothstep(0.45, 0.70, n));
+    hot     = mix(hot,       peak,      smoothstep(0.70, 0.95, n));
     col = mix(col, hot, 0.85);
   }
 
@@ -1509,14 +1516,15 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   // pass). Decodes (A * 0.05, B, 0, 1), ramps an acid-green palette on
   // the B concentration. Mirrors webgl2.js FRAG_BG kind == 8 branch.
   if (kind == 8) {
+    // dark/mid/hot ramp reads u.base.rgb / u.bot.rgb / u.top.rgb so
+    // the picker drives the palette. Default state colours match the
+    // previous hard-coded stops (0.02,0.06,0.04) / (0.10,0.40,0.20) /
+    // (0.49,1.00,0.54 = panel accent #7eff8a).
     let rxColor = textureSample(reactorTex, reactorSamp, uv);
     let rxConc = rxColor.rg / vec2<f32>(0.05, 1.0);
     let bN = clamp(rxConc.y * 1.6, 0.0, 1.0);
-    let dark = vec3<f32>(0.02, 0.06, 0.04);
-    let mid  = vec3<f32>(0.10, 0.40, 0.20);
-    let hot  = vec3<f32>(0.49, 1.00, 0.54);   // panel accent #7eff8a
-    col = mix(mix(dark, mid, smoothstep(0.0, 0.45, bN)),
-              hot, smoothstep(0.45, 0.92, bN));
+    col = mix(mix(u.base.rgb, u.bot.rgb, smoothstep(0.0, 0.45, bN)),
+              u.top.rgb, smoothstep(0.45, 0.92, bN));
   }
 
   // Vignette: darken the corners. Aspect-corrected so the falloff
@@ -2736,11 +2744,15 @@ export class WebGPURenderer extends RendererBase {
 
   _reactorRt(idx) { return idx === 0 ? this._reactorRtA : this._reactorRtB; }
 
-  _reactorSeed() {
+  _reactorSeed(seedCount) {
     const device = this.device;
     const front = this._reactorRt(this._reactorFront);
     const back  = this._reactorRt(1 - this._reactorFront);
-    const count = 5 + Math.floor(Math.random() * 4);
+    // Caller passes the desired count; fall back to a randomised 5..8
+    // when called without an argument (legacy path).
+    const count = (typeof seedCount === 'number' && seedCount > 0)
+      ? Math.max(1, Math.min(REACTOR_MAX_SEEDS_WGPU, seedCount | 0))
+      : (5 + Math.floor(Math.random() * 4));
     const u = this._reactorSeedScratch;
     u[0] = this._reactorRtSize.w;
     u[1] = this._reactorRtSize.h;
@@ -3365,15 +3377,22 @@ export class WebGPURenderer extends RendererBase {
     // Reactor (Gray-Scott): run the simulation step once per frame if
     // ANY layer references kind='reactor'. Reactor layers all sample
     // the same RT, so a single step suffices regardless of how many
-    // reactor layers exist in the stack.
-    const hasReactor = layers.some(l => l.kind === 'reactor');
+    // reactor layers exist in the stack. Per-layer fields (seedCount,
+    // reseedSec, simSpeed) come from the first reactor layer.
+    const reactorLayer = layers.find(l => l.kind === 'reactor');
+    const hasReactor = !!reactorLayer;
     if (hasReactor) {
       this._reactorEnsureRts();
-      if (timeMs - this._reactorLastSeedMs > 10000) {
-        this._reactorSeed();
+      const reseedSec = Math.max(0.1, +reactorLayer.reseedSec || 10);
+      if (timeMs - this._reactorLastSeedMs > reseedSec * 1000) {
+        const seedCount = Math.max(1, Math.min(REACTOR_MAX_SEEDS_WGPU,
+          Math.round(+reactorLayer.seedCount || 6)));
+        this._reactorSeed(seedCount);
         this._reactorLastSeedMs = timeMs;
       }
-      this._reactorStep(5);
+      const simSpeed = Math.max(0, Math.min(15,
+        Math.round(+reactorLayer.simSpeed ?? 5)));
+      if (simSpeed > 0) this._reactorStep(simSpeed);
     } else if (this._reactorRtA) {
       // No layer references reactor — release RT GPU memory. Pipelines
       // + the sampler + dummy stay so a return to the theme is cheap.

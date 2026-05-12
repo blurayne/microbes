@@ -747,6 +747,9 @@ void main() {
     // 0.00714 — user re-tuned the lung to 0.7× current (was 0.0050
     // after the original "0.2× scale" step). Features visibly bigger
     // than the prior tweak, still finer than the initial 0.0010.
+    // hot/cool ramp reads u_top / u_bot so the picker actually drives
+    // the smoke palette. Default state colours match the previous
+    // hard-coded stops (0.510,0.204,0.016) / (0.529,0.808,0.980).
     vec2 plungP = worldPx * 0.00714 + vec2(0.0, u_time * 0.08);
     float breath = 0.55 + 0.20 * sin(u_time * 0.6);
     float n0 = bgFbm(plungP * 0.5);
@@ -754,9 +757,7 @@ void main() {
     float n2 = bgFbm(plungP + n1);
     float n3 = bgFbm(plungP + vec2(u_time * 0.04, 0.0) + n2);
     float v = breath * n3;
-    vec3 hot  = vec3(0.510, 0.204, 0.016);
-    vec3 cool = vec3(0.529, 0.808, 0.980);
-    col = mix(col, mix(hot, cool, clamp(v, 0.0, 1.0)), 0.85);
+    col = mix(col, mix(u_top, u_bot, clamp(v, 0.0, 1.0)), 0.85);
   }
 
   // ---- Bloodflow (kind 9): port of shader-test's 'bloodflow ·
@@ -767,11 +768,15 @@ void main() {
     // 0.012 — user spec "scale bloodflow by 0.1x" (features 10x
     // smaller than original 0.0012; far denser pattern across the
     // viewport).
+    // Colour ramp reads u_bot → u_top → 1.5×u_top so the in-app
+    // picker actually drives the look. Default state colours are
+    // calibrated to match the previous hard-coded ramp.
     vec2 bf_p = worldPx * 0.012 + vec2(u_time * 0.04, u_time * 0.03);
     float bf_n = bgFbm(bf_p);
     float bf_rbc = bgFbm(worldPx * 0.0030 + vec2(0.0, u_time * 0.15));
-    vec3 bf_base = mix(vec3(0.18, 0.03, 0.05), vec3(0.42, 0.06, 0.08), bf_n);
-    bf_base = mix(bf_base, vec3(0.62, 0.10, 0.14), smoothstep(0.55, 0.75, bf_rbc) * 0.5);
+    vec3 bf_hi = clamp(u_top * 1.5, vec3(0.0), vec3(1.0));
+    vec3 bf_base = mix(u_bot, u_top, bf_n);
+    bf_base = mix(bf_base, bf_hi, smoothstep(0.55, 0.75, bf_rbc) * 0.5);
     col = mix(col, bf_base, 0.85);
   }
   // ---- Cell shadow (kind 10): port of shader-test's voronoi ---
@@ -794,8 +799,10 @@ void main() {
     }
     float cs_v = -(1.0 / 32.0) * log(max(cs_sum, 1e-6));
     float cs_intensity = 0.03 / pow(max(1.2 - sqrt(max(cs_v, 0.0)), 0.05), 3.0);
-    vec3 cs_baseCol = vec3(200.0/255.0, 50.0/255.0, 69.0/255.0);
-    col = mix(col, clamp(cs_baseCol * cs_intensity, 0.0, 2.0), 0.95);
+    // cs_baseCol reads u_base so the picker drives the voronoi tint.
+    // Default state base (#c83245) matches the previous hard-coded
+    // colour vec3(200/255, 50/255, 69/255).
+    col = mix(col, clamp(u_base * cs_intensity, 0.0, 2.0), 0.95);
   }
   // ---- Aurora borealis: vertical ribbons of green/violet (kind 5) ----
   // Ribbon density driven by domain-warped fbm; brightness peaks in
@@ -829,19 +836,18 @@ void main() {
 
   // ---- Lava / fire: boiling 3-octave fbm (kind 7) ----
   // Domain warp (fbm-of-fbm) for organic motion; rising drift via the
-  // -u_time*1.2 offset on Y. Hot gradient: black → deep red → orange
-  // → near-white-yellow.
+  // -u_time*1.2 offset on Y. Hot gradient: base → bot → top → peak,
+  // where peak is a clamped 2×u_top so the picker actually drives the
+  // hot tendrils. Default state colours are calibrated to match the
+  // previous hard-coded ramp.
   if (u_kind == 7) {
     vec2 p = worldPx * 0.005;
     p.y -= u_time * 1.2;
     float n = bgFbm(p + bgFbm(p * 0.5 + u_time * 0.05));
-    vec3 black   = vec3(0.05, 0.01, 0.00);
-    vec3 deepRed = vec3(0.50, 0.03, 0.01);
-    vec3 orange  = vec3(1.00, 0.45, 0.05);
-    vec3 yellow  = vec3(1.00, 0.92, 0.50);
-    vec3 hot = mix(black, deepRed, smoothstep(0.20, 0.45, n));
-    hot     = mix(hot,   orange,  smoothstep(0.45, 0.70, n));
-    hot     = mix(hot,   yellow,  smoothstep(0.70, 0.95, n));
+    vec3 peak = clamp(u_top * 2.0, vec3(0.0), vec3(1.0));
+    vec3 hot = mix(u_base, u_bot, smoothstep(0.20, 0.45, n));
+    hot     = mix(hot,    u_top,  smoothstep(0.45, 0.70, n));
+    hot     = mix(hot,    peak,   smoothstep(0.70, 0.95, n));
     col = mix(col, hot, 0.85);
   }
 
@@ -941,14 +947,15 @@ void main() {
   // tint where A ≈ 1 stays untouched. Step + seed shaders run in their
   // own off-screen passes — see _reactorStep / _reactorSeed.
   if (u_kind == 8) {
+    // dark/mid/hot ramp reads u_base / u_bot / u_top so the picker
+    // actually drives the acid-green palette. Default state colours
+    // match the previous hard-coded stops (0.02,0.06,0.04) /
+    // (0.10,0.40,0.20) / (0.49,1.00,0.54 = panel accent #7eff8a).
     vec4 rxColor = texture(u_reactorTex, v_uv);
     vec2 rxConc = rxColor.rg / vec2(0.05, 1.0);
     float bN = clamp(rxConc.y * 1.6, 0.0, 1.0);
-    vec3 dark = vec3(0.02, 0.06, 0.04);
-    vec3 mid  = vec3(0.10, 0.40, 0.20);
-    vec3 hot  = vec3(0.49, 1.00, 0.54);   // panel accent #7eff8a
-    col = mix(mix(dark, mid, smoothstep(0.0, 0.45, bN)),
-              hot, smoothstep(0.45, 0.92, bN));
+    col = mix(mix(u_base, u_bot, smoothstep(0.0, 0.45, bN)),
+              u_top, smoothstep(0.45, 0.92, bN));
   }
 
   // Vignette: darken the corners. Aspect-corrected so the falloff
@@ -2598,11 +2605,15 @@ export class WebGL2Renderer extends RendererBase {
 
   _reactorRt(idx) { return idx === 0 ? this._reactorRtA : this._reactorRtB; }
 
-  _reactorSeed() {
+  _reactorSeed(seedCount) {
     const gl = this.gl;
     const front = this._reactorRt(this._reactorFront);
     const back  = this._reactorRt(1 - this._reactorFront);
-    const count = 5 + Math.floor(Math.random() * 4);   // 5..8 discs
+    // Caller passes the desired count; fall back to a randomised 5..8
+    // when called without an argument (legacy path).
+    const count = (typeof seedCount === 'number' && seedCount > 0)
+      ? Math.max(1, Math.min(REACTOR_MAX_SEEDS, seedCount | 0))
+      : (5 + Math.floor(Math.random() * 4));
     for (let i = 0; i < count; i++) {
       this._reactorSeedBuf[i * 3]     = Math.random();
       this._reactorSeedBuf[i * 3 + 1] = Math.random();
@@ -2948,16 +2959,24 @@ export class WebGL2Renderer extends RendererBase {
     // Reactor (Gray-Scott) — run N step iterations + maybe seed before
     // the display pass(es), so the FRAG_BG kind=8 branch can sample the
     // up-to-date front RT. Update once per frame regardless of how many
-    // reactor layers reference it.
-    const hasReactor = layers.some(l => l.kind === 'reactor');
+    // reactor layers reference it. Per-layer fields (seedCount,
+    // reseedSec, simSpeed) come from the first reactor layer; the rest
+    // tag along since they sample the same RT.
+    const reactorLayer = layers.find(l => l.kind === 'reactor');
+    const hasReactor = !!reactorLayer;
     if (hasReactor) {
       this._reactorEnsureProgs();
       this._reactorEnsureRts();
-      if (timeMs - this._reactorLastSeedMs > 10000) {
-        this._reactorSeed();
+      const reseedSec = Math.max(0.1, +reactorLayer.reseedSec || 10);
+      if (timeMs - this._reactorLastSeedMs > reseedSec * 1000) {
+        const seedCount = Math.max(1, Math.min(REACTOR_MAX_SEEDS,
+          Math.round(+reactorLayer.seedCount || 6)));
+        this._reactorSeed(seedCount);
         this._reactorLastSeedMs = timeMs;
       }
-      this._reactorStep(5);
+      const simSpeed = Math.max(0, Math.min(15,
+        Math.round(+reactorLayer.simSpeed ?? 5)));
+      if (simSpeed > 0) this._reactorStep(simSpeed);
       // Restore the scene framebuffer + drawing-buffer viewport so
       // the bg display pass renders into the same target as cells.
       gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);

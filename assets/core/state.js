@@ -162,7 +162,7 @@ const KNOWN_BACKGROUND_KEYS = [
   'bloodstream', 'bloodflow', 'cellShadow',
   'cartoonNight', 'spectrum', 'lymphNode',
   'lung', 'lavaFire', 'reactor',
-  'boneMarrow', 'mitochondria', 'neuron', 'bile',
+  'mitochondria', 'neuron', 'bile',
 ];
 
 // Map old THEMES keys → new accent keys for the interfaceColor
@@ -172,7 +172,7 @@ const LEGACY_INTERFACE_COLOR_MIGRATION = {
   bloodstream: 'red',  bloodflow: 'red',     cellShadow: 'red',
   cartoonNight: 'cyan', spectrum: 'violet',  lymphNode: 'violet',
   lung: 'pink',         lavaFire: 'amber',   reactor: 'green',
-  boneMarrow: 'amber',  mitochondria: 'amber',
+  mitochondria: 'amber',
   neuron: 'cyan',       bile: 'green',
   // Removed scenes — fold to a sensible accent.
   dracula: 'violet',
@@ -371,7 +371,6 @@ export const LOCALES = {
     bg_lung: 'Lung (smoke)',
     bg_lavaFire: 'Magma (orange)',
     bg_reactor: 'Reactor (acid green)',
-    bg_boneMarrow: 'Bone Marrow (cream)',
     bg_mitochondria: 'Mitochondria (amber)',
     bg_neuron: 'Neuron (electric blue)',
     bg_bile: 'Bile (chartreuse)',
@@ -432,6 +431,9 @@ export const LOCALES = {
     bg_layer_grid_step: 'Grid step',
     bg_layer_spot_count: 'Spot count',
     bg_layer_vignette: 'Vignette',
+    bg_layer_seed_count: 'Random spots',
+    bg_layer_reseed_sec: 'Randomisation (s)',
+    bg_layer_sim_speed: 'Time (steps/frame)',
     fx_order_title: 'Overlay order',
     fx_kind_noise: 'Static noise',
     fx_kind_vignette: 'Vignette',
@@ -560,7 +562,6 @@ export const LOCALES = {
     bg_lung: 'Lunge (Rauch)',
     bg_lavaFire: 'Magma (Orange)',
     bg_reactor: 'Reaktor (Säuregrün)',
-    bg_boneMarrow: 'Knochenmark (Creme)',
     bg_mitochondria: 'Mitochondrium (Bernstein)',
     bg_neuron: 'Neuron (Elektroblau)',
     bg_bile: 'Galle (Chartreuse)',
@@ -615,6 +616,9 @@ export const LOCALES = {
     bg_layer_grid_step: 'Gitter-Abstand',
     bg_layer_spot_count: 'Spot-Anzahl',
     bg_layer_vignette: 'Vignette',
+    bg_layer_seed_count: 'Zufalls-Spots',
+    bg_layer_reseed_sec: 'Randomisierung (s)',
+    bg_layer_sim_speed: 'Zeit (Schritte/Frame)',
     fx_order_title: 'Overlay-Reihenfolge',
     fx_kind_noise: 'Rauschen',
     fx_kind_vignette: 'Vignette',
@@ -736,7 +740,6 @@ export const LOCALES = {
     bg_lung: 'Pulmón (humo)',
     bg_lavaFire: 'Magma (naranja)',
     bg_reactor: 'Reactor (verde ácido)',
-    bg_boneMarrow: 'Médula ósea (crema)',
     bg_mitochondria: 'Mitocondria (ámbar)',
     bg_neuron: 'Neurona (azul eléctrico)',
     bg_bile: 'Bilis (chartreuse)',
@@ -863,7 +866,6 @@ export const LOCALES = {
     bg_lung: 'Lunga (Rauch)',
     bg_lavaFire: 'Magma (Orange)',
     bg_reactor: 'Reakta (Saurgrea)',
-    bg_boneMarrow: 'Knochnmark (Creme)',
     bg_mitochondria: 'Mitochondrium (Bernstoaa)',
     bg_neuron: 'Neuron (Elektrobloh)',
     bg_bile: 'Goi (Chartreuse)',
@@ -992,7 +994,6 @@ export const LOCALES = {
     bg_lung: 'Lung (Rauch)',
     bg_lavaFire: 'Magma (Orsch)',
     bg_reactor: 'Reakta (Saurgrie)',
-    bg_boneMarrow: 'Knochemark (Creme)',
     bg_mitochondria: 'Mitochondrium (Bernstaa)',
     bg_neuron: 'Neuron (Elektrablau)',
     bg_bile: 'Gall (Chartreuse)',
@@ -1121,7 +1122,6 @@ export const LOCALES = {
     bg_lung: 'Lung (Rauch)',
     bg_lavaFire: 'Magma (Orsch)',
     bg_reactor: 'Reaktor (Saurgrie)',
-    bg_boneMarrow: 'Knochemark (Creem)',
     bg_mitochondria: 'Mitochondrium (Bernstaa)',
     bg_neuron: 'Neuron (Elektroblau)',
     bg_bile: 'Gall (Chartreuse)',
@@ -1247,7 +1247,6 @@ export const LOCALES = {
     bg_lung: 'Pulmo (fumus)',
     bg_lavaFire: 'Magma (aurantium)',
     bg_reactor: 'Reactor (viride acidum)',
-    bg_boneMarrow: 'Medulla ossea (cremor)',
     bg_mitochondria: 'Mitochondrium (succinum)',
     bg_neuron: 'Neuron (caeruleum electricum)',
     bg_bile: 'Bilis (chartreuse)',
@@ -1415,78 +1414,83 @@ export const THEMES = {
   // pick by both the in-app accent name and the dominant tone.
   bloodstream: {
     label: 'Bloodstream (crimson)',
-    bg: { kind: 'gradient', topColor: '#5b101a', botColor: '#1d0306', spotColor: 'rgba(255,90,100,0.18)', spotCount: 6, vignette: 0.45, rbcSilhouettes: true },
+    bg: { kind: 'gradient', topColor: '#5b101a', botColor: '#1d0306', spotColor: 'rgba(255,90,100,0.18)', spotCount: 6, vignette: 0, rbcSilhouettes: true },
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#ff6b6b' },
   },
   bloodflow: {
     label: 'Bloodflow (vermilion)',
-    bg: { kind: 'bloodflow', topColor: '#3a0a12', botColor: '#0e0205', vignette: 0.30 },
+    // topColor/botColor match the previous hard-coded shader ramp
+    // (0.42,0.06,0.08) and (0.18,0.03,0.05) so the default look is
+    // preserved now that the bloodflow shader actually reads them.
+    bg: { kind: 'bloodflow', topColor: '#6b0f14', botColor: '#2e080d', vignette: 0 },
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#d63333' },
   },
   cellShadow: {
     label: 'Cell Shadow (red)',
-    bg: { kind: 'cell-shadow', base: '#3a060e', vignette: 0.35 },
+    // base #c83245 matches the previously hard-coded voronoi colour
+    // (vec3(200/255, 50/255, 69/255)) so the picker drives the look.
+    bg: { kind: 'cell-shadow', base: '#c83245', vignette: 0 },
     outline: { color: '#1c0306', defaultPx: 4 },
     ui: { panelAccent: '#c83246' },
   },
   cartoonNight: {
     label: 'Cosmic Soup (navy)',
-    bg: { kind: 'flat', base: '#0c1a3a', spotColors: ['#ff7ab8','#ffb84d','#5fe3d2','#ff5d6e'], spotCount: 6, vignette: 0.30 },
+    bg: { kind: 'flat', base: '#0c1a3a', spotColors: ['#ff7ab8','#ffb84d','#5fe3d2','#ff5d6e'], spotCount: 6, vignette: 0 },
     outline: { color: '#04081a', defaultPx: 5 },
     ui: { panelAccent: '#5fe3d2' },
   },
   spectrum: {
     label: 'Spectrum (rainbow)',
-    bg: { kind: 'flat', base: '#000000', spotColors: ['#ff003c','#ff8a00','#ffd600','#3ecf6c','#3da6ff','#a855f7'], spotCount: 6, vignette: 0.30 },
+    bg: { kind: 'flat', base: '#000000', spotColors: ['#ff003c','#ff8a00','#ffd600','#3ecf6c','#3da6ff','#a855f7'], spotCount: 6, vignette: 0 },
     outline: { color: '#000000', defaultPx: 4 },
     ui: { panelAccent: '#a855f7' },
   },
   lymphNode: {
     label: 'Lymph Node (violet)',
-    bg: { kind: 'gradient', topColor: '#2a0e3a', botColor: '#0a0410', spotColor: 'rgba(160,120,200,0.15)', spotCount: 5, vignette: 0.40 },
+    bg: { kind: 'gradient', topColor: '#2a0e3a', botColor: '#0a0410', spotColor: 'rgba(160,120,200,0.15)', spotCount: 5, vignette: 0 },
     outline: { color: '#0a0410', defaultPx: 4 },
     ui: { panelAccent: '#bd93e2' },
   },
   lung: {
     label: 'Lung (smoke)',
-    bg: { kind: 'lung', base: '#1a1118', topColor: '#3a1c2c', botColor: '#0a0610', spotCount: 0, vignette: 0.40 },
+    // topColor/botColor match the previously hard-coded hot/cool ramp
+    // (0.510,0.204,0.016) / (0.529,0.808,0.980) so the default smoke
+    // look is preserved now that the lung shader reads u_top / u_bot.
+    bg: { kind: 'lung', base: '#1a1118', topColor: '#823404', botColor: '#87cefa', spotCount: 0, vignette: 0 },
     outline: { color: '#02080f', defaultPx: 4 },
     ui: { panelAccent: '#ff9aa8' },
   },
   lavaFire: {
     label: 'Magma (orange)',
-    bg: { kind: 'lava', base: '#1a0402', topColor: '#3b0a05', botColor: '#0a0202', spotCount: 0, vignette: 0.50 },
+    // base/bot/top/peak ramp now reads u_base/u_bot/u_top in the lava
+    // shader. Defaults match the previous hard-coded stops
+    // (0.05,0.01,0.00)/(0.50,0.03,0.01)/(1.00,0.45,0.05) so the look
+    // is preserved out of the box; peak is derived as clamp(top*2).
+    bg: { kind: 'lava', base: '#0d0300', topColor: '#ff730d', botColor: '#800803', spotCount: 0, vignette: 0 },
     outline: { color: '#1a0606', defaultPx: 4 },
     ui: { panelAccent: '#ff5a00' },
   },
   // ── New palettes (2026) — common themes the project lacked.
-  boneMarrow: {
-    // Pale cream + tan — bone-marrow / cancellous-bone aesthetic.
-    label: 'Bone Marrow (cream)',
-    bg: { kind: 'flat', base: '#e9dcb8', spotColors: ['#c9a87a','#b0905e','#937444'], spotCount: 5, vignette: 0.20 },
-    outline: { color: '#5a432a', defaultPx: 3 },
-    ui: { panelAccent: '#b0905e' },
-  },
   mitochondria: {
     // Warm amber on deep brown — mitochondrial inner-membrane palette.
     label: 'Mitochondria (amber)',
-    bg: { kind: 'gradient', topColor: '#3a1c0a', botColor: '#100602', spotColor: 'rgba(255,160,60,0.20)', spotCount: 6, vignette: 0.40 },
+    bg: { kind: 'gradient', topColor: '#3a1c0a', botColor: '#100602', spotColor: 'rgba(255,160,60,0.20)', spotCount: 6, vignette: 0 },
     outline: { color: '#1c0a02', defaultPx: 4 },
     ui: { panelAccent: '#ffa040' },
   },
   neuron: {
     // Electric blue on near-black — synapse / action-potential feel.
     label: 'Neuron (electric blue)',
-    bg: { kind: 'gradient', topColor: '#0a1830', botColor: '#020610', spotColor: 'rgba(80,180,255,0.22)', spotCount: 5, vignette: 0.40 },
+    bg: { kind: 'gradient', topColor: '#0a1830', botColor: '#020610', spotColor: 'rgba(80,180,255,0.22)', spotCount: 5, vignette: 0 },
     outline: { color: '#020610', defaultPx: 3 },
     ui: { panelAccent: '#50b4ff' },
   },
   bile: {
     // Chartreuse on deep olive — bile / gallbladder palette.
     label: 'Bile (chartreuse)',
-    bg: { kind: 'gradient', topColor: '#1c2810', botColor: '#080c04', spotColor: 'rgba(180,220,80,0.18)', spotCount: 4, vignette: 0.35 },
+    bg: { kind: 'gradient', topColor: '#1c2810', botColor: '#080c04', spotColor: 'rgba(180,220,80,0.18)', spotCount: 4, vignette: 0 },
     outline: { color: '#080c04', defaultPx: 4 },
     ui: { panelAccent: '#b4dc50' },
   },
@@ -1497,7 +1501,15 @@ export const THEMES = {
   // back to the base colour. See .claude/plan/04-reactor-bg.md.
   reactor: {
     label: 'Reactor (acid green)',
-    bg: { kind: 'reactor', base: '#02060a', spotCount: 0, vignette: 0.40 },
+    // seedCount  — random discs placed per reseed event (1..8).
+    // reseedSec  — seconds between random reseeds ("Randomisation").
+    // simSpeed   — Gray-Scott step iterations per frame ("Time"; 0 = paused).
+    // base/botColor/topColor — dark→mid→hot ramp on B-concentration.
+    //   Defaults match the previous hard-coded stops
+    //   (0.02,0.06,0.04)/(0.10,0.40,0.20)/(0.49,1.00,0.54) so the
+    //   acid-green look is preserved now that the kind-8 display
+    //   shader reads u_base/u_bot/u_top.
+    bg: { kind: 'reactor', base: '#051010', botColor: '#1a6633', topColor: '#7dff8a', vignette: 0, seedCount: 6, reseedSec: 10, simSpeed: 5 },
     outline: { color: '#0a1816', defaultPx: 4 },
     ui: { panelAccent: '#7eff8a' },
   },
