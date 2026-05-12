@@ -1291,3 +1291,24 @@ body.adding #stage    { cursor: crosshair; }
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
+
+/* Off-screen navigation arrows — pointer-events: none full-
+   viewport layer; each arrow is an SVG anchored to its edge.
+   Per-edge rotation orients the triangle outward. Hidden via
+   `.hidden` while empty. */
+.nav-arrows-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+}
+.nav-arrow {
+  position: absolute;
+  filter: drop-shadow(0 1px 2px #0008);
+  transition: width 120ms ease, height 120ms ease;
+}
+.nav-arrow.hidden { display: none; }
+.nav-arrow-top    { top: 8px;    left: 50%; transform: translateX(-50%); }
+.nav-arrow-bottom { bottom: 8px; left: 50%; transform: translateX(-50%) rotate(180deg); }
+.nav-arrow-left   { left: 8px;   top: 50%;  transform: translateY(-50%) rotate(-90deg); }
+.nav-arrow-right  { right: 8px;  top: 50%;  transform: translateY(-50%) rotate(90deg); }
