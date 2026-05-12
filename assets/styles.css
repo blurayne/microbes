@@ -565,6 +565,12 @@ body.is-paused #aboutDialog {
   font-weight: 500;
   border-radius: 8px;
   cursor: pointer;
+  /* Anchor + button share this class so the GitHub link in .actions
+     looks identical to the Copy build / About buttons next to it.
+     text-decoration: none kills the anchor underline; inline-block
+     lets the border + padding lay out the same way a <button> does. */
+  text-decoration: none;
+  display: inline-block;
 }
 
 /* "Now playing" line above the music-volume slider. Label dim,
