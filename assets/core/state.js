@@ -161,7 +161,8 @@ const KNOWN_THEME_KEYS = [
 const KNOWN_BACKGROUND_KEYS = [
   'bloodstream', 'bloodflow', 'cellShadow',
   'cartoonNight', 'spectrum', 'lymphNode',
-  'lung', 'lavaFire', 'reactor',
+  'lung', 'aurora', 'underwater',
+  'lavaFire', 'reactor',
   'mitochondria', 'neuron', 'bile',
 ];
 
@@ -172,12 +173,11 @@ const LEGACY_INTERFACE_COLOR_MIGRATION = {
   bloodstream: 'red',  bloodflow: 'red',     cellShadow: 'red',
   cartoonNight: 'cyan', spectrum: 'violet',  lymphNode: 'violet',
   lung: 'pink',         lavaFire: 'amber',   reactor: 'green',
+  aurora: 'green',      underwater: 'cyan',
   mitochondria: 'amber',
   neuron: 'cyan',       bile: 'green',
   // Removed scenes — fold to a sensible accent.
   dracula: 'violet',
-  // Removed scene keys (aurora / underwater) also map sensibly:
-  aurora: 'green',      underwater: 'cyan',
 };
 
 const VALID_RENDER_SCALES = [1, 0.5, 0.25, 0.125];
@@ -369,6 +369,8 @@ export const LOCALES = {
     bg_spectrum: 'Spectrum (rainbow)',
     bg_lymphNode: 'Lymph Node (violet)',
     bg_lung: 'Lung (smoke)',
+    bg_aurora: 'Aurora (green/violet)',
+    bg_underwater: 'Underwater (caustic)',
     bg_lavaFire: 'Magma (orange)',
     bg_reactor: 'Reactor (acid green)',
     bg_mitochondria: 'Mitochondria (amber)',
@@ -560,6 +562,8 @@ export const LOCALES = {
     bg_spectrum: 'Spektrum (Regenbogen)',
     bg_lymphNode: 'Lymphknoten (Violett)',
     bg_lung: 'Lunge (Rauch)',
+    bg_aurora: 'Polarlicht (Grün/Violett)',
+    bg_underwater: 'Unterwasser (Kaustik)',
     bg_lavaFire: 'Magma (Orange)',
     bg_reactor: 'Reaktor (Säuregrün)',
     bg_mitochondria: 'Mitochondrium (Bernstein)',
@@ -1461,6 +1465,24 @@ export const THEMES = {
     bg: { kind: 'lung', base: '#1a1118', topColor: '#823404', botColor: '#87cefa', spotCount: 0, vignette: 0 },
     outline: { color: '#02080f', defaultPx: 4 },
     ui: { panelAccent: '#ff9aa8' },
+  },
+  aurora: {
+    label: 'Aurora (green/violet)',
+    // topColor/botColor mix into the ribbon hue — defaults match the
+    // previously hard-coded green (0.24,0.95,0.52) and violet
+    // (0.55,0.35,0.95). base is the night-sky tint below the ribbons.
+    bg: { kind: 'aurora', base: '#050a18', topColor: '#3df285', botColor: '#8c59f2', vignette: 0 },
+    outline: { color: '#020410', defaultPx: 4 },
+    ui: { panelAccent: '#3df285' },
+  },
+  underwater: {
+    label: 'Underwater (caustic)',
+    // botColor is the deep wash, topColor is the bright caustic peak —
+    // defaults match the previously hard-coded deep (0.04,0.16,0.30)
+    // and bright (0.60,0.95,1.00).
+    bg: { kind: 'underwater', base: '#020a18', topColor: '#99f2ff', botColor: '#0a2950', vignette: 0 },
+    outline: { color: '#020a18', defaultPx: 4 },
+    ui: { panelAccent: '#99f2ff' },
   },
   lavaFire: {
     label: 'Magma (orange)',

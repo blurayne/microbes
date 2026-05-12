@@ -807,31 +807,30 @@ void main() {
   // ---- Aurora borealis: vertical ribbons of green/violet (kind 5) ----
   // Ribbon density driven by domain-warped fbm; brightness peaks in
   // a horizontal band (the "sky strip"). Hue oscillates between
-  // green and violet over time.
+  // topColor and botColor over time — defaults match the previous
+  // hard-coded green (0.24,0.95,0.52) / violet (0.55,0.35,0.95).
   if (u_kind == 5) {
     vec2 sky = vec2(worldPx.x * 0.0015, worldPx.y * 0.001 - u_time * 0.05);
     float warp = bgFbm(vec2(sky.x, u_time * 0.08));
     float ribbon = 0.5 + 0.5 * sin(sky.y * 6.2831 + warp * 6.2831);
     ribbon = pow(ribbon, 4.0);
     float bandH = exp(-pow((sky.y - 0.5) * 1.5, 2.0));
-    vec3 green  = vec3(0.24, 0.95, 0.52);
-    vec3 violet = vec3(0.55, 0.35, 0.95);
-    vec3 hue = mix(green, violet, 0.5 + 0.5 * sin(warp * 3.14159 + u_time * 0.2));
+    vec3 hue = mix(u_top, u_bot, 0.5 + 0.5 * sin(warp * 3.14159 + u_time * 0.2));
     col = mix(col, hue, ribbon * bandH * 0.85);
   }
 
   // ---- Underwater: caustic interference (kind 6) ----
   // Two interleaved sine systems modulated by each other; raised to a
-  // high power to spike the bright caustic ridges.
+  // high power to spike the bright caustic ridges. botColor is the
+  // deep wash, topColor is the bright caustic peak — defaults match
+  // the previous hard-coded deep (0.04,0.16,0.30) / bright (0.60,0.95,1.00).
   if (u_kind == 6) {
     vec2 p = worldPx * 0.04;
     float w1 = sin(p.x + u_time * 0.6 + sin(p.y * 0.75));
     float w2 = sin(p.y * 0.95 + u_time * 0.85 + sin(p.x * 0.85));
     float c = pow(max(0.0, (w1 + w2) * 0.5 + 0.5), 6.0);
-    vec3 deep   = vec3(0.04, 0.16, 0.30);
-    vec3 bright = vec3(0.60, 0.95, 1.00);
-    col = mix(col, deep, 0.70);
-    col = mix(col, bright, c * 0.55);
+    col = mix(col, u_bot, 0.70);
+    col = mix(col, u_top, c * 0.55);
   }
 
   // ---- Lava / fire: boiling 3-octave fbm (kind 7) ----
