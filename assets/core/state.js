@@ -20,6 +20,7 @@ export const DEFAULTS = {
   bgFlowSpeed: 0.55,
   bgScale: 1.0,             // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0..4×.
   outlinePx: 5,
+  faceScale: 1.0,           // multiplier on cartoon face size — scales eye radius, pupil radius, eye horizontal spread, and mouth width uniformly across all renderers. 1.0 keeps the previous look; 0 hides faces; up to 3 makes them fill the cell. Clamped 0..3 in loadSettings.
   showDebugField: false,
   // Visual style for the cell rendering itself. Was the lone "theme"
   // setting until late 2026; renamed when the colour palette below was
@@ -443,6 +444,10 @@ export function loadSettings() {
       parsed.bgScale = DEFAULTS.bgScale;
     }
     parsed.bgScale = Math.max(0, Math.min(4, parsed.bgScale));
+    if (typeof parsed.faceScale !== 'number' || !Number.isFinite(parsed.faceScale)) {
+      parsed.faceScale = DEFAULTS.faceScale;
+    }
+    parsed.faceScale = Math.max(0, Math.min(3.0, parsed.faceScale));
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Rheinhessisch was renamed to Mainzerisch (Mainz city dialect).
@@ -651,7 +656,7 @@ export const LOCALES = {
     meta_outline_hint_polygon: ' — polygon-union rim, sharp / no blur.',
     auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
-    wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background size', outline_px: 'Outline px',
+    wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background size', outline_px: 'Outline px', face_size: 'Face size',
     membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
@@ -843,7 +848,7 @@ export const LOCALES = {
     random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
-    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundgröße', outline_px: 'Umrandung px',
+    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundgröße', outline_px: 'Umrandung px', face_size: 'Gesichtsgröße',
     membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
@@ -980,7 +985,7 @@ export const LOCALES = {
     random_split: 'División aleatoria', meta_split: 'División metaball',
     auto_split: 'Auto-división (s)',
     friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
-    wobble: 'Oscilación', bg_flow: 'Flujo de fondo', bg_scale: 'Tamaño de fondo', outline_px: 'Contorno px',
+    wobble: 'Oscilación', bg_flow: 'Flujo de fondo', bg_scale: 'Tamaño de fondo', outline_px: 'Contorno px', face_size: 'Tamaño de cara',
     membrane: 'Membrana', cell_size: 'Tamaño de célula', use_highlight: 'Usar color de resalte',
     mode_target: 'Modo objetivo', mode_target_tip: 'Toca para seleccionar / enviar',
     mode_split: 'Modo división', mode_split_tip: 'Toca una célula para dividirla',
@@ -1106,7 +1111,7 @@ export const LOCALES = {
     random_split: 'Zoifällige Teilung', meta_split: 'Metaball-Doaln',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
-    wobble: 'Wackln', bg_flow: 'Hintagrundgflies', bg_scale: 'Hintagrundgrässn', outline_px: 'Umrandung px',
+    wobble: 'Wackln', bg_flow: 'Hintagrundgflies', bg_scale: 'Hintagrundgrässn', outline_px: 'Umrandung px', face_size: 'Gsichtsgreßn',
     membrane: 'Membran', cell_size: 'Zoingrässn', use_highlight: 'Akzentfarb vawendn',
     mode_target: 'Zuimodus', mode_target_tip: 'Drauflanga: aussuacha / Zui setzn',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Drauflanga deid de Zoin teiln',
@@ -1234,7 +1239,7 @@ export const LOCALES = {
     random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
-    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
+    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px', face_size: 'Gesichtsgröße',
     membrane: 'Membran', cell_size: 'Zellgröß', use_highlight: 'Akzentfarb verwende',
     mode_target: 'Zielmodus', mode_target_tip: 'Drufftippe: aussuche / Ziel setze',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Drufftippe teilt die Zell',
@@ -1362,7 +1367,7 @@ export const LOCALES = {
     random_split: 'Zufällische Teilung', meta_split: 'Metaball-Teilung',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
-    wobble: 'Wackele', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
+    wobble: 'Wackele', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px', face_size: 'Gesichtsgreße',
     membrane: 'Membran', cell_size: 'Zellgröß', use_highlight: 'Akzentfarb verwenne',
     mode_target: 'Zielmodus', mode_target_tip: 'Druffdibbe: aussuche / Ziel setze',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Druffdibbe teilt die Zell',
@@ -1487,7 +1492,7 @@ export const LOCALES = {
     random_split: 'Divisio casualis', meta_split: 'Divisio metaballi',
     auto_split: 'Auto-divisio (s)',
     friction: 'Frictio', bounce: 'Resilientia', throw_strength: 'Vis jactus',
-    wobble: 'Tremor', bg_flow: 'Fluxus tergi', bg_scale: 'Magnitudo tergi', outline_px: 'Linea (px)',
+    wobble: 'Tremor', bg_flow: 'Fluxus tergi', bg_scale: 'Magnitudo tergi', outline_px: 'Linea (px)', face_size: 'Magnitudo faciei',
     membrane: 'Membrana', cell_size: 'Magnitudo cellulae',
     use_highlight: 'Colore luminis utere',
     mode_target: 'Modus signi', mode_target_tip: 'Tange ut elige / mitte',

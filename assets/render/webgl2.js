@@ -1755,9 +1755,10 @@ in vec4 v_face2;      // (lookX, lookY, mouthW, blink)
 in vec4 v_face3;      // (mouthY, phase, blur, alphaMul)
 in vec3 v_mouthCol;
 uniform float u_time;
+uniform float u_faceScale;     // S.faceScale — uniform multiplier on every face dimension (eye R, pupil R, eye-X spread, mouth half-width). Default 1.0 keeps the legacy look; 0 hides faces; up to 3 fills the cell.
 out vec4 outColor;
 
-const float FACE_SCALE = 1.2;
+const float FACE_SCALE_BASE = 1.2;
 
 // Edge-widening smoothstep — approximates Gaussian blur by extending the
 // AA band by v_face3.z (= blur amount in body-radius units). Replaces
@@ -1798,12 +1799,17 @@ void main() {
   int eyesCount = int(v_face1.x + 0.5);
   if (eyesCount == 0 && mouthKind == 0) discard;
 
+  // Compose the user-driven face scale into the legacy 1.2 constant.
+  // mouthW + eye-spread baked-in below pick this up too, so the whole
+  // face scales as one unit when the slider moves.
+  float FACE_SCALE = FACE_SCALE_BASE * u_faceScale;
+
   float eyeRBase = v_face1.y;
   float eyeY = v_face1.z;
   float pupilRBase = v_face1.w;
   float blink = v_face2.w;
   vec2 look = vec2(v_face2.x, v_face2.y);
-  float mouthW = v_face2.z;
+  float mouthW = v_face2.z * u_faceScale;
   float mouthY = v_face3.x;
   float phase = v_face3.y;
 
@@ -2190,6 +2196,7 @@ export class WebGL2Renderer extends RendererBase {
       camera: gl.getUniformLocation(this._faceProg, 'u_camera'),
       viewport: gl.getUniformLocation(this._faceProg, 'u_viewport'),
       time: gl.getUniformLocation(this._faceProg, 'u_time'),
+      faceScale: gl.getUniformLocation(this._faceProg, 'u_faceScale'),
     };
     this._faceVbo = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this._faceVbo);
@@ -3503,6 +3510,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform4f(this._faceU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
     gl.uniform2f(this._faceU.viewport, this.W, this.H);
     gl.uniform1f(this._faceU.time, time);
+    gl.uniform1f(this._faceU.faceScale, S.faceScale != null ? S.faceScale : 1);
     gl.bindVertexArray(this._faceVao);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
     gl.bindVertexArray(null);
