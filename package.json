@@ -4,7 +4,12 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
+    "test:visual": "playwright test",
+    "test:visual:update": "playwright test --update-snapshots",
     "serve": "python3 -m http.server 8000",
     "build:docs": "mkdocs build"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.60.0"
   }
 }
