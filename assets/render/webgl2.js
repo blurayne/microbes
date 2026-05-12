@@ -2494,10 +2494,11 @@ export class WebGL2Renderer extends RendererBase {
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     // Scene render target. Set when a scene-wide post-process is on:
     //   • caustics overlay  → always scene-wide
-    //   • liquid ripples + rippleScope='scene' → scene-wide
-    //   • liquid ripples + rippleScope='bg'    → bg-only; ripples
-    //     RT is bound transiently inside drawBackground and the
-    //     post-pass runs there. Cells render directly to canvas.
+    //   • liquid ripples positioned ABOVE the scene pin in
+    //     S.overlayOrder → scene-wide (runs after cells)
+    //   • liquid ripples positioned BELOW the scene pin → bg-only;
+    //     ripples RT is bound transiently inside drawBackground and
+    //     the post-pass runs there. Cells render directly to canvas.
     this._sceneFbo = null;
     this._scenePostProc = null;
     const useRipples       = !!S.liquidRipples;
