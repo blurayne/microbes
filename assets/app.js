@@ -766,6 +766,7 @@ bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
 bindRange('membraneIntensity', 'membraneIntensity', 'membraneVal', v => v.toFixed(2));
 bindRange('cellBorderThickness', 'cellBorderThickness', 'cellBorderVal', v => v.toFixed(1) + '×');
 bindRange('cellSizeMul', 'cellSizeMul', 'cellSizeVal', v => v.toFixed(2) + '×');
+bindRange('faceScale', 'faceScale', 'faceScaleVal', v => v.toFixed(2) + '×');
 bindRange('friction', 'friction', 'frictionVal', v => v.toFixed(2));
 bindRange('bounce', 'bounce', 'bounceVal', v => v.toFixed(2));
 bindRange('throwStrength', 'throwStrength', 'throwVal', v => v.toFixed(2) + '×');
