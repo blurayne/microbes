@@ -18,6 +18,7 @@ export const DEFAULTS = {
   autoSplitSeconds: 10,
   maxCells: 32,
   bgFlowSpeed: 0.55,
+  bgScale: 1.0,             // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0..4×.
   outlinePx: 5,
   showDebugField: false,
   theme: 'petriDish',
@@ -92,6 +93,10 @@ export function loadSettings() {
       parsed.cellBorderThickness = DEFAULTS.cellBorderThickness;
     }
     parsed.cellBorderThickness = Math.max(0.5, Math.min(5.0, parsed.cellBorderThickness));
+    if (typeof parsed.bgScale !== 'number' || !Number.isFinite(parsed.bgScale)) {
+      parsed.bgScale = DEFAULTS.bgScale;
+    }
+    parsed.bgScale = Math.max(0, Math.min(4, parsed.bgScale));
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Migrate legacy `highlightColor` field to the new `useHighlight` toggle.
@@ -139,7 +144,7 @@ export const LOCALES = {
     split_push: 'Push apart with momentum', split_bond: 'Bond, then drift',
     max_cells: 'Max cells', auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
-    wobble: 'Wobble', bg_flow: 'Background flow', outline_px: 'Outline px',
+    wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background size', outline_px: 'Outline px',
     membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
@@ -223,7 +228,7 @@ export const LOCALES = {
     split_push: 'Mit Schwung auseinander', split_bond: 'Verbinden, dann driften',
     max_cells: 'Max. Zellen', auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
-    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
+    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundgröße', outline_px: 'Umrandung px',
     membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
@@ -307,7 +312,7 @@ export const LOCALES = {
     split_push: 'Empujar con impulso', split_bond: 'Unir, luego separar',
     max_cells: 'Células máx.', auto_split: 'Auto-división (s)',
     friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
-    wobble: 'Oscilación', bg_flow: 'Flujo de fondo', outline_px: 'Contorno px',
+    wobble: 'Oscilación', bg_flow: 'Flujo de fondo', bg_scale: 'Tamaño de fondo', outline_px: 'Contorno px',
     membrane: 'Membrana', cell_size: 'Tamaño de célula', use_highlight: 'Usar color de resalte',
     mode_target: 'Modo objetivo', mode_target_tip: 'Toca para seleccionar / enviar',
     mode_split: 'Modo división', mode_split_tip: 'Toca una célula para dividirla',
@@ -392,7 +397,7 @@ export const LOCALES = {
     split_push: 'Mit Schwung auseinanda', split_bond: 'Vabinda, dann driftn',
     max_cells: 'Max. Zoin', auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
-    wobble: 'Wackln', bg_flow: 'Hintagrundgflies', outline_px: 'Umrandung px',
+    wobble: 'Wackln', bg_flow: 'Hintagrundgflies', bg_scale: 'Hintagrundgrässn', outline_px: 'Umrandung px',
     membrane: 'Membran', cell_size: 'Zoingrässn', use_highlight: 'Akzentfarb vawendn',
     mode_target: 'Zuimodus', mode_target_tip: 'Drauflanga: aussuacha / Zui setzn',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Drauflanga deid de Zoin teiln',
@@ -476,7 +481,7 @@ export const LOCALES = {
     split_push: 'Pelle cum impetu', split_bond: 'Conjunge, deinde fluctuent',
     max_cells: 'Cellulae maximae', auto_split: 'Auto-divisio (s)',
     friction: 'Frictio', bounce: 'Resilientia', throw_strength: 'Vis jactus',
-    wobble: 'Tremor', bg_flow: 'Fluxus tergi', outline_px: 'Linea (px)',
+    wobble: 'Tremor', bg_flow: 'Fluxus tergi', bg_scale: 'Magnitudo tergi', outline_px: 'Linea (px)',
     membrane: 'Membrana', cell_size: 'Magnitudo cellulae',
     use_highlight: 'Colore luminis utere',
     mode_target: 'Modus signi', mode_target_tip: 'Tange ut elige / mitte',

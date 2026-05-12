@@ -502,7 +502,7 @@ const BG_WGSL = /* wgsl */ `
 struct BgU {
   // (kind, vignette, gridStep, time)
   misc: vec4<f32>,
-  // (camera.scale, camera.tx, camera.ty, _)
+  // (camera.scale, camera.tx, camera.ty, bgScale)
   cam: vec4<f32>,
   // (viewportW, viewportH, spotCount, rbcOn)
   vp: vec4<f32>,
@@ -547,6 +547,11 @@ struct VsOut {
   let viewport = u.vp.xy;
   let spotCount = i32(u.vp.z + 0.5);
   let rbcOn = i32(u.vp.w + 0.5);
+  // Background-size slider — multiplier on every bg feature
+  // size (ring stride, grid step, spot radii, RBC silhouettes).
+  // Floored at 0.05 so the slider's 0 endpoint doesn't collapse
+  // strides; at the floor features are ~20× bigger than baseline.
+  let bgS = max(u.cam.w, 0.05);
 
   var col = u.base.rgb;
   if (kind == 1) {
@@ -557,21 +562,23 @@ struct VsOut {
   let screenPx = uv * viewport;
   let worldPx = (screenPx - vec2<f32>(camTx, camTy)) / max(camScale, 0.0001);
 
-  // Petri-dish concentric rings — 1px thin at every 32 world units.
+  // Petri-dish concentric rings — 1px thin at every 32*bgS world units.
   if (kind == 2) {
     let ctr = viewport * 0.5;
     let r = length(worldPx - ctr);
-    let nearestRing = floor(r / 32.0 + 0.5) * 32.0;
+    let stride = 32.0 * bgS;
+    let nearestRing = floor(r / stride + 0.5) * stride;
     let dToRing = abs(r - nearestRing);
     let pxWorld = 1.0 / max(camScale, 0.0001);
     let band = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.5, dToRing);
     col = mix(col, u.ringColor.rgb, band * 0.18);
   }
 
-  // Cyber grid — thin lines every gridStep world units in both axes.
+  // Cyber grid — thin lines every gridStep*bgS world units in both axes.
   if (kind == 3) {
-    let g = worldPx - floor(worldPx / gridStep) * gridStep;
-    let dToLine = min(g, vec2<f32>(gridStep, gridStep) - g);
+    let gStep = gridStep * bgS;
+    let g = worldPx - floor(worldPx / gStep) * gStep;
+    let dToLine = min(g, vec2<f32>(gStep, gStep) - g);
     let pxWorld = 1.0 / max(camScale, 0.0001);
     let lineX = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.x);
     let lineY = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.y);
@@ -580,23 +587,24 @@ struct VsOut {
   }
 
   // Drifting light spots — additive, screen UV. Colours pre-multiplied.
+  // Spot radius scaled by bgS.
   for (var i: i32 = 0; i < ${MAX_SPOTS}; i = i + 1) {
     if (i >= spotCount) { break; }
     let s = u.spots[i];
     let d = distance(uv, s.xy);
-    let a = 1.0 - smoothstep(0.0, s.z, d);
+    let a = 1.0 - smoothstep(0.0, s.z * bgS, d);
     col = col + u.spotCols[i].rgb * a;
   }
 
   // Drifting RBC silhouettes — bloodstream theme flair. 22 ellipses
-  // with darker centre dot, drift on screen UV with time.
+  // with darker centre dot, drift on screen UV with time. Radii × bgS.
   if (rbcOn == 1) {
     for (var i: i32 = 0; i < 22; i = i + 1) {
       let seed = f32(i) * 1.31;
       let fx = fract(f32(i) / 22.0 + 0.06 * sin(time * 0.25 + seed));
       let fy = fract(fract(seed * 0.7) + time * 0.15 + f32(i) * 0.13);
       let c = vec2<f32>(fx, fy);
-      let r = 0.018 + 0.016 * fract(seed * 0.21);
+      let r = (0.018 + 0.016 * fract(seed * 0.21)) * bgS;
       let dEll = (uv - c) / vec2<f32>(r, r * 0.78);
       let ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
       col = mix(col, vec3<f32>(1.0, 0.35, 0.35), ellA);
@@ -1185,7 +1193,7 @@ export class WebGPURenderer extends RendererBase {
     // Single fullscreen triangle; shader reads everything from one
     // uniform buffer. Uniform layout (96 floats / 384 bytes):
     //   [0..3]    misc (kind, vignette, gridStep, time)
-    //   [4..7]    cam  (scale, tx, ty, _)
+    //   [4..7]    cam  (scale, tx, ty, bgScale)
     //   [8..11]   vp   (W, H, spotCount, rbcOn)
     //   [12..31]  base, top, bot, ringColor, gridColor (5 × vec4)
     //   [32..63]  spots[8] vec4 (cx, cy, r, _) screen 0..1
@@ -1747,11 +1755,11 @@ export class WebGPURenderer extends RendererBase {
     data[1] = bg.vignette || 0;
     data[2] = bg.gridStep || 48;
     data[3] = t;
-    // cam
+    // cam (.w is repurposed as the bgScale uniform — see BG_WGSL)
     data[4] = this.camera.scale;
     data[5] = this.camera.tx;
     data[6] = this.camera.ty;
-    data[7] = 0;
+    data[7] = S.bgScale != null ? S.bgScale : 1;
     // vp + spotCount + rbcOn
     const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
     data[8] = this.W;

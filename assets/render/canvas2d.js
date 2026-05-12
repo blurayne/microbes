@@ -94,17 +94,29 @@ export class Canvas2DRenderer extends RendererBase {
     }
     ctx.fillRect(0, 0, W, H);
 
+    // bgScale lets the user enlarge / shrink every world-coord
+    // bg pattern feature without touching the camera zoom. We do
+    // that by running the bg pass at an effective scale of
+    // cam.scale * bgScale: world points project further from the
+    // camera origin, so features appear bgScale× bigger on screen
+    // while cells continue to render at the unchanged cam.scale.
+    // Mirrors the WebGL2 / WebGPU shaders' "worldPx /= bgScale".
+    // Floor at 0.05 so the slider's 0 endpoint doesn't divide-by-
+    // zero — at the floor features are ~20× bigger than baseline,
+    // reading as a near-uniform wash.
+    const bgScale = Math.max(0.05, S.bgScale || 1);
+    const bgEff = cam.scale * bgScale;
     ctx.save();
-    ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
-    const wx = -cam.tx / cam.scale;
-    const wy = -cam.ty / cam.scale;
-    const ww = W / cam.scale;
-    const wh = H / cam.scale;
+    ctx.transform(bgEff, 0, 0, bgEff, cam.tx, cam.ty);
+    const wx = -cam.tx / bgEff;
+    const wy = -cam.ty / bgEff;
+    const ww = W / bgEff;
+    const wh = H / bgEff;
 
     if (bg.kind === 'agar') {
       ctx.save();
       ctx.strokeStyle = bg.ringColor || 'rgba(120,80,30,0.10)';
-      ctx.lineWidth = 1 / cam.scale;
+      ctx.lineWidth = 1 / bgEff;
       const cx = W / 2, cy = H / 2;
       const maxR = Math.hypot(W, H) * 0.9;
       for (let r = 32; r < maxR; r += 32) {
@@ -119,7 +131,7 @@ export class Canvas2DRenderer extends RendererBase {
       ctx.save();
       const t2 = ts * 0.00025 * S.bgFlowSpeed;
       const N = 22;
-      ctx.lineWidth = 1.4 / cam.scale;
+      ctx.lineWidth = 1.4 / bgEff;
       for (let i = 0; i < N; i++) {
         const seed = i * 1.31;
         const fx = ((i / N) + 0.06 * Math.sin(t2 + seed)) % 1;
@@ -147,7 +159,7 @@ export class Canvas2DRenderer extends RendererBase {
       ctx.save();
       const step = bg.gridStep || 48;
       ctx.strokeStyle = bg.gridColor || 'rgba(0,255,170,0.15)';
-      ctx.lineWidth = 1 / cam.scale;
+      ctx.lineWidth = 1 / bgEff;
       const x0 = Math.floor(wx / step) * step;
       const y0 = Math.floor(wy / step) * step;
       ctx.beginPath();
@@ -195,7 +207,11 @@ export class Canvas2DRenderer extends RendererBase {
     const W = this.W, H = this.H;
     const cam = this.camera;
     const t = ts * 0.001 * S.bgFlowSpeed;
-    const sc = cam.scale;
+    // bgScale enters via `sc`: every "1/sc" line width below stays
+    // at 1 screen px regardless of the slider, matching the bg
+    // pass above (and the shader smoothstep bands).
+    const bgScale = Math.max(0.05, S.bgScale || 1);
+    const sc = cam.scale * bgScale;
     switch (decor) {
       case 'lymphocytes': {
         const N = 22;

@@ -265,6 +265,7 @@ uniform int u_spotCount;
 uniform vec4 u_spots[${MAX_SPOTS}];      // (cx, cy, r, _) screen 0..1
 uniform vec3 u_spotCols[${MAX_SPOTS}];
 uniform int u_rbc;                        // 0=off, 1=draw drifting RBC silhouettes
+uniform float u_bgScale;                  // S.bgScale — uniform multiplier on every bg feature size (rings stride, grid step, spot radii, RBC silhouettes). Floored at 0.05 below.
 
 out vec4 outColor;
 
@@ -277,22 +278,32 @@ void main() {
   vec2 screenPx = v_uv * u_viewport;
   vec2 worldPx = (screenPx - u_camera.yz) / u_camera.x;
 
-  // Petri-dish concentric rings — 1px thin at every 32 world units,
-  // centred on the world middle. Matches Canvas2D's stroke loop.
+  // Background-size slider. Every bg-pattern stride / feature
+  // radius below is multiplied by bgS, so a single uniform makes
+  // features grow or shrink uniformly while cells stay at the
+  // unchanged cam.scale. Floor at 0.05 so the slider's 0 endpoint
+  // doesn't collapse the stride to zero — at the floor features
+  // are ~20× bigger than baseline (near-uniform wash).
+  float bgS = max(u_bgScale, 0.05);
+
+  // Petri-dish concentric rings — 1px thin at every 32*bgS world
+  // units, centred on the world middle. Matches Canvas2D's stroke loop.
   if (u_kind == 2) {
     vec2 ctr = u_viewport * 0.5;
     float r = length(worldPx - ctr);
-    float nearestRing = floor(r / 32.0 + 0.5) * 32.0;
+    float stride = 32.0 * bgS;
+    float nearestRing = floor(r / stride + 0.5) * stride;
     float dToRing = abs(r - nearestRing);
     float pxWorld = 1.0 / u_camera.x;
     float band = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.5, dToRing);
     col = mix(col, u_ringColor, band * 0.18);
   }
 
-  // Cyber grid: thin lines every gridStep world units, in both axes.
+  // Cyber grid: thin lines every gridStep*bgS world units, in both axes.
   if (u_kind == 3) {
-    vec2 g = mod(worldPx, u_gridStep);
-    vec2 dToLine = min(g, u_gridStep - g);
+    float gStep = u_gridStep * bgS;
+    vec2 g = mod(worldPx, gStep);
+    vec2 dToLine = min(g, gStep - g);
     float pxWorld = 1.0 / u_camera.x;
     float lineX = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.x);
     float lineY = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.y);
@@ -302,24 +313,25 @@ void main() {
 
   // Drifting light spots — additive, screen-space coords. Each spot
   // colour was pre-multiplied by its source alpha on the JS side, so
-  // we just add directly without re-scaling.
+  // we just add directly without re-scaling. Radius scales with bgS.
   for (int i = 0; i < ${MAX_SPOTS}; i++) {
     if (i >= u_spotCount) break;
     vec4 s = u_spots[i];
     float d = distance(v_uv, s.xy);
-    float a = 1.0 - smoothstep(0.0, s.z, d);
+    float a = 1.0 - smoothstep(0.0, s.z * bgS, d);
     col += u_spotCols[i] * a;
   }
 
   // Drifting red-blood-cell silhouettes — bloodstream theme flair.
   // 22 ellipses with darker centre dot, drift on screen UV with u_time.
+  // Ellipse radii multiplied by bgS.
   if (u_rbc == 1) {
     for (int i = 0; i < 22; i++) {
       float seed = float(i) * 1.31;
       float fx = mod(float(i) / 22.0 + 0.06 * sin(u_time * 0.25 + seed), 1.0);
       float fy = mod(fract(seed * 0.7) + u_time * 0.15 + float(i) * 0.13, 1.0);
       vec2 c = vec2(fx, fy);
-      float r = 0.018 + 0.016 * fract(seed * 0.21);
+      float r = (0.018 + 0.016 * fract(seed * 0.21)) * bgS;
       vec2 dEll = (v_uv - c) / vec2(r, r * 0.78);
       float ellA = (1.0 - smoothstep(0.85, 1.0, length(dEll))) * 0.10;
       col = mix(col, vec3(1.0, 0.35, 0.35), ellA);
@@ -1029,6 +1041,7 @@ export class WebGL2Renderer extends RendererBase {
     this._bgU.spots = bu('u_spots');
     this._bgU.spotCols = bu('u_spotCols');
     this._bgU.rbc = bu('u_rbc');
+    this._bgU.bgScale = bu('u_bgScale');
 
     this._bgVao = gl.createVertexArray();
 
@@ -1371,6 +1384,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform4fv(this._bgU.spots, this._spotsBuf);
     gl.uniform3fv(this._bgU.spotCols, this._spotColsBuf);
     gl.uniform1i(this._bgU.rbc, bg.rbcSilhouettes ? 1 : 0);
+    gl.uniform1f(this._bgU.bgScale, S.bgScale || 1);
 
     gl.bindVertexArray(this._bgVao);
     gl.disable(gl.BLEND);

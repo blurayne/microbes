@@ -398,6 +398,7 @@ function bindRange(id, key, valId, fmt) {
 bindRange('maxCells', 'maxCells', 'maxCellsVal', v => v.toFixed(0));
 bindRange('autoSplitSeconds', 'autoSplitSeconds', 'autoVal', v => v.toFixed(0) + 's');
 bindRange('bgFlowSpeed', 'bgFlowSpeed', 'bgVal', v => v.toFixed(2) + '×');
+bindRange('bgScale', 'bgScale', 'bgScaleVal', v => v.toFixed(2) + '×');
 bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
 bindRange('membraneIntensity', 'membraneIntensity', 'membraneVal', v => v.toFixed(2));
 bindRange('cellBorderThickness', 'cellBorderThickness', 'cellBorderVal', v => v.toFixed(1) + '×');
