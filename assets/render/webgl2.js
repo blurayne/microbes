@@ -674,6 +674,7 @@ uniform int u_spotCount;
 uniform vec4 u_spots[${MAX_SPOTS}];      // (cx, cy, r, _) screen 0..1
 uniform vec3 u_spotCols[${MAX_SPOTS}];
 uniform int u_rbc;                        // 0=off, 1=draw drifting RBC silhouettes
+uniform float u_bgScale;                  // S.bgScale — uniform multiplier on every bg feature size (rings stride, grid step, spot radii, RBC silhouettes). Floored at 0.05 below.
 uniform float u_opacity;                  // per-layer opacity (0..1), folded into output alpha + premultiplied RGB
 
 out vec4 outColor;
@@ -711,22 +712,32 @@ void main() {
   vec2 worldPx = vec2(ccwBg * dCam.x + scwBg * dCam.y,
                       -scwBg * dCam.x + ccwBg * dCam.y) / u_camera.x;
 
-  // Petri-dish concentric rings — 1px thin at every 32 world units,
-  // centred on the world middle. Matches Canvas2D's stroke loop.
+  // Background-size slider. Every bg-pattern stride / feature
+  // radius below is multiplied by bgS, so a single uniform makes
+  // features grow or shrink uniformly while cells stay at the
+  // unchanged cam.scale. Floor at 0.05 so the slider's 0 endpoint
+  // doesn't collapse the stride to zero — at the floor features
+  // are ~20× bigger than baseline (near-uniform wash).
+  float bgS = max(u_bgScale, 0.05);
+
+  // Petri-dish concentric rings — 1px thin at every 32*bgS world
+  // units, centred on the world middle. Matches Canvas2D's stroke loop.
   if (u_kind == 2) {
     vec2 ctr = u_viewport * 0.5;
     float r = length(worldPx - ctr);
-    float nearestRing = floor(r / 32.0 + 0.5) * 32.0;
+    float stride = 32.0 * bgS;
+    float nearestRing = floor(r / stride + 0.5) * stride;
     float dToRing = abs(r - nearestRing);
     float pxWorld = 1.0 / u_camera.x;
     float band = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.5, dToRing);
     col = mix(col, u_ringColor, band * 0.18);
   }
 
-  // Cyber grid: thin lines every gridStep world units, in both axes.
+  // Cyber grid: thin lines every gridStep*bgS world units, in both axes.
   if (u_kind == 3) {
-    vec2 g = mod(worldPx, u_gridStep);
-    vec2 dToLine = min(g, u_gridStep - g);
+    float gStep = u_gridStep * bgS;
+    vec2 g = mod(worldPx, gStep);
+    vec2 dToLine = min(g, gStep - g);
     float pxWorld = 1.0 / u_camera.x;
     float lineX = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.x);
     float lineY = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.y);
@@ -864,29 +875,32 @@ void main() {
 
   // Drifting light spots — additive, screen-space coords. Each spot
   // colour was pre-multiplied by its source alpha on the JS side, so
-  // we just add directly without re-scaling.
+  // we just add directly without re-scaling. Radius scales with bgS.
   for (int i = 0; i < ${MAX_SPOTS}; i++) {
     if (i >= u_spotCount) break;
     vec4 s = u_spots[i];
     float d = distance(v_uv, s.xy);
-    float a = 1.0 - smoothstep(0.0, s.z, d);
+    float a = 1.0 - smoothstep(0.0, s.z * bgS, d);
     col += u_spotCols[i] * a;
   }
 
   // Bloodstream theme: directional plasma flow beneath the RBC
   // silhouettes. Flow vector points downward (top → bottom) so the
   // wash reads as a stream of blood draining vertically; streamer
-  // ribbons appear as horizontal bands sliding downward.
+  // ribbons appear as horizontal bands sliding downward. Pattern
+  // wavelength scales with bgS — dividing worldPx by bgS is
+  // equivalent to multiplying the fbm wavelength by bgS.
   if (u_rbc == 1) {
+    vec2 bgWorldPx = worldPx / bgS;
     vec2 flow = vec2(0.10, 1.0);    // mostly downward, slight rightward
-    vec2 plasmaP = worldPx * 0.0015 + flow * (u_time * 0.20);
+    vec2 plasmaP = bgWorldPx * 0.0015 + flow * (u_time * 0.20);
     float plasma = bgFbm(plasmaP + bgFbm(plasmaP * 0.5));
     vec3 plasmaCol = mix(vec3(0.30, 0.05, 0.07), vec3(0.62, 0.12, 0.16),
                          smoothstep(0.30, 0.85, plasma));
     col = mix(col, plasmaCol, 0.55);
     // Streamer ribbons — narrow horizontal bands (perpendicular to
     // the vertical flow) of brighter tint that scroll downward.
-    float ribbon = sin(worldPx.x * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
+    float ribbon = sin(bgWorldPx.x * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
                        + u_time * 0.6);
     ribbon = pow(max(0.0, ribbon), 6.0);
     col = mix(col, vec3(0.88, 0.22, 0.25), ribbon * 0.18);
@@ -897,9 +911,12 @@ void main() {
   // density stays camera-independent. Each donut renders as a soft
   // pink rim with a darker red dimple in the centre (the biconcave
   // depression seen face-on); a slight aspect ratio (0.92) makes the
-  // per-cell spin visually readable.
+  // per-cell spin visually readable. Tile size + disc radius scale
+  // with bgS so a single slider grows / shrinks the whole pattern;
+  // time-driven motion stays in unscaled world units so RBCs move at
+  // the same on-screen speed regardless of bgS.
   if (u_rbc == 1) {
-    const float TS = 600.0;            // world px per tile
+    float TS = 600.0 * bgS;            // world px per tile
     vec2 tIdx = floor(worldPx / TS);
     for (int oy = -1; oy <= 1; oy++) {
       for (int ox = -1; ox <= 1; ox++) {
@@ -912,7 +929,7 @@ void main() {
           vec2 cWorld = cell * TS + inTile
                       + vec2(28.0 * sin(u_time * 0.30 + kSeed), 0.0)
                       + vec2(9.0, 110.0) * u_time;
-          float rWorld = 24.0 + 18.0 * fract(kSeed * 0.41);
+          float rWorld = (24.0 + 18.0 * fract(kSeed * 0.41)) * bgS;
 
           // Per-cell rotation: angle = seed phase + slow spin rate.
           float spin = 0.6 + 0.7 * fract(kSeed * 0.71);   // 0.6..1.3 rad/s
@@ -2152,6 +2169,7 @@ export class WebGL2Renderer extends RendererBase {
     this._bgU.spots = bu('u_spots');
     this._bgU.spotCols = bu('u_spotCols');
     this._bgU.rbc = bu('u_rbc');
+    this._bgU.bgScale = bu('u_bgScale');
     this._bgU.reactorTex = bu('u_reactorTex');
     this._bgU.opacity = bu('u_opacity');
 
@@ -3083,6 +3101,7 @@ export class WebGL2Renderer extends RendererBase {
     gl.uniform4fv(this._bgU.spots, this._spotsBuf);
     gl.uniform3fv(this._bgU.spotCols, this._spotColsBuf);
     gl.uniform1i(this._bgU.rbc, bg.rbcSilhouettes ? 1 : 0);
+    gl.uniform1f(this._bgU.bgScale, S.bgScale || 1);
     gl.uniform1f(this._bgU.opacity, (typeof bg.opacity === 'number') ? bg.opacity : 1);
     if (kind === 8) {
       gl.activeTexture(gl.TEXTURE0);

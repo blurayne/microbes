@@ -18,6 +18,7 @@ export const DEFAULTS = {
   autoSplitSeconds: 10,
   maxCells: 512,            // population cap. UI number input in Settings → Population; clamps to [32, 4096], invalid input resets to 512. Reached cap = spawnAtWorld/beginSplit recycle the oldest cell (#136); see TODO.md for future ideas.
   bgFlowSpeed: 0.55,
+  bgScale: 1.0,             // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0..4×.
   outlinePx: 5,
   showDebugField: false,
   // Visual style for the cell rendering itself. Was the lone "theme"
@@ -111,6 +112,7 @@ export const DEFAULTS = {
   showFPS: false,
   showObjectCount: false,   // append live cell + particle count to the FPS line
   navArrows: true,          // edge-of-screen arrows pointing at off-screen cells
+  navMode: 'floating',      // 'floating' = 4 fixed-edge aggregate arrows; 'anchored' = per-cell arrows sliding along the screen edge, with 1D-greedy clustering when crowded. Default keeps the original UX.
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
   friction: 0.80,
@@ -355,6 +357,8 @@ export function loadSettings() {
     // Migrate legacy renderer values (pixi / pixi-webgpu / pixi-webgl2) to
     // the new default. Pixi support was removed in favour of native WebGPU.
     if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
+    const validNavModes = ['floating', 'anchored'];
+    if (!validNavModes.includes(parsed.navMode)) parsed.navMode = DEFAULTS.navMode;
     const validMetaRtModes = ['bbox', 'fullCanvas', 'sharedMax'];
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
     const validMetaOutlineModes = ['edge', 'sdf', 'polygon'];
@@ -435,6 +439,10 @@ export function loadSettings() {
       parsed.cellBorderThickness = DEFAULTS.cellBorderThickness;
     }
     parsed.cellBorderThickness = Math.max(0.5, Math.min(5.0, parsed.cellBorderThickness));
+    if (typeof parsed.bgScale !== 'number' || !Number.isFinite(parsed.bgScale)) {
+      parsed.bgScale = DEFAULTS.bgScale;
+    }
+    parsed.bgScale = Math.max(0, Math.min(4, parsed.bgScale));
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Rheinhessisch was renamed to Mainzerisch (Mainz city dialect).
@@ -643,12 +651,13 @@ export const LOCALES = {
     meta_outline_hint_polygon: ' — polygon-union rim, sharp / no blur.',
     auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
-    wobble: 'Wobble', bg_flow: 'Background flow', outline_px: 'Outline px',
+    wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background size', outline_px: 'Outline px',
     membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
     mode_kill: 'Kill mode', mode_kill_tip: 'Tap a cell to make it explode',
     cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS', show_renderer: 'Show renderer', show_build_info: 'Show build info', show_object_count: 'Show object count', nav_arrows: 'Off-screen arrows',
+    nav_mode: 'Arrow mode', nav_mode_floating: 'Floating (4 fixed)', nav_mode_anchored: 'Anchored (slide along edge)',
     copy_build: 'Copy build SHA', toast_build_copied: 'Build SHA copied to clipboard', toast_build_copy_failed: 'Copy failed', build_stamp_copy_hint: 'Click to copy full build SHA',
     show_field: 'Show metaball field', render_scale: 'Render scale',
     upscale: 'Upscale', scanlines: 'Scanlines (CRT)',
@@ -834,12 +843,13 @@ export const LOCALES = {
     random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
-    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', outline_px: 'Umrandung px',
+    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundgröße', outline_px: 'Umrandung px',
     membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
     mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zelle antippen, sie zerplatzt',
     cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen', show_object_count: 'Objektanzahl anzeigen', nav_arrows: 'Pfeile außerhalb des Bildes',
+    nav_mode: 'Pfeilmodus', nav_mode_floating: 'Schwebend (4 fest)', nav_mode_anchored: 'Verankert (am Rand entlang)',
     copy_build: 'Build-SHA kopieren', toast_build_copied: 'Build-SHA in Zwischenablage kopiert', toast_build_copy_failed: 'Kopieren fehlgeschlagen', build_stamp_copy_hint: 'Klicken, um die vollständige Build-SHA zu kopieren',
     show_field: 'Metaball-Feld zeigen', render_scale: 'Renderskala',
     upscale: 'Hochskalieren', scanlines: 'Scanlines (CRT)',
@@ -970,7 +980,7 @@ export const LOCALES = {
     random_split: 'División aleatoria', meta_split: 'División metaball',
     auto_split: 'Auto-división (s)',
     friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
-    wobble: 'Oscilación', bg_flow: 'Flujo de fondo', outline_px: 'Contorno px',
+    wobble: 'Oscilación', bg_flow: 'Flujo de fondo', bg_scale: 'Tamaño de fondo', outline_px: 'Contorno px',
     membrane: 'Membrana', cell_size: 'Tamaño de célula', use_highlight: 'Usar color de resalte',
     mode_target: 'Modo objetivo', mode_target_tip: 'Toca para seleccionar / enviar',
     mode_split: 'Modo división', mode_split_tip: 'Toca una célula para dividirla',
@@ -1096,7 +1106,7 @@ export const LOCALES = {
     random_split: 'Zoifällige Teilung', meta_split: 'Metaball-Doaln',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
-    wobble: 'Wackln', bg_flow: 'Hintagrundgflies', outline_px: 'Umrandung px',
+    wobble: 'Wackln', bg_flow: 'Hintagrundgflies', bg_scale: 'Hintagrundgrässn', outline_px: 'Umrandung px',
     membrane: 'Membran', cell_size: 'Zoingrässn', use_highlight: 'Akzentfarb vawendn',
     mode_target: 'Zuimodus', mode_target_tip: 'Drauflanga: aussuacha / Zui setzn',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Drauflanga deid de Zoin teiln',
@@ -1477,7 +1487,7 @@ export const LOCALES = {
     random_split: 'Divisio casualis', meta_split: 'Divisio metaballi',
     auto_split: 'Auto-divisio (s)',
     friction: 'Frictio', bounce: 'Resilientia', throw_strength: 'Vis jactus',
-    wobble: 'Tremor', bg_flow: 'Fluxus tergi', outline_px: 'Linea (px)',
+    wobble: 'Tremor', bg_flow: 'Fluxus tergi', bg_scale: 'Magnitudo tergi', outline_px: 'Linea (px)',
     membrane: 'Membrana', cell_size: 'Magnitudo cellulae',
     use_highlight: 'Colore luminis utere',
     mode_target: 'Modus signi', mode_target_tip: 'Tange ut elige / mitte',

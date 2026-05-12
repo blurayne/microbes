@@ -205,6 +205,9 @@
         <label><span data-i18n="bg_flow">Background flow</span> <span id="bgVal" class="val"></span>
           <input type="range" id="bgFlowSpeed" min="0" max="2" step="0.05" />
         </label>
+        <label><span data-i18n="bg_scale">Background size</span> <span id="bgScaleVal" class="val"></span>
+          <input type="range" id="bgScale" min="0" max="4" step="0.05" />
+        </label>
         <label><span data-i18n="outline_px">Outline px</span> <span id="outVal" class="val"></span>
           <input type="range" id="outlinePx" min="1" max="10" step="1" />
         </label>
@@ -223,6 +226,12 @@
         <label><input type="checkbox" id="showBuildInfo" /> <span data-i18n="show_build_info">Show build info</span></label>
         <label><input type="checkbox" id="showObjectCount" /> <span data-i18n="show_object_count">Show object count</span></label>
         <label><input type="checkbox" id="navArrows" /> <span data-i18n="nav_arrows">Off-screen arrows</span></label>
+        <label><span data-i18n="nav_mode">Arrow mode</span>
+          <select id="navMode">
+            <option value="floating" data-i18n="nav_mode_floating">Floating (4 fixed)</option>
+            <option value="anchored" data-i18n="nav_mode_anchored">Anchored (slide along edge)</option>
+          </select>
+        </label>
         <label><input type="checkbox" id="showDebugField" /> <span data-i18n="show_field">Show metaball field</span></label>
       </details>
 

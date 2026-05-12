@@ -1234,11 +1234,16 @@ const BG_WGSL = /* wgsl */ `
 struct BgU {
   // (kind, vignette, gridStep, time)
   misc: vec4<f32>,
-  // (camera.scale, camera.tx, camera.ty, _)
+  // (camera.scale, camera.tx, camera.ty, camera.rotation) — .w is
+  // rotation in radians, consumed by cRBg/sRBg in fs_main so the bg
+  // pattern follows pinch-rotation. It is NOT bgScale (earlier bug,
+  // pre-fix). bgScale lives in extra.y so the two values don't
+  // collide on the same component.
   cam: vec4<f32>,
   // (viewportW, viewportH, spotCount, rbcOn)
   vp: vec4<f32>,
-  // Per-layer extras: x=opacity (0..1), yzw reserved.
+  // Per-layer extras: x=opacity (0..1), y=bgScale (1.0 = default,
+  // floor 0.05 at the shader), zw reserved.
   extra: vec4<f32>,
   base: vec4<f32>,
   top: vec4<f32>,
@@ -1312,6 +1317,11 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   let viewport = u.vp.xy;
   let spotCount = i32(u.vp.z + 0.5);
   let rbcOn = i32(u.vp.w + 0.5);
+  // Background-size slider — multiplier on every bg feature
+  // size (ring stride, grid step, spot radii, RBC silhouettes).
+  // Floored at 0.05 so the slider's 0 endpoint doesn't collapse
+  // strides; at the floor features are ~20× bigger than baseline.
+  let bgS = max(u.extra.y, 0.05);
 
   var col = u.base.rgb;
   if (kind == 1) {
@@ -1327,21 +1337,23 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   let worldPx = vec2<f32>(cRBg * dCam.x + sRBg * dCam.y,
                           -sRBg * dCam.x + cRBg * dCam.y) / max(camScale, 0.0001);
 
-  // Petri-dish concentric rings — 1px thin at every 32 world units.
+  // Petri-dish concentric rings — 1px thin at every 32*bgS world units.
   if (kind == 2) {
     let ctr = viewport * 0.5;
     let r = length(worldPx - ctr);
-    let nearestRing = floor(r / 32.0 + 0.5) * 32.0;
+    let stride = 32.0 * bgS;
+    let nearestRing = floor(r / stride + 0.5) * stride;
     let dToRing = abs(r - nearestRing);
     let pxWorld = 1.0 / max(camScale, 0.0001);
     let band = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.5, dToRing);
     col = mix(col, u.ringColor.rgb, band * 0.18);
   }
 
-  // Cyber grid — thin lines every gridStep world units in both axes.
+  // Cyber grid — thin lines every gridStep*bgS world units in both axes.
   if (kind == 3) {
-    let g = worldPx - floor(worldPx / gridStep) * gridStep;
-    let dToLine = min(g, vec2<f32>(gridStep, gridStep) - g);
+    let gStep = gridStep * bgS;
+    let g = worldPx - floor(worldPx / gStep) * gStep;
+    let dToLine = min(g, vec2<f32>(gStep, gStep) - g);
     let pxWorld = 1.0 / max(camScale, 0.0001);
     let lineX = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.x);
     let lineY = 1.0 - smoothstep(pxWorld * 0.4, pxWorld * 1.4, dToLine.y);
@@ -1453,11 +1465,12 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   }
 
   // Drifting light spots — additive, screen UV. Colours pre-multiplied.
+  // Spot radius scaled by bgS.
   for (var i: i32 = 0; i < ${MAX_SPOTS}; i = i + 1) {
     if (i >= spotCount) { break; }
     let s = u.spots[i];
     let d = distance(uv, s.xy);
-    let a = 1.0 - smoothstep(0.0, s.z, d);
+    let a = 1.0 - smoothstep(0.0, s.z * bgS, d);
     col = col + u.spotCols[i].rgb * a;
   }
 
@@ -1466,25 +1479,29 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   // with the camera (matches Canvas2D's drawBackground behaviour where
   // RBCs are drawn inside the camera transform).
   // Bloodstream theme: directional plasma flow + horizontal ribbon
-  // bands scrolling downward. Mirrors WebGL2 FRAG_BG.
+  // bands scrolling downward. Mirrors WebGL2 FRAG_BG. Wavelength
+  // scales with bgS via dividing worldPx by bgS.
   if (rbcOn == 1) {
+    let bgWorldPx = worldPx / bgS;
     let flow = vec2<f32>(0.10, 1.0);   // downward + slight rightward
-    let plasmaP = worldPx * 0.0015 + flow * (time * 0.20);
+    let plasmaP = bgWorldPx * 0.0015 + flow * (time * 0.20);
     let plasma = bgFbm(plasmaP + vec2<f32>(bgFbm(plasmaP * 0.5)));
     let plasmaCol = mix(vec3<f32>(0.30, 0.05, 0.07),
                         vec3<f32>(0.62, 0.12, 0.16),
                         smoothstep(0.30, 0.85, plasma));
     col = mix(col, plasmaCol, 0.55);
-    var ribbon = sin(worldPx.x * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
+    var ribbon = sin(bgWorldPx.x * 0.012 + bgFbm(plasmaP * 0.7) * 6.28
                      + time * 0.6);
     ribbon = pow(max(0.0, ribbon), 6.0);
     col = mix(col, vec3<f32>(0.88, 0.22, 0.25), ribbon * 0.18);
   }
 
   // RBC donuts — biconcave-disc silhouettes flowing top → bottom
-  // with per-cell rotation. Mirror of WebGL2 FRAG_BG.
+  // with per-cell rotation. Mirror of WebGL2 FRAG_BG. Tile size and
+  // disc radius scale with bgS; time-driven motion stays in unscaled
+  // world units so on-screen speed is unchanged.
   if (rbcOn == 1) {
-    let TS: f32 = 600.0;
+    let TS: f32 = 600.0 * bgS;
     let tIdx = floor(worldPx / TS);
     for (var oy: i32 = -1; oy <= 1; oy = oy + 1) {
       for (var ox: i32 = -1; ox <= 1; ox = ox + 1) {
@@ -1496,7 +1513,7 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
           let cWorld = cell * TS + inTile
                      + vec2<f32>(28.0 * sin(time * 0.30 + kSeed), 0.0)
                      + vec2<f32>(9.0, 110.0) * time;
-          let rWorld = 24.0 + 18.0 * fract(kSeed * 0.41);
+          let rWorld = (24.0 + 18.0 * fract(kSeed * 0.41)) * bgS;
 
           let spin = 0.6 + 0.7 * fract(kSeed * 0.71);
           let ang  = kSeed + time * spin;
@@ -2236,9 +2253,9 @@ export class WebGPURenderer extends RendererBase {
     // Single fullscreen triangle; shader reads everything from one
     // uniform buffer. Uniform layout (100 floats / 400 bytes):
     //   [0..3]    misc  (kind, vignette, gridStep, time)
-    //   [4..7]    cam   (scale, tx, ty, _)
+    //   [4..7]    cam   (scale, tx, ty, rotation)
     //   [8..11]   vp    (W, H, spotCount, rbcOn)
-    //   [12..15]  extra (opacity, _, _, _)
+    //   [12..15]  extra (opacity, bgScale, _, _)
     //   [16..35]  base, top, bot, ringColor, gridColor (5 × vec4)
     //   [36..67]  spots[8] vec4 (cx, cy, r, _) screen 0..1
     //   [68..99]  spotCols[8] vec4 (r, g, b, _) pre-multiplied
@@ -3545,7 +3562,9 @@ export class WebGPURenderer extends RendererBase {
     data[1] = bg.vignette || 0;
     data[2] = bg.gridStep || 48;
     data[3] = t;
-    // cam (.w = rotation-radians)
+    // cam (.w = camera.rotation in radians — the bg shader reads it
+    // via cRBg/sRBg in fs_main so the bg pattern rotates with the
+    // camera when pinch-rotation is on). bgScale lives in extra.y.
     data[4] = this.camera.scale;
     data[5] = this.camera.tx;
     data[6] = this.camera.ty;
@@ -3556,9 +3575,9 @@ export class WebGPURenderer extends RendererBase {
     data[9] = this.H;
     data[10] = count;
     data[11] = bg.rbcSilhouettes ? 1 : 0;
-    // extra (opacity, _, _, _)
+    // extra (opacity, bgScale, _, _)
     data[12] = (typeof bg.opacity === 'number') ? bg.opacity : 1;
-    data[13] = 0;
+    data[13] = S.bgScale != null ? S.bgScale : 1;
     data[14] = 0;
     data[15] = 0;
     // base / top / bot / ringColor / gridColor (each vec4 with .a = 0 padding)

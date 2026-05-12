@@ -30,9 +30,20 @@ When **shipping** the change:
 
 ## House rules
 
-- **Always branch off `main`.** Never commit directly to main.
+- **Always branch off `main`.** Never commit directly to main, and
+  never stack PRs on feature branches — every PR's `base` is
+  `main`, never another `claude/*` branch. If a follow-up depends
+  on work that hasn't merged yet, wait for the parent PR to land,
+  then branch off the freshly-updated main.
 - **One PR per logical change.** Big plans split into sub-PRs;
   the plan file in `.claude/plan/` describes the split.
+- **Auto-merge when CI is green.** Every PR opened by a Claude
+  session should have auto-merge enabled (`merge_method: squash`)
+  immediately after creation, so it lands on main as soon as the
+  Pages-deploy workflow + tests pass without the user having to
+  click anything. Use `mcp__github__enable_pr_auto_merge`. The
+  user explicitly opted in to this in May 2026 — don't ask each
+  time, just do it.
 - **Always announce branch / PR / build / codename after every
   merge or push to main.** Three numbers, three meanings — never
   conflate them:

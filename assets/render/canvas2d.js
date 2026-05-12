@@ -134,6 +134,18 @@ export class Canvas2DRenderer extends RendererBase {
     }
     ctx.fillRect(0, 0, W, H);
 
+    // bgScale lets the user enlarge / shrink every world-coord
+    // bg pattern feature without touching the camera zoom. We do
+    // that by running the bg pass at an effective scale of
+    // cam.scale * bgScale: world points project further from the
+    // camera origin, so features appear bgScale× bigger on screen
+    // while cells continue to render at the unchanged cam.scale.
+    // Mirrors the WebGL2 / WebGPU shaders' "worldPx /= bgScale".
+    // Floor at 0.05 so the slider's 0 endpoint doesn't divide-by-
+    // zero — at the floor features are ~20× bigger than baseline,
+    // reading as a near-uniform wash.
+    const bgScale = Math.max(0.05, S.bgScale || 1);
+    const bgEff = cam.scale * bgScale;
     ctx.save();
     // Mirror the rotation-aware composition that `withCameraCtx` applies
     // to the cell pass. Without this the bg only scales + translates, so
@@ -142,20 +154,20 @@ export class Canvas2DRenderer extends RendererBase {
     // move in opposite directions. Reduces to the original
     // scale + translate matrix exactly when cam.rotation === 0.
     if (cam.rotation === 0) {
-      ctx.transform(cam.scale, 0, 0, cam.scale, cam.tx, cam.ty);
+      ctx.transform(bgEff, 0, 0, bgEff, cam.tx, cam.ty);
     } else {
       const co = Math.cos(cam.rotation), si = Math.sin(cam.rotation);
-      ctx.transform(cam.scale * co, cam.scale * si, -cam.scale * si, cam.scale * co, cam.tx, cam.ty);
+      ctx.transform(bgEff * co, bgEff * si, -bgEff * si, bgEff * co, cam.tx, cam.ty);
     }
-    const wx = -cam.tx / cam.scale;
-    const wy = -cam.ty / cam.scale;
-    const ww = W / cam.scale;
-    const wh = H / cam.scale;
+    const wx = -cam.tx / bgEff;
+    const wy = -cam.ty / bgEff;
+    const ww = W / bgEff;
+    const wh = H / bgEff;
 
     if (bg.kind === 'agar') {
       ctx.save();
       ctx.strokeStyle = bg.ringColor || 'rgba(120,80,30,0.10)';
-      ctx.lineWidth = 1 / cam.scale;
+      ctx.lineWidth = 1 / bgEff;
       const cx = W / 2, cy = H / 2;
       const maxR = Math.hypot(W, H) * 0.9;
       for (let r = 32; r < maxR; r += 32) {
@@ -181,7 +193,7 @@ export class Canvas2DRenderer extends RendererBase {
       const ty0 = Math.floor(wy / TS) - 1;
       const tx1 = Math.ceil((wx + ww) / TS) + 1;
       const ty1 = Math.ceil((wy + wh) / TS) + 1;
-      ctx.lineWidth = 1.4 / cam.scale;
+      ctx.lineWidth = 1.4 / bgEff;
       // Same hash as bgHash() in the GPU shaders so the silhouette
       // layout matches between renderers.
       const bgHash = (x, y) => {
@@ -224,7 +236,7 @@ export class Canvas2DRenderer extends RendererBase {
       ctx.save();
       const step = bg.gridStep || 48;
       ctx.strokeStyle = bg.gridColor || 'rgba(0,255,170,0.15)';
-      ctx.lineWidth = 1 / cam.scale;
+      ctx.lineWidth = 1 / bgEff;
       const x0 = Math.floor(wx / step) * step;
       const y0 = Math.floor(wy / step) * step;
       ctx.beginPath();
@@ -272,7 +284,11 @@ export class Canvas2DRenderer extends RendererBase {
     const W = this.W, H = this.H;
     const cam = this.camera;
     const t = ts * 0.001 * S.bgFlowSpeed;
-    const sc = cam.scale;
+    // bgScale enters via `sc`: every "1/sc" line width below stays
+    // at 1 screen px regardless of the slider, matching the bg
+    // pass above (and the shader smoothstep bands).
+    const bgScale = Math.max(0.05, S.bgScale || 1);
+    const sc = cam.scale * bgScale;
     switch (decor) {
       case 'lymphocytes': {
         const N = 22;

@@ -1312,3 +1312,44 @@ body.adding #stage    { cursor: crosshair; }
 .nav-arrow-bottom { bottom: 8px; left: 50%; transform: translateX(-50%) rotate(180deg); }
 .nav-arrow-left   { left: 8px;   top: 50%;  transform: translateY(-50%) rotate(-90deg); }
 .nav-arrow-right  { right: 8px;  top: 50%;  transform: translateY(-50%) rotate(90deg); }
+
+/* Anchored mode: per-cluster wrapper positioned absolutely via inline
+   left/top (set in JS), then rotated to point outward. Width/height
+   come from CSS custom properties also set inline, so the same
+   stylesheet handles the whole 18..44 px range without inline style
+   collisions. Smooth slide while a cluster moves along the edge. */
+.nav-arrow-anchor {
+  position: absolute;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: left 120ms linear, top 120ms linear,
+              transform 120ms linear;
+}
+.nav-arrow-anchor.hidden { display: none; }
+.nav-arrow-anchored {
+  width:  var(--nav-arrow-thickness, 14px);
+  height: var(--nav-arrow-length,    18px);
+  filter: drop-shadow(0 1px 2px #0008);
+  transition: width 120ms ease, height 120ms ease;
+}
+/* Count badge sits above the arrow tip (anchor's local +Y axis is
+   along the arrow length, pre-rotation), so the badge always reads
+   upright relative to the arrow even after the wrapper rotates. */
+.nav-arrow-badge {
+  margin-top: 2px;
+  padding: 1px 6px;
+  font: 600 11px/1.2 system-ui, -apple-system, sans-serif;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.65);
+  border-radius: 999px;
+  white-space: nowrap;
+  /* Counter-rotate the badge so the digits stay upright regardless
+     of which edge the cluster sits on (parent .nav-arrow-anchor
+     applies a 0/90/180/-90° rotation; this cancels it for the
+     simple-axis cases). The text reads upright on top + bottom
+     edges naturally; for left + right we accept slightly rotated
+     digits to keep the rule simple — the count is still legible. */
+}
+.nav-arrow-badge.hidden { display: none; }
