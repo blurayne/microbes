@@ -589,7 +589,7 @@ const allDialogs = [...new Set([settingsEl, helpDialog, addDialog, aboutDialog].
 const aboutBtn = document.getElementById('aboutBtn');
 if (aboutBtn) aboutBtn.addEventListener('click', () => openOnly(aboutDialog));
 const copyBuildBtn = document.getElementById('copyBuildBtn');
-if (copyBuildBtn) copyBuildBtn.addEventListener('click', copyBuildLabel);
+if (copyBuildBtn) copyBuildBtn.addEventListener('click', copyBuildSha);
 _hookDebugLogButtons();
 
 function openOnly(target) {
@@ -1803,14 +1803,17 @@ function renderPaletteBadGrid() {
 
 // ---------- Build stamp ----------
 // The current build label — same string shown in the on-screen
-// #build pill, used by the clipboard handlers (click on stamp + the
-// "Copy build" button in Settings). Computed once on load; the
-// build payload doesn't change for a session.
+// #build pill. The full SHA is kept separately so the copy
+// handler can write the complete commit hash to the clipboard
+// even though the displayed pill abbreviates it to 7 chars.
 let _currentBuildLabel = '';
+let _currentBuildSha = '';
 function renderBuildStamp() {
   const el = document.getElementById('build');
   const b = window.__BUILD__ || { sha: 'dev', run: 0, dateUtc: null, branch: null };
-  const sha = (b.sha || 'dev').slice(0, 7);
+  const fullSha = b.sha || 'dev';
+  _currentBuildSha = fullSha;
+  const sha = fullSha.slice(0, 7);
   let when = '';
   if (b.dateUtc) {
     const d = new Date(b.dateUtc);
@@ -1837,25 +1840,25 @@ function renderBuildStamp() {
 }
 renderBuildStamp();
 
-// Click the build stamp → copy the label to the clipboard, confirm
-// via toast. Same handler is reused by the Settings → "Copy build"
-// button so the user has two equally easy paths.
-async function copyBuildLabel() {
-  const ok = await copyToClipboard(_currentBuildLabel);
+// Click the build stamp / press the Settings "Copy build" button →
+// copy the FULL commit SHA (not the 7-char abbreviated display) to
+// the clipboard. Toast confirms.
+async function copyBuildSha() {
+  const ok = await copyToClipboard(_currentBuildSha);
   showToast(ok
-    ? (T('toast_build_copied') || 'Build copied')
+    ? (T('toast_build_copied') || 'Build SHA copied')
     : (T('toast_build_copy_failed') || 'Copy failed'));
 }
 const buildStampEl = document.getElementById('build');
 if (buildStampEl) {
-  buildStampEl.addEventListener('click', copyBuildLabel);
+  buildStampEl.addEventListener('click', copyBuildSha);
   buildStampEl.setAttribute('role', 'button');
   buildStampEl.setAttribute('tabindex', '0');
-  buildStampEl.title = T('build_stamp_copy_hint') || 'Click to copy build identifier';
+  buildStampEl.title = T('build_stamp_copy_hint') || 'Click to copy build SHA';
   buildStampEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
       e.preventDefault();
-      copyBuildLabel();
+      copyBuildSha();
     }
   });
 }
