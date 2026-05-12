@@ -192,6 +192,20 @@
         <option value="extended">extended only</option>
       </select>
     </label>
+    <label>bg
+      <select id="bg">
+        <option value="solid">solid (dark)</option>
+        <option value="bloodstream">bloodstream</option>
+        <option value="bloodflow">bloodflow</option>
+        <option value="cellShadow">cell-shadow</option>
+        <option value="lung">lung</option>
+        <option value="aurora">aurora</option>
+        <option value="underwater">underwater</option>
+        <option value="lavaFire">lava</option>
+        <option value="reactor">reactor</option>
+        <option value="neuron">neuron</option>
+      </select>
+    </label>
     <p class="hint">
       Each frame embeds the live game at <code>index.html?cellType=…&theme=…&renderer=…&pose=1</code> so the same code path that ships to players is what you see here. Frames are pointer-event-disabled to keep scrolling sane; click the ↗ corner to open a frame fullscreen + interactive. Use the Settings → footer <strong>Screenshot</strong> button (or <code>window.__SCREENSHOT__()</code>) inside the popped-out tab to grab a paired PNG + JSON sidecar for diffing.
     </p>
@@ -239,6 +253,7 @@
     const themesSel = document.getElementById('themesShown');
     const cartoonSel = document.getElementById('cartoonMode');
     const scopeSel = document.getElementById('scope');
+    const bgSel = document.getElementById('bg');
 
     // URL state — restored from / persisted to the page's own query
     // params so refreshes keep the user's last view.
@@ -249,6 +264,7 @@
         themes: q.get('themes') || 'all',
         cartoon: q.get('cartoon') || 'off',
         scope: q.get('scope') || 'all',
+        bg: q.get('bg') || 'solid',
       };
     }
     function writeState(s) {
@@ -257,12 +273,20 @@
       window.history.replaceState(null, '', url);
     }
 
-    function frameUrl(cell, theme, renderer, cartoon) {
+    function frameUrl(cell, theme, renderer, cartoon, bg) {
+      // `pose=1` triggers `body.is-pose-clean` in the game — hides
+      // every chrome layer (pause overlay, FABs, scanlines, build
+      // stamp, floating text, nav-arrows, composition HUD, spawn
+      // banner). Result: the canvas renders cells only.
+      // `bg=solid` defaults the session to the synthetic flat dark
+      // colour (#0a0612) so iframes diff cleanly against one
+      // background instead of whatever the persisted setting was.
       const p = new URLSearchParams({
         cellType: cell.key,
         theme,
         renderer,
         pose: '1',
+        bg: bg || 'solid',
       });
       if (cell.cat === 'extended') p.set('extended', '1');
       if (cartoon === 'on') p.set('cartoon', '1');
@@ -275,6 +299,7 @@
         themes: themesSel.value,
         cartoon: cartoonSel.value,
         scope: scopeSel.value,
+        bg: bgSel.value,
       };
       writeState(state);
 
@@ -323,7 +348,7 @@
           const frame = document.createElement('div');
           frame.className = 'frame';
           const iframe = document.createElement('iframe');
-          iframe.src = frameUrl(cell, theme, state.renderer, state.cartoon);
+          iframe.src = frameUrl(cell, theme, state.renderer, state.cartoon, state.bg);
           iframe.loading = 'lazy';
           iframe.title = `${cell.key} · ${theme} · ${state.renderer}`;
           const label = document.createElement('div');
@@ -350,8 +375,9 @@
     themesSel.value = init.themes;
     cartoonSel.value = init.cartoon;
     scopeSel.value = init.scope;
+    bgSel.value = init.bg;
 
-    for (const el of [rendererSel, themesSel, cartoonSel, scopeSel]) {
+    for (const el of [rendererSel, themesSel, cartoonSel, scopeSel, bgSel]) {
       el.addEventListener('change', render);
     }
     render();

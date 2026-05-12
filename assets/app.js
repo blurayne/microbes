@@ -567,10 +567,16 @@ function setPaused(p) {
   // Music plays when not paused AND the user hasn't muted via volume = 0.
   if (_musicPlayer) _musicPlayer.setEnabled(!_paused && (S.musicVolume || 0) > 0);
 }
-// `?pose=1` URL override → start paused. Applied here (after
-// setPaused is defined) rather than inside applyOverridesToSim so
-// the pause-state singleton stays the one source of truth.
-if (URL_OVERRIDES.pose) setPaused(true);
+// `?pose=1` URL override → freeze the sim AND mark the document with
+// `body.is-pose-clean` so every chrome layer (pause overlay, FABs,
+// scanlines, build stamp, floating text, nav-arrows, composition HUD,
+// spawn banner) hides via CSS. Result: the canvas renders cells only,
+// suitable for visual-diff screenshots (cell-zoo iframes, Playwright
+// snapshots, side-by-side compare with shader-test).
+if (URL_OVERRIDES.pose) {
+  document.body.classList.add('is-pose-clean');
+  setPaused(true);
+}
 // `?screenshot=1` URL override → fire `_screenshotNow()` after the
 // first couple of frames so the paused pose has rendered + the cell
 // has settled. Two rAFs is a defensive belt-and-braces: one to flush
