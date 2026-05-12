@@ -2097,7 +2097,7 @@ export class WebGPURenderer extends RendererBase {
     // Caustics-overlay post-process (S.causticsOverlay). Lazy: nothing
     // is allocated until the toggle is first turned on, and everything
     // is released on toggle-off.
-    this._causticBgRt = null;        // { tex, view, w, h }
+    // Post-pin chain RTs are allocated in _postEnsureRts.
     this._causticBgPipeline = null;  // GPURenderPipeline
     this._causticBgSampler = null;   // GPUSampler (linear)
     this._causticBgUbo = null;       // GPUBuffer (16 bytes — time + padding)
@@ -2834,28 +2834,41 @@ export class WebGPURenderer extends RendererBase {
     this._reactorLastSeedMs = -Infinity;
   }
 
-  // ── Caustics overlay (S.causticsOverlay) ──
-  // Builds a full-canvas RGBA8unorm texture with RENDER_ATTACHMENT
-  // + TEXTURE_BINDING usage so the bg pass can render INTO it and
-  // the post-pass below can sample FROM it.
-  _causticBgEnsureRt() {
+  // ── Post-FX ping-pong RTs (shared) ──
+  // Two canvas-sized RGBA8 textures alternated between by every
+  // post-pin overlay. Each chain step reads from _postSource and
+  // writes to the other RT, then we swap. The last step writes
+  // straight to the canvas surface (_frameView). Mirrors WebGL2.
+  _postMakeRt() {
     const device = this.device;
-    // Canvas drawing-buffer pixels (dpr * renderScale) — sampling the bg
-    // pass at CSS-px size on a HiDPI display previously left only the
-    // top-left quarter of the screen showing caustics.
     const w = this.canvas.width | 0;
     const h = this.canvas.height | 0;
-    if (this._causticBgRt && this._causticBgRt.w === w && this._causticBgRt.h === h) return;
-    if (this._causticBgRt) { try { this._causticBgRt.tex.destroy(); } catch {} }
     const tex = device.createTexture({
       size: [w, h],
-      format: this.format,                 // match the canvas format so the
-                                           // post-pass output matches the
-                                           // surface's pipeline target.
+      format: this.format,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     });
-    this._causticBgRt = { tex, view: tex.createView(), w, h };
+    return { tex, view: tex.createView(), w, h };
   }
+  _postEnsureRts() {
+    const w = this.canvas.width | 0;
+    const h = this.canvas.height | 0;
+    if (this._postRtA && this._postRtA.w === w && this._postRtA.h === h) return;
+    this._postDestroyRts();
+    this._postRtA = this._postMakeRt();
+    this._postRtB = this._postMakeRt();
+  }
+  _postDestroyRts() {
+    if (this._postRtA) { try { this._postRtA.tex.destroy(); } catch {} this._postRtA = null; }
+    if (this._postRtB) { try { this._postRtB.tex.destroy(); } catch {} this._postRtB = null; }
+    this._postSource = null;
+  }
+
+  // ── Caustics overlay (S.causticsOverlay) ──
+  // Pipeline-only helper. RT allocation lives in _postEnsureRts; the
+  // shader samples whichever ping-pong RT is currently the chain
+  // source and writes to the other (or to the canvas surface for the
+  // last chain step).
   _causticBgEnsurePipeline() {
     if (this._causticBgPipeline) return;
     const device = this.device;
@@ -2878,7 +2891,6 @@ export class WebGPURenderer extends RendererBase {
     this._causticBgUboData = new Float32Array(8);
   }
   _causticBgDestroy() {
-    if (this._causticBgRt) { try { this._causticBgRt.tex.destroy(); } catch {} this._causticBgRt = null; }
     if (this._causticBgUbo) { try { this._causticBgUbo.destroy(); } catch {} this._causticBgUbo = null; }
     this._causticBgPipeline = null;
     this._causticBgSampler = null;
@@ -2886,22 +2898,8 @@ export class WebGPURenderer extends RendererBase {
   }
 
   // ── Microscope FX post-pass (S.microscopeBlur + S.makeItReal) ──
-  // Mirror of webgl2.js _sceneFx*. Shared RT for blur + duotone grade.
-  // Mutually exclusive with caustics + ripples-scene-wide (one RT slot
-  // for any scene-wide post-process). Lazy alloc + lazy destroy.
-  _sceneFxEnsureRt() {
-    const device = this.device;
-    const w = this.canvas.width | 0;
-    const h = this.canvas.height | 0;
-    if (this._sceneFxRt && this._sceneFxRt.w === w && this._sceneFxRt.h === h) return;
-    if (this._sceneFxRt) { try { this._sceneFxRt.tex.destroy(); } catch {} }
-    const tex = device.createTexture({
-      size: [w, h],
-      format: this.format,
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
-    });
-    this._sceneFxRt = { tex, view: tex.createView(), w, h };
-  }
+  // Pipeline-only helper. Bundled shader for scene-wide blur +
+  // duotone color grade. Shares the ping-pong RTs.
   _sceneFxEnsurePipeline() {
     if (this._sceneFxPipeline) return;
     const device = this.device;
@@ -2925,7 +2923,6 @@ export class WebGPURenderer extends RendererBase {
     this._sceneFxUboData = new Float32Array(12);
   }
   _sceneFxDestroy() {
-    if (this._sceneFxRt) { try { this._sceneFxRt.tex.destroy(); } catch {} this._sceneFxRt = null; }
     if (this._sceneFxUbo) { try { this._sceneFxUbo.destroy(); } catch {} this._sceneFxUbo = null; }
     this._sceneFxPipeline = null;
     this._sceneFxSampler = null;
@@ -3336,38 +3333,52 @@ export class WebGPURenderer extends RendererBase {
     this._frameEncoder = this.device.createCommandEncoder();
     const tex = this.context.getCurrentTexture();
     this._frameView = tex.createView();
-    // Scene render target — when caustics or ripples is on, all draw
-    // passes (bg, cells, particles, antibodies) render into the
-    // offscreen RT and endFrame() composites it to _frameView through
-    // the post-process. Mirrors WebGL2's _sceneFbo design.
+    // Build the post-pin chain of enabled FBO passes by walking
+    // S.overlayOrder from just-above-pin upward (= rendering order:
+    // first item is closest to the scene pin, runs first). Mirrors
+    // webgl2.js beginFrame. microscope-blur and duotone share the
+    // sceneFx WGSL module so they collapse to a single 'sceneFx'
+    // chain step.
+    const order = Array.isArray(S.overlayOrder) ? S.overlayOrder : [];
+    const pinIdx = order.indexOf('scene');
+    this._postChain = [];
+    if (pinIdx > 0) {
+      for (let i = pinIdx - 1; i >= 0; i--) {
+        const k = order[i];
+        if (k === 'ripples' && S.liquidRipples) {
+          this._postChain.push('ripples');
+        } else if (k === 'caustics' && S.causticsOverlay) {
+          this._postChain.push('caustics');
+        } else if ((k === 'microscope' || k === 'duotone')
+                   && (S.microscopeBlur || S.makeItReal)) {
+          if (!this._postChain.includes('sceneFx')) this._postChain.push('sceneFx');
+        }
+      }
+    }
+    const ripplesBgOnly = !!S.liquidRipples && !overlayKindRunsAfterScene('ripples');
+
+    // Default scene target is the canvas. If any post-pin chain step
+    // is enabled, redirect to the shared ping-pong front RT and the
+    // chain in endFrame composites through to the canvas.
     this._sceneView = this._frameView;
-    this._scenePostProc = null;
-    const useRipples       = !!S.liquidRipples;
-    const ripplesSceneWide = useRipples && overlayKindRunsAfterScene('ripples');
-    const useCaustics      = !!S.causticsOverlay && !ripplesSceneWide;
-    const useSceneFx       = (!!S.microscopeBlur || !!S.makeItReal) && !ripplesSceneWide && !useCaustics;
-    if (ripplesSceneWide) {
+    if (this._postChain.length > 0) {
+      this._postEnsureRts();
+      for (const k of this._postChain) {
+        if (k === 'ripples')  this._rippleBgEnsurePipeline();
+        if (k === 'caustics') this._causticBgEnsurePipeline();
+        if (k === 'sceneFx')  this._sceneFxEnsurePipeline();
+      }
+      this._postSource = this._postRtA;
+      this._sceneView = this._postSource.view;
+    } else if (this._postRtA) {
+      this._postDestroyRts();
+    }
+    if (ripplesBgOnly) {
       this._rippleBgEnsureRt();
       this._rippleBgEnsurePipeline();
-      this._sceneView = this._rippleBgRt.view;
-      this._scenePostProc = 'ripples';
-    } else if (useCaustics) {
-      this._causticBgEnsureRt();
-      this._causticBgEnsurePipeline();
-      this._sceneView = this._causticBgRt.view;
-      this._scenePostProc = 'caustics';
-    } else if (useSceneFx) {
-      this._sceneFxEnsureRt();
-      this._sceneFxEnsurePipeline();
-      this._sceneView = this._sceneFxRt.view;
-      this._scenePostProc = 'sceneFx';
-    }
-    const ripplesBgOnly = useRipples && !ripplesSceneWide;
-    if (!ripplesSceneWide && !ripplesBgOnly && this._rippleBgRt) {
+    } else if (this._rippleBgRt) {
       this._rippleBgDestroy();
     }
-    if (!useCaustics && this._causticBgRt) this._causticBgDestroy();
-    if (!useSceneFx && this._sceneFxRt) this._sceneFxDestroy();
   }
 
   drawBackground(timeMs) {
@@ -3488,9 +3499,12 @@ export class WebGPURenderer extends RendererBase {
           { binding: 2, resource: this._rippleBgRt.view },
         ],
       });
+      // Write the rippled bg to the current scene target — _postRtA
+      // when the post-pin chain is on, else directly to the canvas
+      // surface. Cells/particles render on top after this.
       const post = this._frameEncoder.beginRenderPass({
         colorAttachments: [{
-          view: this._frameView,
+          view: this._sceneView,
           clearValue: { r: 0, g: 0, b: 0, a: 1 },
           loadOp: 'clear',
           storeOp: 'store',
@@ -4167,11 +4181,39 @@ export class WebGPURenderer extends RendererBase {
 
   endFrame() {
     if (!this._frameEncoder) return;
-    // Composite the scene RT to the canvas surface through the active
-    // post-process (caustics or ripples). When neither is on,
-    // _sceneView === _frameView and there's nothing to do.
-    if (this._scenePostProc === 'ripples' && this._rippleBgPipeline && this._rippleBgRt) {
-      const t = this._lastFrameSec || 0;
+    // Walk the post-pin overlay chain (built in beginFrame): each
+    // enabled FBO pass reads from _postSource and writes to the
+    // other ping-pong RT, then we swap. The last step writes
+    // straight to _frameView (the canvas surface). Finally the
+    // cheap FX overlays (noise / vignette / crosshair) layer on
+    // top via pre-baked blend pipelines — they remain outside the
+    // FBO chain.
+    const t = this._lastFrameSec || 0;
+    if (this._postChain && this._postChain.length > 0 && this._postSource) {
+      for (let i = 0; i < this._postChain.length; i++) {
+        const kind = this._postChain[i];
+        const isLast = (i === this._postChain.length - 1);
+        const dst = isLast ? null
+                           : (this._postSource === this._postRtA ? this._postRtB : this._postRtA);
+        const dstView = dst ? dst.view : this._frameView;
+        this._runPostPass(kind, this._postSource.view, dstView, t);
+        if (!isLast) this._postSource = dst;
+      }
+      this._postChain = [];
+      this._postSource = null;
+    }
+    this._fxOverlayDraw(t);
+    this.device.queue.submit([this._frameEncoder.finish()]);
+    this._frameEncoder = null;
+    this._frameView = null;
+    this._sceneView = null;
+  }
+
+  // Run a single post-pin chain step. Reads from `srcView` and
+  // writes to `dstView` (one of the ping-pong RTs, or the canvas
+  // surface for the last step).
+  _runPostPass(kind, srcView, dstView, t) {
+    if (kind === 'ripples' && this._rippleBgPipeline) {
       const cellCount = this._rippleBgCollectCells();
       const u = this._rippleBgUboData;
       u[0] = t;
@@ -4191,12 +4233,12 @@ export class WebGPURenderer extends RendererBase {
         entries: [
           { binding: 0, resource: { buffer: this._rippleBgUbo } },
           { binding: 1, resource: this._rippleBgSampler },
-          { binding: 2, resource: this._rippleBgRt.view },
+          { binding: 2, resource: srcView },
         ],
       });
       const post = this._frameEncoder.beginRenderPass({
         colorAttachments: [{
-          view: this._frameView,
+          view: dstView,
           clearValue: { r: 0, g: 0, b: 0, a: 1 },
           loadOp: 'clear',
           storeOp: 'store',
@@ -4206,8 +4248,7 @@ export class WebGPURenderer extends RendererBase {
       post.setBindGroup(0, bg);
       post.draw(3, 1, 0, 0);
       post.end();
-    } else if (this._scenePostProc === 'caustics' && this._causticBgPipeline && this._causticBgRt) {
-      const t = this._lastFrameSec || 0;
+    } else if (kind === 'caustics' && this._causticBgPipeline) {
       this._causticBgUboData[0] = t;
       this._causticBgUboData[4] = S.causticTintR ?? 0.0;
       this._causticBgUboData[5] = S.causticTintG ?? 1.35;
@@ -4222,12 +4263,12 @@ export class WebGPURenderer extends RendererBase {
         entries: [
           { binding: 0, resource: { buffer: this._causticBgUbo } },
           { binding: 1, resource: this._causticBgSampler },
-          { binding: 2, resource: this._causticBgRt.view },
+          { binding: 2, resource: srcView },
         ],
       });
       const post = this._frameEncoder.beginRenderPass({
         colorAttachments: [{
-          view: this._frameView,
+          view: dstView,
           clearValue: { r: 0, g: 0, b: 0, a: 1 },
           loadOp: 'clear',
           storeOp: 'store',
@@ -4237,7 +4278,7 @@ export class WebGPURenderer extends RendererBase {
       post.setBindGroup(0, bg);
       post.draw(3, 1, 0, 0);
       post.end();
-    } else if (this._scenePostProc === 'sceneFx' && this._sceneFxPipeline && this._sceneFxRt) {
+    } else if (kind === 'sceneFx' && this._sceneFxPipeline) {
       const u = this._sceneFxUboData;
       u[0] = this.canvas.width;
       u[1] = this.canvas.height;
@@ -4259,12 +4300,12 @@ export class WebGPURenderer extends RendererBase {
         entries: [
           { binding: 0, resource: { buffer: this._sceneFxUbo } },
           { binding: 1, resource: this._sceneFxSampler },
-          { binding: 2, resource: this._sceneFxRt.view },
+          { binding: 2, resource: srcView },
         ],
       });
       const post = this._frameEncoder.beginRenderPass({
         colorAttachments: [{
-          view: this._frameView,
+          view: dstView,
           clearValue: { r: 0, g: 0, b: 0, a: 1 },
           loadOp: 'clear',
           storeOp: 'store',
@@ -4275,16 +4316,6 @@ export class WebGPURenderer extends RendererBase {
       post.draw(3, 1, 0, 0);
       post.end();
     }
-    // FX overlays (noise / vignette / crosshair) layer on top of
-    // whatever the scene + post-pass produced. Each enabled effect
-    // is its own render pass with the appropriate pre-baked blend
-    // pipeline; runs even when no caustics/ripples is active.
-    this._fxOverlayDraw(this._lastFrameSec || 0);
-    this.device.queue.submit([this._frameEncoder.finish()]);
-    this._frameEncoder = null;
-    this._frameView = null;
-    this._sceneView = null;
-    this._scenePostProc = null;
   }
 
   // Decoration pass (S.metaSplit-independent). Per-type spikes /
@@ -4687,6 +4718,7 @@ export class WebGPURenderer extends RendererBase {
     this._causticBgDestroy();
     this._rippleBgDestroy();
     this._sceneFxDestroy();
+    this._postDestroyRts();
     tryDestroy(this._reactorStepUniformBuffer);
     tryDestroy(this._reactorSeedUniformBuffer);
     tryDestroy(this._reactorDummyTex);
