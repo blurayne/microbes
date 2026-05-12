@@ -4196,8 +4196,23 @@ export class WebGPURenderer extends RendererBase {
     // cheap FX overlays (noise / vignette / crosshair) layer on
     // top via pre-baked blend pipelines — they remain outside the
     // FBO chain.
+    //
+    // Encoder split: when a post-pin chain is enabled, the bg+cells
+    // writes to _postRtA need to be flushed to GPU memory BEFORE
+    // the chain's first pass samples that texture. Some WebGPU
+    // implementations (notably tile-based mobile GPUs) don't insert
+    // a sufficient memory barrier between adjacent render passes
+    // within a single command encoder, so the post-pass sampler
+    // reads stale tile content — showing up as motion trails on
+    // anything that moves frame-to-frame (the duotone shader with
+    // moving cells was the reported symptom). Submitting the
+    // bg+cells encoder, then re-encoding the post chain + FX in a
+    // fresh encoder, forces the runtime to insert the barrier.
     const t = this._lastFrameSec || 0;
-    if (this._postChain && this._postChain.length > 0 && this._postSource) {
+    const hasChain = !!(this._postChain && this._postChain.length > 0 && this._postSource);
+    if (hasChain) {
+      this.device.queue.submit([this._frameEncoder.finish()]);
+      this._frameEncoder = this.device.createCommandEncoder();
       for (let i = 0; i < this._postChain.length; i++) {
         const kind = this._postChain[i];
         const isLast = (i === this._postChain.length - 1);
