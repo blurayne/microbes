@@ -16,6 +16,11 @@ import { openColorPicker } from './ui/color-picker.js';
 import { showToast, copyToClipboard } from './ui/toast.js';
 import { NavArrows } from './ui/nav-arrows.js';
 import { Sim } from './core/sim.js';
+import {
+  URL_OVERRIDES,
+  applyOverridesToSettings,
+  applyOverridesToSim,
+} from './core/url-overrides.js';
 import { CELL_RELATIONS } from './core/cell-relations.js';
 import { defaultHp, getRule } from './core/sim-rules.js';
 import { FloatingText } from './core/floating-text.js';
@@ -142,8 +147,19 @@ function _hookDebugLogButtons() {
   }
 }
 
+// URL query-param overrides — patches S (theme / renderer /
+// extendedCells / cartoon) before any binding reads it. In-memory
+// only, never persisted. See assets/core/url-overrides.js for the
+// supported params + the skill at
+// .claude/skills/import-shader-test-cell/SKILL.md for usage.
+applyOverridesToSettings(S);
+
 // ---------- Sim + renderer ----------
 const sim = new Sim();
+// Spawn the URL-requested specimen at world centre (if any). Must
+// come AFTER `sim` is constructed but is safe to run before the
+// renderer is ready — the spawn is just a sim-state mutation.
+applyOverridesToSim(sim);
 const floatingText = new FloatingText(document.getElementById('floatingText'));
 const cellTags = new CellTagOverlay(document.getElementById('cellTagLayer'));
 const spawnBanner = new SpawnBanner(document.getElementById('spawnBannerLayer'));
@@ -550,6 +566,10 @@ function setPaused(p) {
   // Music plays when not paused AND the user hasn't muted via volume = 0.
   if (_musicPlayer) _musicPlayer.setEnabled(!_paused && (S.musicVolume || 0) > 0);
 }
+// `?pose=1` URL override → start paused. Applied here (after
+// setPaused is defined) rather than inside applyOverridesToSim so
+// the pause-state singleton stays the one source of truth.
+if (URL_OVERRIDES.pose) setPaused(true);
 if (pauseBtn) {
   pauseBtn.addEventListener('click', (e) => {
     e.stopPropagation();

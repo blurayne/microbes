@@ -165,7 +165,7 @@ const KNOWN_INTERFACE_COLOR_KEYS = [
 // Cell-shader themes — the new S.theme setting. 'legacy' renders
 // today's geometry unchanged; the other four port the corresponding
 // docs/shader-test.html compose-pass styles into the disk shader.
-const KNOWN_THEME_KEYS = [
+export const KNOWN_THEME_KEYS = [
   'legacy', 'microscope', 'cartoon', 'kurzgesagt', 'classic',
 ];
 
