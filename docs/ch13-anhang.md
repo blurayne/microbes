@@ -313,4 +313,76 @@
 
     </section>
 
+    <section id="anhang-b" class="appendix-section" style="margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--line, #2a2438);">
+      <h2 style="margin-bottom: 8px;">Anhang B — Erweiterte Zellen (nicht spielrelevant)</h2>
+      <p style="color: var(--ink-dim); font-size: 13px; line-height: 1.55; max-width: 700px;">
+        Der <a href="../shader-test.html"><strong>Shader-Test</strong></a> rendert
+        21 Spezimen (kinds 0–20). Im Spiel ausbalanciert sind die 20 Zelltypen
+        aus §01 + §02. Der verbleibende kind 0 — <em>Eukaryote, generic</em> —
+        ist eine generische Körperzelle, die als <strong>erweiterte (nicht
+        spielrelevante) Zelle</strong> in der Add-Dialog-Liste auftaucht,
+        sobald in den Einstellungen → Anzeige der Schalter
+        <em>„Erweiterte (nicht spielrelevante) Zellen zeigen"</em>
+        aktiviert ist. Sie dient ausschließlich als visueller Vergleich
+        zwischen Spiel-Renderer und Shader-Test (siehe
+        <code>docs/cell-zoo.html</code>).
+      </p>
+
+      <div class="tier-group" style="display: grid; gap: 16px; margin-top: 20px;">
+        <div class="card cell-card" data-cell="eukaryote" style="--cell-color: #c78ca8;">
+          <div class="card-header">
+            <div class="card-icon">
+              <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
+                <circle cx="22" cy="22" r="16" fill="#e6b8c8" stroke="#7a3e58" stroke-width="2"/>
+                <circle cx="22" cy="22" r="5" fill="#4a2638"/>
+              </svg>
+            </div>
+            <div class="card-title">
+              <h3>Eukaryote · Erweitert</h3>
+              <div class="card-sub">Generische Körperzelle — Shader-Test kind 0</div>
+            </div>
+          </div>
+          <p style="font-size: 13px; line-height: 1.55;">
+            Passives Spezimen ohne Spielbalance. Drift-KI (kein Verfolgen,
+            kein Angriff), unendliche HP wie alle <em>good</em>-Zellen,
+            <code>category: 'good'</code>, <code>extended: true</code> in
+            <code>CELL_TYPES</code>. Farben aus <code>cytoColor(0)</code>
+            des Shader-Tests: <code>vec3(0.78, 0.55, 0.66) ≈ #c78ca8</code>,
+            ergänzt durch Top/Bottom-Stops <code>#e6b8c8 / #a06b80</code>
+            für den Radialverlauf und einen warmen Kern <code>#4a2638</code>.
+          </p>
+          <p style="font-size: 12px; color: var(--ink-dim);">
+            Spawn-Test im laufenden Build:
+            <code>?cellType=eukaryote&amp;extended=1&amp;theme=legacy&amp;pose=1</code> ·
+            Vergleich gegen den Shader-Test über <code>docs/cell-zoo.html</code>
+            (Scope-Filter: <em>extended only</em>).
+          </p>
+          <div class="rel-row">
+            <span class="rel-label">Freunde</span>
+            <span class="rel-list">—</span>
+          </div>
+          <div class="rel-row">
+            <span class="rel-label">Beute</span>
+            <span class="rel-list">—</span>
+          </div>
+          <div class="rel-row">
+            <span class="rel-label">Feinde</span>
+            <span class="rel-list">virus · bacterium · slime (per
+              <code>CELL_TYPES.eukaryote.foes</code>; die Zelle hat
+              <em>infinite HP</em> und wird im Spielbalance-Loop nicht
+              angegriffen)</span>
+          </div>
+        </div>
+      </div>
+
+      <p style="margin-top: 28px; font-size: 12px; color: var(--ink-dim);">
+        Weitere Spezimen aus dem Shader-Test können über die Workflow-
+        Skill
+        <a href="https://github.com/blurayne/microbes/blob/main/.claude/skills/import-shader-test-cell/SKILL.md"><code>import-shader-test-cell</code></a>
+        ins Spiel portiert werden. Hinweise zur Renderer-Parität (canvas2d /
+        webgl2 / webgpu) und zum visuellen Pixel-Diff über Playwright stehen
+        dort.
+      </p>
+    </section>
+
   </div>
