@@ -42,6 +42,7 @@ nav:
   - 11 · Physik & Magnetismus: ch11-physik.md
   - 12 · Briefing & Konter-Quickref: ch12-briefing.md
   - 13 · Anhang · Beziehungsdiagramm: ch13-anhang.md
+  - Cell zoo (visual test): cell-zoo.html
 
 # Allow inline HTML (chapter files are mostly raw HTML blocks).
 markdown_extensions:

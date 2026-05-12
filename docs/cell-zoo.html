@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cell Zoo — Microbes</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #1a060c;
+      --ink: #fff5f0;
+      --panel: #1c0710e6;
+      --accent: #ff7a93;
+      --line: #ffffff22;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+      padding: 12px 16px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 16px;
+      flex-basis: 100%;
+    }
+    header label {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: #ffd0d8aa;
+    }
+    header select {
+      background: #00000033;
+      color: var(--ink);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font: inherit;
+    }
+    header a {
+      color: var(--accent);
+      text-decoration: none;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+    }
+    header a:hover { background: #ffffff14; }
+    .hint {
+      font-size: 11px;
+      color: #ffd0d8aa;
+      flex-basis: 100%;
+      line-height: 1.5;
+    }
+    main {
+      padding: 12px 16px 60px;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 90px repeat(var(--col-count, 5), 1fr);
+      gap: 8px;
+      margin-bottom: 8px;
+      align-items: center;
+    }
+    .row.header-row {
+      position: sticky;
+      top: 92px;
+      background: var(--bg);
+      z-index: 5;
+      padding: 6px 0;
+      border-bottom: 1px solid var(--line);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #ffd0d8aa;
+    }
+    .row .cell-name {
+      font-weight: 600;
+      font-size: 12px;
+      padding-right: 6px;
+      text-align: right;
+      color: #ffe6e8;
+    }
+    .row .cell-name small {
+      display: block;
+      color: #ffd0d8aa;
+      font-weight: 400;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+    }
+    .frame {
+      position: relative;
+      aspect-ratio: 1 / 1;
+      background: #000;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .frame iframe {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: 0;
+      pointer-events: none;
+    }
+    .frame .label {
+      position: absolute;
+      left: 4px;
+      top: 4px;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.7);
+      background: rgba(0, 0, 0, 0.55);
+      padding: 2px 5px;
+      border-radius: 3px;
+      pointer-events: none;
+    }
+    .frame .pop {
+      position: absolute;
+      right: 4px;
+      top: 4px;
+      font-size: 10px;
+      background: rgba(0, 0, 0, 0.55);
+      color: var(--accent);
+      padding: 2px 5px;
+      border-radius: 3px;
+      text-decoration: none;
+      opacity: 0;
+      transition: opacity 120ms;
+    }
+    .frame:hover .pop { opacity: 1; }
+    .group-header {
+      grid-column: 1 / -1;
+      margin: 20px 0 6px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Cell Zoo — game vs <a href="./shader-test.html" target="_blank" rel="noopener">shader-test</a></h1>
+    <label>renderer
+      <select id="renderer">
+        <option value="webgpu">webgpu (default)</option>
+        <option value="webgl2">webgl2</option>
+        <option value="canvas2d">canvas2d</option>
+      </select>
+    </label>
+    <label>themes
+      <select id="themesShown">
+        <option value="all">all 5</option>
+        <option value="legacy">legacy only</option>
+        <option value="non-legacy">non-legacy (4)</option>
+      </select>
+    </label>
+    <label>cartoon
+      <select id="cartoonMode">
+        <option value="off">off</option>
+        <option value="on">on (faces)</option>
+      </select>
+    </label>
+    <label>scope
+      <select id="scope">
+        <option value="all">all cells</option>
+        <option value="good">good only</option>
+        <option value="bad">bad only</option>
+        <option value="extended">extended only</option>
+      </select>
+    </label>
+    <p class="hint">
+      Each frame embeds the live game at <code>index.html?cellType=…&theme=…&renderer=…&pose=1</code> so the same code path that ships to players is what you see here. Frames are pointer-event-disabled to keep scrolling sane; click the ↗ corner to open a frame fullscreen + interactive. Use the Settings → footer <strong>Screenshot</strong> button (or <code>window.__SCREENSHOT__()</code>) inside the popped-out tab to grab a paired PNG + JSON sidecar for diffing.
+    </p>
+  </header>
+
+  <main id="grid"></main>
+
+  <script type="module">
+    // Keep this list in sync with assets/core/state.js CELL_TYPES.
+    // `extended: true` entries are gated on the URL param `?extended=1`
+    // since they're not in the live Add dialog without S.extendedCells.
+    const CELLS = [
+      // Good — immune
+      { key: 'neutrophil', label: 'Neutrophil',    cat: 'good' },
+      { key: 'monocyte',   label: 'Monocyte',      cat: 'good' },
+      { key: 'mast',       label: 'Mast cell',     cat: 'good' },
+      { key: 'nk',         label: 'NK cell',       cat: 'good' },
+      { key: 'macrophage', label: 'Macrophage',    cat: 'good' },
+      { key: 'dendritic',  label: 'Dendritic cell', cat: 'good' },
+      { key: 'basophil',   label: 'Basophil',      cat: 'good' },
+      { key: 'platelet',   label: 'Platelet',      cat: 'good' },
+      { key: 'tcell',      label: 'T cell',        cat: 'good' },
+      { key: 'bcell',      label: 'B cell',        cat: 'good' },
+      { key: 'eosinophil', label: 'Eosinophil',    cat: 'good' },
+      { key: 'rbc',        label: 'Red blood cell', cat: 'good' },
+      // Bad — pathogens
+      { key: 'virus',     label: 'Virus',         cat: 'bad' },
+      { key: 'germ',      label: 'Germ',          cat: 'bad' },
+      { key: 'bacterium', label: 'Bacterium',     cat: 'bad' },
+      { key: 'amoebaP',   label: 'Amoeba',        cat: 'bad' },
+      { key: 'slime',     label: 'Slime mold',    cat: 'bad' },
+      { key: 'mite',      label: 'Mite',          cat: 'bad' },
+      { key: 'spore',     label: 'Spore',         cat: 'bad' },
+      { key: 'toxin',     label: 'Toxin',         cat: 'bad' },
+      // Extended (shader-test only, gated)
+      { key: 'eukaryote', label: 'Eukaryote',     cat: 'extended' },
+    ];
+
+    const ALL_THEMES = ['legacy', 'microscope', 'cartoon', 'kurzgesagt', 'classic'];
+
+    const GAME_URL = '../index.html';
+
+    const grid = document.getElementById('grid');
+    const rendererSel = document.getElementById('renderer');
+    const themesSel = document.getElementById('themesShown');
+    const cartoonSel = document.getElementById('cartoonMode');
+    const scopeSel = document.getElementById('scope');
+
+    // URL state — restored from / persisted to the page's own query
+    // params so refreshes keep the user's last view.
+    function readState() {
+      const q = new URLSearchParams(window.location.search);
+      return {
+        renderer: q.get('renderer') || 'webgpu',
+        themes: q.get('themes') || 'all',
+        cartoon: q.get('cartoon') || 'off',
+        scope: q.get('scope') || 'all',
+      };
+    }
+    function writeState(s) {
+      const q = new URLSearchParams(s);
+      const url = window.location.pathname + '?' + q.toString();
+      window.history.replaceState(null, '', url);
+    }
+
+    function frameUrl(cell, theme, renderer, cartoon) {
+      const p = new URLSearchParams({
+        cellType: cell.key,
+        theme,
+        renderer,
+        pose: '1',
+      });
+      if (cell.cat === 'extended') p.set('extended', '1');
+      if (cartoon === 'on') p.set('cartoon', '1');
+      return `${GAME_URL}?${p.toString()}`;
+    }
+
+    function render() {
+      const state = {
+        renderer: rendererSel.value,
+        themes: themesSel.value,
+        cartoon: cartoonSel.value,
+        scope: scopeSel.value,
+      };
+      writeState(state);
+
+      // Theme filter
+      let themes;
+      if (state.themes === 'legacy') themes = ['legacy'];
+      else if (state.themes === 'non-legacy') themes = ALL_THEMES.filter(t => t !== 'legacy');
+      else themes = ALL_THEMES;
+
+      // Cell filter
+      const cells = CELLS.filter(c => {
+        if (state.scope === 'good') return c.cat === 'good';
+        if (state.scope === 'bad') return c.cat === 'bad';
+        if (state.scope === 'extended') return c.cat === 'extended';
+        return true;
+      });
+
+      grid.innerHTML = '';
+      grid.style.setProperty('--col-count', String(themes.length));
+
+      // Sticky header row.
+      const head = document.createElement('div');
+      head.className = 'row header-row';
+      head.appendChild(Object.assign(document.createElement('span'), { textContent: '' }));
+      themes.forEach(t => {
+        head.appendChild(Object.assign(document.createElement('span'), { textContent: t }));
+      });
+      grid.appendChild(head);
+
+      let lastCat = null;
+      for (const cell of cells) {
+        if (cell.cat !== lastCat) {
+          const h = document.createElement('div');
+          h.className = 'group-header';
+          h.textContent = cell.cat === 'good' ? 'Immune cells' : cell.cat === 'bad' ? 'Pathogens' : 'Extended (shader-test only)';
+          grid.appendChild(h);
+          lastCat = cell.cat;
+        }
+        const row = document.createElement('div');
+        row.className = 'row';
+        const name = document.createElement('div');
+        name.className = 'cell-name';
+        name.innerHTML = `${cell.label}<small>${cell.key}</small>`;
+        row.appendChild(name);
+        for (const theme of themes) {
+          const frame = document.createElement('div');
+          frame.className = 'frame';
+          const iframe = document.createElement('iframe');
+          iframe.src = frameUrl(cell, theme, state.renderer, state.cartoon);
+          iframe.loading = 'lazy';
+          iframe.title = `${cell.key} · ${theme} · ${state.renderer}`;
+          const label = document.createElement('div');
+          label.className = 'label';
+          label.textContent = theme;
+          const pop = document.createElement('a');
+          pop.className = 'pop';
+          pop.href = iframe.src;
+          pop.target = '_blank';
+          pop.rel = 'noopener';
+          pop.textContent = '↗';
+          frame.appendChild(iframe);
+          frame.appendChild(label);
+          frame.appendChild(pop);
+          row.appendChild(frame);
+        }
+        grid.appendChild(row);
+      }
+    }
+
+    // Init from URL state.
+    const init = readState();
+    rendererSel.value = init.renderer;
+    themesSel.value = init.themes;
+    cartoonSel.value = init.cartoon;
+    scopeSel.value = init.scope;
+
+    for (const el of [rendererSel, themesSel, cartoonSel, scopeSel]) {
+      el.addEventListener('change', render);
+    }
+    render();
+  </script>
+</body>
+</html>
