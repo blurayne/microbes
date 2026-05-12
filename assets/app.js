@@ -9,8 +9,7 @@ import {
   T, cellLabel, cellDesc,
   currentTheme, currentBackground, currentInterfaceColor, colorNameFor,
   bgLayerFromPreset, bgLayersFromPreset, makeBgLayerId,
-  overlayFxOrder, setOverlayFxOrder,
-  overlayKindRunsAfterScene, setOverlayKindSide,
+  overlayFxOrder,
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { openColorPicker } from './ui/color-picker.js';
@@ -911,16 +910,9 @@ applyRippleControlsVis();
 
 // Ripple sub-controls — feed straight into the renderer's per-frame
 // uniform pack on the next rAF, so no listener hook is needed beyond
-// the value-label sync that bindRange handles.
-const rippleScopeEl = document.getElementById('rippleScope');
-if (rippleScopeEl) {
-  rippleScopeEl.value = overlayKindRunsAfterScene('ripples') ? 'scene' : 'bg';
-  rippleScopeEl.addEventListener('change', () => {
-    const side = rippleScopeEl.value === 'bg' ? 'before' : 'after';
-    setOverlayKindSide('ripples', side);
-    saveSettings();
-  });
-}
+// the value-label sync that bindRange handles. Wave scope used to
+// be its own <select>; it's now derived from the ripples row's
+// position relative to the scene pin in the unified overlay list.
 bindRange('rippleDensity',  'rippleDensity',  'rippleDensityVal',  v => v.toFixed(1) + '×');
 bindRange('rippleReach',    'rippleReach',    'rippleReachVal',    v => v.toFixed(1) + '×');
 bindRange('rippleStrength', 'rippleStrength', 'rippleStrengthVal', v => v.toFixed(1) + '×');
