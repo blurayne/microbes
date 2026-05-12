@@ -13,6 +13,7 @@ import {
   MIN_SCALE, MAX_SCALE, DRAG_THRESHOLD,
 } from './core/state.js';
 import { openColorPicker } from './ui/color-picker.js';
+import { showToast, copyToClipboard } from './ui/toast.js';
 import { Sim } from './core/sim.js';
 import { CELL_RELATIONS } from './core/cell-relations.js';
 import { defaultHp, getRule } from './core/sim-rules.js';
@@ -587,6 +588,8 @@ window.addEventListener('keydown', (e) => {
 const allDialogs = [...new Set([settingsEl, helpDialog, addDialog, aboutDialog].filter(Boolean))];
 const aboutBtn = document.getElementById('aboutBtn');
 if (aboutBtn) aboutBtn.addEventListener('click', () => openOnly(aboutDialog));
+const copyBuildBtn = document.getElementById('copyBuildBtn');
+if (copyBuildBtn) copyBuildBtn.addEventListener('click', copyBuildLabel);
 _hookDebugLogButtons();
 
 function openOnly(target) {
@@ -1275,6 +1278,11 @@ function applyBuildInfoVis(on) {
 }
 bindCheckbox('showBuildInfo', 'showBuildInfo', applyBuildInfoVis);
 applyBuildInfoVis(S.showBuildInfo);
+// Object count rides on the FPS overlay's visibility. The checkbox
+// only persists the toggle; updateFPS reads S.showObjectCount each
+// throttled tick and appends "· N objs" to the line when on. With
+// the FPS overlay hidden, the count is hidden too.
+bindCheckbox('showObjectCount', 'showObjectCount');
 
 // splitMode radios removed from settings late 2026; field still
 // honoured by sim.js (default 'bondDrift' from DEFAULTS).
@@ -1794,9 +1802,13 @@ function renderPaletteBadGrid() {
 // `if (S.allowBadGuys)` guards keep evaluating truthy.
 
 // ---------- Build stamp ----------
+// The current build label — same string shown in the on-screen
+// #build pill, used by the clipboard handlers (click on stamp + the
+// "Copy build" button in Settings). Computed once on load; the
+// build payload doesn't change for a session.
+let _currentBuildLabel = '';
 function renderBuildStamp() {
   const el = document.getElementById('build');
-  if (!el) return;
   const b = window.__BUILD__ || { sha: 'dev', run: 0, dateUtc: null, branch: null };
   const sha = (b.sha || 'dev').slice(0, 7);
   let when = '';
@@ -1820,9 +1832,33 @@ function renderBuildStamp() {
     parts.push(`#${b.run} · ${buildCodename(b.run)}`);
   }
   if (when) parts.push(when);
-  el.textContent = parts.join(' · ');
+  _currentBuildLabel = parts.join(' · ');
+  if (el) el.textContent = _currentBuildLabel;
 }
 renderBuildStamp();
+
+// Click the build stamp → copy the label to the clipboard, confirm
+// via toast. Same handler is reused by the Settings → "Copy build"
+// button so the user has two equally easy paths.
+async function copyBuildLabel() {
+  const ok = await copyToClipboard(_currentBuildLabel);
+  showToast(ok
+    ? (T('toast_build_copied') || 'Build copied')
+    : (T('toast_build_copy_failed') || 'Copy failed'));
+}
+const buildStampEl = document.getElementById('build');
+if (buildStampEl) {
+  buildStampEl.addEventListener('click', copyBuildLabel);
+  buildStampEl.setAttribute('role', 'button');
+  buildStampEl.setAttribute('tabindex', '0');
+  buildStampEl.title = T('build_stamp_copy_hint') || 'Click to copy build identifier';
+  buildStampEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      copyBuildLabel();
+    }
+  });
+}
 
 // ---------- Frame loop ----------
 let lastTs = 0;
@@ -1840,8 +1876,15 @@ function updateFPS(dt, ts) {
   const fps = avg > 0 ? Math.round(1 / avg) : 0;
   const info = (renderer && typeof renderer.info === 'string') ? renderer.info : '';
   // "15fps (webgpu)" — renderer is always part of the overlay when
-  // it's visible at all (user spec).
-  fpsEl.textContent = info ? `${fps}fps (${info})` : `${fps}fps`;
+  // it's visible at all (user spec). With showObjectCount on, the
+  // total live cell + particle count is appended after a separator.
+  let line = info ? `${fps}fps (${info})` : `${fps}fps`;
+  if (S.showObjectCount && sim) {
+    const cells = (sim.cells && sim.cells.length) || 0;
+    const parts = (sim.particles && sim.particles.length) || 0;
+    line += ` · ${cells + parts} objs`;
+  }
+  fpsEl.textContent = line;
 }
 
 // Composition HUD — top-right widget. Hidden when S.compositionHud
