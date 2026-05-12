@@ -1234,11 +1234,16 @@ const BG_WGSL = /* wgsl */ `
 struct BgU {
   // (kind, vignette, gridStep, time)
   misc: vec4<f32>,
-  // (camera.scale, camera.tx, camera.ty, bgScale)
+  // (camera.scale, camera.tx, camera.ty, camera.rotation) — .w is
+  // rotation in radians, consumed by cRBg/sRBg in fs_main so the bg
+  // pattern follows pinch-rotation. It is NOT bgScale (earlier bug,
+  // pre-fix). bgScale lives in extra.y so the two values don't
+  // collide on the same component.
   cam: vec4<f32>,
   // (viewportW, viewportH, spotCount, rbcOn)
   vp: vec4<f32>,
-  // Per-layer extras: x=opacity (0..1), yzw reserved.
+  // Per-layer extras: x=opacity (0..1), y=bgScale (1.0 = default,
+  // floor 0.05 at the shader), zw reserved.
   extra: vec4<f32>,
   base: vec4<f32>,
   top: vec4<f32>,
@@ -1316,7 +1321,7 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
   // size (ring stride, grid step, spot radii, RBC silhouettes).
   // Floored at 0.05 so the slider's 0 endpoint doesn't collapse
   // strides; at the floor features are ~20× bigger than baseline.
-  let bgS = max(u.cam.w, 0.05);
+  let bgS = max(u.extra.y, 0.05);
 
   var col = u.base.rgb;
   if (kind == 1) {
@@ -2248,9 +2253,9 @@ export class WebGPURenderer extends RendererBase {
     // Single fullscreen triangle; shader reads everything from one
     // uniform buffer. Uniform layout (100 floats / 400 bytes):
     //   [0..3]    misc  (kind, vignette, gridStep, time)
-    //   [4..7]    cam   (scale, tx, ty, bgScale)
+    //   [4..7]    cam   (scale, tx, ty, rotation)
     //   [8..11]   vp    (W, H, spotCount, rbcOn)
-    //   [12..15]  extra (opacity, _, _, _)
+    //   [12..15]  extra (opacity, bgScale, _, _)
     //   [16..35]  base, top, bot, ringColor, gridColor (5 × vec4)
     //   [36..67]  spots[8] vec4 (cx, cy, r, _) screen 0..1
     //   [68..99]  spotCols[8] vec4 (r, g, b, _) pre-multiplied
@@ -3557,22 +3562,22 @@ export class WebGPURenderer extends RendererBase {
     data[1] = bg.vignette || 0;
     data[2] = bg.gridStep || 48;
     data[3] = t;
-    // cam (.w = bgScale — see BG_WGSL: the bg pattern is procedural
-    // in worldPx and doesn't need camera rotation, so we re-use the
-    // 4th slot for the size slider).
+    // cam (.w = camera.rotation in radians — the bg shader reads it
+    // via cRBg/sRBg in fs_main so the bg pattern rotates with the
+    // camera when pinch-rotation is on). bgScale lives in extra.y.
     data[4] = this.camera.scale;
     data[5] = this.camera.tx;
     data[6] = this.camera.ty;
-    data[7] = S.bgScale != null ? S.bgScale : 1;
+    data[7] = this.camera.rotation || 0;
     // vp (W, H, spotCount, rbcOn)
     const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
     data[8] = this.W;
     data[9] = this.H;
     data[10] = count;
     data[11] = bg.rbcSilhouettes ? 1 : 0;
-    // extra (opacity, _, _, _)
+    // extra (opacity, bgScale, _, _)
     data[12] = (typeof bg.opacity === 'number') ? bg.opacity : 1;
-    data[13] = 0;
+    data[13] = S.bgScale != null ? S.bgScale : 1;
     data[14] = 0;
     data[15] = 0;
     // base / top / bot / ringColor / gridColor (each vec4 with .a = 0 padding)
