@@ -2989,7 +2989,10 @@ export class WebGPURenderer extends RendererBase {
     // — so the user can reorder via Settings → Overlays. Mirror of
     // webgl2.js _fxOverlayDraw. Per-frame read means reorders +
     // toggles take effect on the next draw; no pipeline reset needed.
-    const order = overlayFxOrder();
+    // Reversed before iteration so the top-of-list FX composites
+    // last (= visually on top), matching the UI's "Stack (top runs
+    // last)" semantics and the post-pin FBO chain's order.
+    const order = overlayFxOrder().slice().reverse();
     const anyOn = order.some(k =>
       (k === 'noise' && S.staticNoise) ||
       (k === 'vignette' && S.vignette) ||
