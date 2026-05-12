@@ -448,6 +448,10 @@ function _isOverUi(target) {
 }
 window.addEventListener('pointerdown', (ev) => {
   if (!sim.addMode || ev.button !== 0) return;
+  // The canvas-level listener already handles clicks whose target
+  // is the canvas itself — bailing here prevents a double-spawn
+  // when both listeners fire on the same event.
+  if (ev.target === canvas) return;
   if (_isOverUi(ev.target)) return;
   const rect = canvas.getBoundingClientRect();
   const sx = ev.clientX - rect.left;
