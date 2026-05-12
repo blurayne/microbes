@@ -141,16 +141,6 @@ function perimeterPoint(s, W, H) {
   /* otherwise on left edge */ return { edge: 'left',   x: 0,                       y: H - (r - 2 * W - H) };
 }
 
-// Outward-pointing rotation in degrees for each edge.
-function edgeRotationDeg(edge) {
-  switch (edge) {
-    case 'top':    return 0;       // tip up
-    case 'right':  return 90;
-    case 'bottom': return 180;
-    case 'left':   return -90;
-    default:       return 0;
-  }
-}
 
 export class NavArrows {
   constructor(parent) {
@@ -288,7 +278,12 @@ export class NavArrows {
       const sArc = perimeterParam(proj.edge, proj.x, proj.y, W, H);
       const meta = CELL_TYPES[c.type];
       const cat = meta && meta.category;
-      items.push({ s: sArc, cat });
+      // screenX / screenY = the cell's actual (off-screen) projected
+      // position. Carried through clustering so the arrow can be
+      // rotated to point at the cluster's average off-screen position
+      // rather than perpendicular-to-edge — gives the user a real
+      // directional bearing toward the cells.
+      items.push({ s: sArc, cat, screenX: s.x, screenY: s.y });
     }
     items.sort((a, b) => a.s - b.s);
 
@@ -300,6 +295,8 @@ export class NavArrows {
         if (it.cat === 'bad') cur.bad++; else cur.good++;
         cur.sumS += it.s;
         cur.lastS = it.s;
+        cur.sumScreenX += it.screenX;
+        cur.sumScreenY += it.screenY;
       } else {
         clusters.push({
           count: 1,
@@ -307,6 +304,8 @@ export class NavArrows {
           bad:  it.cat === 'bad' ? 1 : 0,
           sumS: it.s,
           lastS: it.s,
+          sumScreenX: it.screenX,
+          sumScreenY: it.screenY,
         });
       }
     }
@@ -330,6 +329,8 @@ export class NavArrows {
           // negative-side from 0.
           sumS:  (first.sumS) + (last.sumS - perim * last.count),
           lastS: first.lastS,
+          sumScreenX: first.sumScreenX + last.sumScreenX,
+          sumScreenY: first.sumScreenY + last.sumScreenY,
         };
         clusters.shift();
         clusters.pop();
@@ -376,6 +377,8 @@ export class NavArrows {
         a.good  += b.good;
         a.bad   += b.bad;
         a.lastS  = b.lastS;
+        a.sumScreenX += b.sumScreenX;
+        a.sumScreenY += b.sumScreenY;
         clusters.splice(i, 1);
         nearestPrev.splice(i, 1);
       }
@@ -400,7 +403,7 @@ export class NavArrows {
 
   _renderAnchoredCluster(slot, cluster, W, H) {
     const { wrap, poly, badge } = slot;
-    const { count, good, bad, sumS } = cluster;
+    const { count, good, bad, sumS, sumScreenX, sumScreenY } = cluster;
     if (count <= 0) {
       wrap.classList.add('hidden');
       return;
@@ -414,6 +417,19 @@ export class NavArrows {
     if (pt.edge === 'left')   posX = EDGE_INSET_PX;
     if (pt.edge === 'right')  posX = W - EDGE_INSET_PX;
 
+    // Rotate the arrow tip toward the cluster's mean off-screen cell
+    // position so the indicator shows a real bearing, not just an
+    // outward-from-edge stub. atan2 on the (anchor → cluster-mean)
+    // vector gives the angle of that vector measured from +x; the
+    // SVG triangle's natural orientation is tip-up (= -y), so a +90°
+    // offset converts the angle into the CSS rotate() value where
+    // 0° = up, 90° = right, 180° = down, -90° = left.
+    const avgScreenX = sumScreenX / count;
+    const avgScreenY = sumScreenY / count;
+    const dirX = avgScreenX - posX;
+    const dirY = avgScreenY - posY;
+    const angleDeg = Math.atan2(dirY, dirX) * 180 / Math.PI + 90;
+
     const total = good + bad;
     const t = Math.min(1, Math.max(0, (total - 1) / 31));
     const sat = 50 + 50 * t;
@@ -424,13 +440,13 @@ export class NavArrows {
 
     wrap.classList.remove('hidden');
     // translate(-50%, -50%) centres the SVG on (posX, posY); the
-    // rotation then orients the tip outward.
+    // rotation aims the tip at the cluster's mean off-screen position.
     wrap.style.left = `${posX.toFixed(1)}px`;
     wrap.style.top  = `${posY.toFixed(1)}px`;
     wrap.style.transform =
-      `translate(-50%, -50%) rotate(${edgeRotationDeg(pt.edge)}deg)`;
+      `translate(-50%, -50%) rotate(${angleDeg.toFixed(1)}deg)`;
     // SVG dimensions (pre-rotation: thickness × length, tip pointing
-    // along local +Y → after rotation, tip points outward).
+    // along local +Y → after rotation, tip points at the cluster).
     wrap.style.setProperty('--nav-arrow-thickness', `${thickness.toFixed(1)}px`);
     wrap.style.setProperty('--nav-arrow-length',    `${length.toFixed(1)}px`);
 

@@ -88,13 +88,15 @@ for item in items sorted by s:
 
 Each cluster carries:
 
-| field    | meaning                                              |
-|----------|------------------------------------------------------|
-| `count`  | number of cells merged                               |
-| `good`   | good-category cells                                  |
-| `bad`    | bad-category (pathogen) cells                        |
-| `sumS`   | running sum of `s` (for mean position computation)   |
-| `lastS`  | `s` of the most-recently-joined item                 |
+| field          | meaning                                                          |
+|----------------|------------------------------------------------------------------|
+| `count`        | number of cells merged                                           |
+| `good`         | good-category cells                                              |
+| `bad`          | bad-category (pathogen) cells                                    |
+| `sumS`         | running sum of `s` (for mean position computation)               |
+| `lastS`        | `s` of the most-recently-joined item                             |
+| `sumScreenX`   | running sum of cell screen-x (for arrow-bearing computation)     |
+| `sumScreenY`   | running sum of cell screen-y (for arrow-bearing computation)     |
 
 This is **single-linkage agglomerative clustering with a fixed cutoff
 distance** — but because the input is 1D and sorted, the dendrogram
@@ -125,8 +127,15 @@ For each cluster:
 * Position = `perimeterPoint(sumS / count, W, H)` (the cluster's mean
   perimeter parameter, mapped back to a screen pixel + edge tag).
 * Inset by 8 px from the edge so the arrow doesn't graze the chrome.
-* Rotate to point outward (0° / 90° / 180° / −90° for top / right /
-  bottom / left).
+* **Rotation = bearing toward the cluster's mean off-screen position.**
+  Each cell's projected `(screenX, screenY)` (off-screen by definition)
+  is summed into the cluster alongside `sumS`. The arrow's CSS rotation
+  comes from `atan2(meanScreenY − posY, meanScreenX − posX) + 90°`,
+  where the `+ 90°` rotates the triangle SVG (tip at local `+y`-up) so
+  that `0° = tip up`, `90° = tip right`, `180° = down`, `−90° = left`.
+  The arrow points at the actual centroid of the cells, not just
+  perpendicular-to-edge — useful at corners and for clusters whose
+  cells are spread out in screen space.
 * Hue lerps red↔green by `good / total` (matches the floating-mode
   mapping).
 * Saturation lerps 50 % → 100 % over `total ∈ [1, 32]`.
