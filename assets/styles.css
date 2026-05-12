@@ -459,12 +459,12 @@ body.is-paused #aboutDialog {
  * label, ▲/▼ buttons. The on/off toggle is the existing checkbox
  * above each effect's sub-controls block; this list only owns the
  * order. (Plan: see commit message + IDEAS.md blend-modes entry.) */
-.fx-order-block { margin: 6px 0 10px 0; }
-.fx-order-title { font-size: 0.85em; opacity: 0.7; margin-bottom: 4px; }
-.fx-order-list { display: flex; flex-direction: column; gap: 4px; }
-.fx-order-row {
+.overlay-order-block { margin: 6px 0 10px 0; }
+.overlay-order-title { font-size: 0.85em; opacity: 0.7; margin-bottom: 4px; }
+.overlay-order-list { display: flex; flex-direction: column; gap: 4px; }
+.overlay-order-row {
   display: grid;
-  grid-template-columns: auto 1fr auto auto;
+  grid-template-columns: auto auto 1fr auto auto;
   gap: 6px; align-items: center;
   padding: 4px 6px;
   background: #00000022;
@@ -473,20 +473,33 @@ body.is-paused #aboutDialog {
   cursor: grab;
   font-size: 0.85em;
 }
-.fx-order-row:active { cursor: grabbing; }
-.fx-order-row.dragging { opacity: 0.4; }
-.fx-order-row.drag-over { border-color: var(--accent); }
-.fx-order-row .drag-handle {
+.overlay-order-row:active { cursor: grabbing; }
+.overlay-order-row.dragging { opacity: 0.4; }
+.overlay-order-row.drag-over { border-color: var(--accent); }
+.overlay-order-row .drag-handle {
   font-family: monospace; padding: 0 4px; user-select: none; opacity: 0.5;
 }
-.fx-order-row .label { user-select: none; }
-.fx-order-row .move-btn {
+.overlay-order-row .label { user-select: none; }
+.overlay-order-row .row-checkbox { margin: 0; cursor: pointer; }
+.overlay-order-row .move-btn {
   background: none; border: 1px solid var(--line); color: var(--ink);
   width: 22px; height: 22px; border-radius: 4px; cursor: pointer;
   padding: 0; line-height: 1; font-size: 12px;
 }
-.fx-order-row .move-btn:hover:not(:disabled) { border-color: var(--accent); }
-.fx-order-row .move-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.overlay-order-row .move-btn:hover:not(:disabled) { border-color: var(--accent); }
+.overlay-order-row .move-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.overlay-order-row.scene-pin {
+  cursor: default;
+  background: transparent;
+  border-style: dashed;
+  opacity: 0.7;
+  grid-template-columns: 1fr;
+  text-align: center;
+  font-style: italic;
+}
+.sub-controls-title {
+  font-size: 0.85em; opacity: 0.7; margin: 4px 0;
+}
 
 .settings-panel select {
   display: block;
