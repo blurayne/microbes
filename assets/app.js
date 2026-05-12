@@ -1717,14 +1717,22 @@ function appendHelpSection(parent, title, entries) {
 }
 
 const cellListEl = document.getElementById('cellList');
+// CELL_TYPES entries flagged `extended: true` (e.g. the eukaryote from
+// the shader-test port) are hidden from the Add dialog + help list
+// unless the user opts in via Settings → Display → "Show extended
+// (non-game) cells". Centralised here so every renderer of the cell
+// menu shares the same gate.
+function isVisibleCell(t) {
+  return !(t && t.extended) || S.extendedCells;
+}
 function renderHelpList() {
   if (!cellListEl) return;
   cellListEl.innerHTML = '';
-  const goodEntries = Object.entries(CELL_TYPES).filter(([, t]) => t.category === 'good');
+  const goodEntries = Object.entries(CELL_TYPES).filter(([, t]) => t.category === 'good' && isVisibleCell(t));
   appendHelpSection(cellListEl, T('help_group_good'), goodEntries);
   if (S.allowBadGuys) {
     for (const g of PATHOGEN_GROUPS) {
-      const entries = g.members.map(k => [k, CELL_TYPES[k]]).filter(([, t]) => t);
+      const entries = g.members.map(k => [k, CELL_TYPES[k]]).filter(([, t]) => t && isVisibleCell(t));
       appendHelpSection(cellListEl, `${g.icon} ${T('pgroup_' + g.key)}`, entries);
     }
   }
@@ -1794,7 +1802,7 @@ const cellGridBadEl = document.getElementById('cellGridBad');
 function renderPaletteGrid() {
   if (!cellGridEl) return;
   cellGridEl.innerHTML = '';
-  const goodEntries = Object.entries(CELL_TYPES).filter(([, t]) => t.category === 'good');
+  const goodEntries = Object.entries(CELL_TYPES).filter(([, t]) => t.category === 'good' && isVisibleCell(t));
   appendGridSection(cellGridEl, T('help_group_good'), goodEntries);
 }
 function renderPaletteBadGrid() {
@@ -1802,10 +1810,22 @@ function renderPaletteBadGrid() {
   cellGridBadEl.innerHTML = '';
   if (!S.allowBadGuys) return;
   for (const g of PATHOGEN_GROUPS) {
-    const entries = g.members.map(k => [k, CELL_TYPES[k]]).filter(([, t]) => t);
+    const entries = g.members.map(k => [k, CELL_TYPES[k]]).filter(([, t]) => t && isVisibleCell(t));
     appendGridSection(cellGridBadEl, `${g.icon} ${T('pgroup_' + g.key)}`, entries);
   }
 }
+
+// Extended (non-game) cells toggle — adds CELL_TYPES entries flagged
+// `extended: true` (currently just `eukaryote` from the shader-test
+// port) to the Add dialog + help list. Re-renders all three dialog
+// views on change. Placed AFTER renderPalette* / cellGrid* setup so
+// the callback's immediate init invocation (bindCheckbox runs
+// onChange once on bind) finds the cellGrid* DOM refs initialised.
+bindCheckbox('extendedCells', 'extendedCells', () => {
+  renderHelpList();
+  renderPaletteGrid();
+  renderPaletteBadGrid();
+});
 
 // Pathogens are always allowed — the "Allow pathogens" checkbox was
 // removed. S.allowBadGuys stays in DEFAULTS as a no-op so existing

@@ -10,7 +10,7 @@ file in sync.
 
 ## Open
 
-_(none)_
+- [ ] **Shader-test visual parity for in-game cells** — [`.claude/plan/13-shader-test-visuals.md`](./.claude/plan/13-shader-test-visuals.md) — split into PRs A → F; foundation PRs serially, per-cell ports parallel.
 
 ## Done
 
