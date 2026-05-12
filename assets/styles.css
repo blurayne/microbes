@@ -164,6 +164,14 @@ body.is-paused #aboutDialog {
   letter-spacing: 0.08em;
   color: #ffd0d8aa;
 }
+/* Bad-cells side of the add dialog: a stronger, redder headline so
+   the pathogen sections read as visually distinct from the friendly
+   side (which keeps the muted pink). Full opacity + a hotter red
+   hue; the rule scopes to #cellGridBad so other grid sections
+   (e.g. help dialog) aren't affected. */
+#cellGridBad .cell-grid-section > h3 {
+  color: #ff4d5e;
+}
 .cell-grid-section > .cell-grid { margin-bottom: 0; }
 
 .palette-footer {
