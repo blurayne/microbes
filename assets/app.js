@@ -516,6 +516,8 @@ if (eyeBtn) {
     S.cellTypeOverlay = !S.cellTypeOverlay;
     saveSettings();
     syncEye();
+    // Keep the overlay-stack list checkbox in sync.
+    renderOverlayOrderList();
   });
 }
 
@@ -888,7 +890,8 @@ const causticsControlsEl = document.getElementById('causticsControls');
 function applyCausticsControlsVis() {
   if (causticsControlsEl) causticsControlsEl.hidden = !S.causticsOverlay;
 }
-bindCheckbox('causticsToggle', 'causticsOverlay', applyCausticsControlsVis);
+// Toggle now lives in the unified overlay list (renderOverlayOrderList);
+// applyCausticsControlsVis still runs on first mount + on each toggle.
 applyCausticsControlsVis();
 // RGB tint sliders feed straight into the caustic shader uniform on
 // the next rAF — the renderer reads S.causticTintR/G/B each frame.
@@ -903,7 +906,7 @@ const rippleControlsEl = document.getElementById('rippleControls');
 function applyRippleControlsVis() {
   if (rippleControlsEl) rippleControlsEl.hidden = !S.liquidRipples;
 }
-bindCheckbox('liquidRipplesToggle', 'liquidRipples', applyRippleControlsVis);
+// Toggle now lives in the unified overlay list.
 applyRippleControlsVis();
 
 // Ripple sub-controls — feed straight into the renderer's per-frame
@@ -929,7 +932,7 @@ const staticNoiseControlsEl = document.getElementById('staticNoiseControls');
 function applyStaticNoiseVis() {
   if (staticNoiseControlsEl) staticNoiseControlsEl.hidden = !S.staticNoise;
 }
-bindCheckbox('staticNoiseToggle', 'staticNoise', applyStaticNoiseVis);
+// Toggle now lives in the unified overlay list.
 applyStaticNoiseVis();
 bindRange('staticNoiseIntensity', 'staticNoiseIntensity', 'staticNoiseIntensityVal', v => v.toFixed(2));
 const staticNoiseBlendEl = document.getElementById('staticNoiseBlend');
@@ -946,7 +949,7 @@ const vignetteControlsEl = document.getElementById('vignetteControls');
 function applyVignetteVis() {
   if (vignetteControlsEl) vignetteControlsEl.hidden = !S.vignette;
 }
-bindCheckbox('vignetteToggle', 'vignette', applyVignetteVis);
+// Toggle now lives in the unified overlay list.
 applyVignetteVis();
 bindRange('vignetteIntensity', 'vignetteIntensity', 'vignetteIntensityVal', v => v.toFixed(2));
 const vignetteBlendEl = document.getElementById('vignetteBlend');
@@ -958,25 +961,51 @@ if (vignetteBlendEl) {
   });
 }
 
-// Crosshair overlay — toggle-only (cyan + at viewport centre).
-bindCheckbox('crosshairToggle', 'crosshair');
+// Crosshair overlay — toggle lives in the unified overlay list.
 
-// FX overlay order: sortable list of the three fixed-function FX
-// overlays (noise/vignette/crosshair). Drag-and-drop reorder OR
-// up/down buttons. The renderers iterate overlayFxOrder() each
-// frame so changes take effect on the next draw — no pipeline
-// reset needed. On/off toggles + per-effect sliders stay where
-// they are above; this list only owns the draw order. The
-// underlying source-of-truth is S.overlayOrder; this UI is the
-// "FX subset" view of it until PR B unifies the list.
-const fxOrderListEl = document.getElementById('fxOrderList');
-function renderFxOrderList() {
-  if (!fxOrderListEl) return;
-  const fxOrder = overlayFxOrder();
-  fxOrderListEl.innerHTML = '';
-  fxOrder.forEach((kind, index) => {
+// Unified overlay-stack list: every overlay (FX blends + FBO passes +
+// the cell-type HTML overlay) is one row containing a drag handle, a
+// checkbox bound to its toggle, the i18n label, and ▲/▼ buttons. The
+// 'scene' entry renders as a fixed dashed pin — not draggable, no
+// checkbox — marking where the cell pass runs in the stack. Renderers
+// read overlayFxOrder() + overlayKindRunsAfterScene() each frame so
+// reorders + toggles take effect on the next draw with no pipeline
+// reset needed.
+const overlayOrderListEl = document.getElementById('overlayOrderList');
+const OVERLAY_KIND_META = {
+  duotone:    { stateField: 'makeItReal',      labelKey: 'overlay_kind_duotone',    onChange: () => applyMakeItRealVis() },
+  noise:      { stateField: 'staticNoise',     labelKey: 'overlay_kind_noise',      onChange: () => applyStaticNoiseVis() },
+  vignette:   { stateField: 'vignette',        labelKey: 'overlay_kind_vignette',   onChange: () => applyVignetteVis() },
+  crosshair:  { stateField: 'crosshair',       labelKey: 'overlay_kind_crosshair',  onChange: () => {} },
+  microscope: { stateField: 'microscopeBlur',  labelKey: 'overlay_kind_microscope', onChange: () => applyMicroscopeBlurVis() },
+  caustics:   { stateField: 'causticsOverlay', labelKey: 'overlay_kind_caustics',   onChange: () => applyCausticsControlsVis() },
+  celltype:   { stateField: 'cellTypeOverlay', labelKey: 'overlay_kind_celltype',   onChange: () => {
+    // Keep the eye-FAB's aria-pressed in sync with the list checkbox.
+    if (eyeBtn) eyeBtn.setAttribute('aria-pressed', String(!!S.cellTypeOverlay));
+  } },
+  ripples:    { stateField: 'liquidRipples',   labelKey: 'overlay_kind_ripples',    onChange: () => applyRippleControlsVis() },
+};
+let _overlayDragFromIndex = -1;
+function renderOverlayOrderList() {
+  if (!overlayOrderListEl) return;
+  overlayOrderListEl.innerHTML = '';
+  const order = Array.isArray(S.overlayOrder) ? S.overlayOrder : [];
+  order.forEach((kind, index) => {
+    if (kind === 'scene') {
+      const row = document.createElement('div');
+      row.className = 'overlay-order-row scene-pin';
+      row.dataset.index = String(index);
+      const label = document.createElement('span');
+      label.className = 'label';
+      label.textContent = T('overlay_pin_scene') || '— scene —';
+      row.appendChild(label);
+      overlayOrderListEl.appendChild(row);
+      return;
+    }
+    const meta = OVERLAY_KIND_META[kind];
+    if (!meta) return;
     const row = document.createElement('div');
-    row.className = 'fx-order-row';
+    row.className = 'overlay-order-row';
     row.draggable = true;
     row.dataset.index = String(index);
 
@@ -986,40 +1015,46 @@ function renderFxOrderList() {
     handle.title = T('fx_drag_reorder') || 'Drag to reorder';
     row.appendChild(handle);
 
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'row-checkbox';
+    cb.checked = !!S[meta.stateField];
+    cb.addEventListener('change', () => {
+      S[meta.stateField] = cb.checked;
+      saveSettings();
+      meta.onChange();
+    });
+    row.appendChild(cb);
+
     const label = document.createElement('span');
     label.className = 'label';
-    label.textContent = T('fx_kind_' + kind) || kind;
+    label.textContent = T(meta.labelKey) || kind;
     row.appendChild(label);
 
     const up = document.createElement('button');
-    up.type = 'button';
-    up.className = 'move-btn';
-    up.textContent = '▲';
+    up.type = 'button'; up.className = 'move-btn'; up.textContent = '▲';
     up.title = T('fx_move_up') || 'Move up';
     up.disabled = index === 0;
-    up.addEventListener('click', () => moveFxOrder(index, index - 1));
+    up.addEventListener('click', () => moveOverlayOrder(index, index - 1));
     row.appendChild(up);
 
     const down = document.createElement('button');
-    down.type = 'button';
-    down.className = 'move-btn';
-    down.textContent = '▼';
+    down.type = 'button'; down.className = 'move-btn'; down.textContent = '▼';
     down.title = T('fx_move_down') || 'Move down';
-    down.disabled = index === fxOrder.length - 1;
-    down.addEventListener('click', () => moveFxOrder(index, index + 1));
+    down.disabled = index === order.length - 1;
+    down.addEventListener('click', () => moveOverlayOrder(index, index + 1));
     row.appendChild(down);
 
-    // Drag-drop reorder. Same idiom as the bg-layer list (PR #151).
     row.addEventListener('dragstart', (e) => {
-      _fxDragFromIndex = index;
+      _overlayDragFromIndex = index;
       row.classList.add('dragging');
       try { e.dataTransfer.setData('text/plain', String(index)); } catch {}
       e.dataTransfer.effectAllowed = 'move';
     });
     row.addEventListener('dragend', () => {
       row.classList.remove('dragging');
-      _fxDragFromIndex = -1;
-      document.querySelectorAll('.fx-order-row.drag-over').forEach(el => el.classList.remove('drag-over'));
+      _overlayDragFromIndex = -1;
+      document.querySelectorAll('.overlay-order-row.drag-over').forEach(el => el.classList.remove('drag-over'));
     });
     row.addEventListener('dragover', (e) => {
       e.preventDefault();
@@ -1030,27 +1065,24 @@ function renderFxOrderList() {
     row.addEventListener('drop', (e) => {
       e.preventDefault();
       row.classList.remove('drag-over');
-      if (_fxDragFromIndex < 0 || _fxDragFromIndex === index) return;
-      moveFxOrder(_fxDragFromIndex, index);
+      if (_overlayDragFromIndex < 0 || _overlayDragFromIndex === index) return;
+      moveOverlayOrder(_overlayDragFromIndex, index);
     });
 
-    fxOrderListEl.appendChild(row);
+    overlayOrderListEl.appendChild(row);
   });
 }
-let _fxDragFromIndex = -1;
-function moveFxOrder(from, to) {
-  const current = overlayFxOrder();
-  if (from < 0 || from >= current.length) return;
-  if (to < 0 || to >= current.length) return;
+function moveOverlayOrder(from, to) {
+  if (!Array.isArray(S.overlayOrder)) return;
+  if (from < 0 || from >= S.overlayOrder.length) return;
+  if (to < 0 || to >= S.overlayOrder.length) return;
   if (from === to) return;
-  const next = current.slice();
-  const moved = next.splice(from, 1)[0];
-  next.splice(to, 0, moved);
-  setOverlayFxOrder(next);
+  const moved = S.overlayOrder.splice(from, 1)[0];
+  S.overlayOrder.splice(to, 0, moved);
   saveSettings();
-  renderFxOrderList();
+  renderOverlayOrderList();
 }
-renderFxOrderList();
+renderOverlayOrderList();
 
 // Microscope blur — scene-wide variable-radius blur. Same pattern as
 // the caustics / ripples / staticNoise sections: toggle reveals a
@@ -1060,7 +1092,7 @@ const microscopeBlurControlsEl = document.getElementById('microscopeBlurControls
 function applyMicroscopeBlurVis() {
   if (microscopeBlurControlsEl) microscopeBlurControlsEl.hidden = !S.microscopeBlur;
 }
-bindCheckbox('microscopeBlurToggle', 'microscopeBlur', applyMicroscopeBlurVis);
+// Toggle now lives in the unified overlay list.
 applyMicroscopeBlurVis();
 bindRange('microscopeFocus',         'microscopeFocus',         'microscopeFocusVal',         v => v.toFixed(2));
 bindRange('microscopeBlurStrength',  'microscopeBlurStrength',  'microscopeBlurStrengthVal',  v => v.toFixed(2));
@@ -1072,7 +1104,7 @@ const makeItRealControlsEl = document.getElementById('makeItRealControls');
 function applyMakeItRealVis() {
   if (makeItRealControlsEl) makeItRealControlsEl.hidden = !S.makeItReal;
 }
-bindCheckbox('makeItRealToggle', 'makeItReal', applyMakeItRealVis);
+// Toggle now lives in the unified overlay list.
 applyMakeItRealVis();
 bindRange('makeItRealHue1',       'makeItRealHue1',       'makeItRealHue1Val',       v => v.toFixed(2));
 bindRange('makeItRealHue2',       'makeItRealHue2',       'makeItRealHue2Val',       v => v.toFixed(2));

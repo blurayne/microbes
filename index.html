@@ -68,8 +68,12 @@
 
       <details class="settings-section">
         <summary data-i18n="overlays_section">Overlays</summary>
-        <label><input type="checkbox" id="causticsToggle" /> <span data-i18n="caustics_overlay">Caustics overlay</span></label>
+        <div class="overlay-order-block">
+          <div class="overlay-order-title" data-i18n="overlay_order_title">Stack (top runs last)</div>
+          <div id="overlayOrderList" class="overlay-order-list"></div>
+        </div>
         <div id="causticsControls" class="sub-controls" hidden>
+          <div class="sub-controls-title" data-i18n="caustics_overlay">Caustics overlay</div>
           <label><span data-i18n="caustic_tint_r">Tint R</span> <span id="causticTintRVal" class="val"></span>
             <input type="range" id="causticTintR" min="0" max="2.0" step="0.05" />
           </label>
@@ -80,8 +84,8 @@
             <input type="range" id="causticTintB" min="0" max="2.0" step="0.05" />
           </label>
         </div>
-        <label><input type="checkbox" id="liquidRipplesToggle" /> <span data-i18n="liquid_ripples">Liquid ripples</span></label>
         <div id="rippleControls" class="sub-controls" hidden>
+          <div class="sub-controls-title" data-i18n="liquid_ripples">Liquid ripples</div>
           <label><span data-i18n="ripple_scope">Wave scope</span>
             <select id="rippleScope">
               <option value="scene" data-i18n="ripple_scope_scene">Whole scene</option>
@@ -98,8 +102,8 @@
             <input type="range" id="rippleStrength" min="0.2" max="3.0" step="0.1" />
           </label>
         </div>
-        <label><input type="checkbox" id="staticNoiseToggle" /> <span data-i18n="static_noise">Static noise</span></label>
         <div id="staticNoiseControls" class="sub-controls" hidden>
+          <div class="sub-controls-title" data-i18n="static_noise">Static noise</div>
           <label><span data-i18n="static_noise_intensity">Noise intensity</span> <span id="staticNoiseIntensityVal" class="val"></span>
             <input type="range" id="staticNoiseIntensity" min="0" max="1.0" step="0.02" />
           </label>
@@ -111,8 +115,8 @@
             </select>
           </label>
         </div>
-        <label><input type="checkbox" id="vignetteToggle" /> <span data-i18n="vignette">Vignette</span></label>
         <div id="vignetteControls" class="sub-controls" hidden>
+          <div class="sub-controls-title" data-i18n="vignette">Vignette</div>
           <label><span data-i18n="vignette_intensity">Vignette intensity</span> <span id="vignetteIntensityVal" class="val"></span>
             <input type="range" id="vignetteIntensity" min="0" max="1.5" step="0.02" />
           </label>
@@ -124,13 +128,8 @@
             </select>
           </label>
         </div>
-        <label><input type="checkbox" id="crosshairToggle" /> <span data-i18n="crosshair">Crosshair</span></label>
-        <div class="fx-order-block">
-          <div class="fx-order-title" data-i18n="fx_order_title">Overlay order</div>
-          <div id="fxOrderList" class="fx-order-list"></div>
-        </div>
-        <label><input type="checkbox" id="microscopeBlurToggle" /> <span data-i18n="microscope_blur">Microscope blur</span></label>
         <div id="microscopeBlurControls" class="sub-controls" hidden>
+          <div class="sub-controls-title" data-i18n="microscope_blur">Microscope blur</div>
           <label><span data-i18n="microscope_focus">Focus radius</span> <span id="microscopeFocusVal" class="val"></span>
             <input type="range" id="microscopeFocus" min="0" max="1" step="0.01" />
           </label>
@@ -141,8 +140,8 @@
             <input type="range" id="microscopeFalloff" min="0" max="1" step="0.01" />
           </label>
         </div>
-        <label><input type="checkbox" id="makeItRealToggle" /> <span data-i18n="make_it_real">Make it real</span></label>
         <div id="makeItRealControls" class="sub-controls" hidden>
+          <div class="sub-controls-title" data-i18n="make_it_real">Make it real</div>
           <label><span data-i18n="make_it_real_hue1">Shadow hue</span> <span id="makeItRealHue1Val" class="val"></span>
             <input type="range" id="makeItRealHue1" min="0" max="1" step="0.01" />
           </label>
