@@ -27,6 +27,7 @@ import { effectiveMouthKind } from '../core/sim-faces.js';
 import { testKindFor } from '../core/cell-kinds.js';
 import { RendererBase } from './renderer.js';
 import { URL_OVERRIDES } from '../core/url-overrides.js';
+import { loadTexture } from '../core/texture-loader.js';
 
 // Rendertest translucent mode: paint to a canvas that retains its
 // alpha channel so the captured PNG composites onto an arbitrary
@@ -1330,6 +1331,10 @@ struct BgU {
 // to be complete; the shader simply doesn't sample it for kinds 0-7).
 @group(0) @binding(1) var reactorSamp: sampler;
 @group(0) @binding(2) var reactorTex: texture_2d<f32>;
+// Tissue (image-tiled) bg: only sampled when kind == 11. A 1x1
+// dummy is bound otherwise so the bind-group stays complete.
+@group(0) @binding(3) var tissueSamp: sampler;
+@group(0) @binding(4) var tissueTex: texture_2d<f32>;
 
 struct VsOut {
   @builtin(position) pos: vec4<f32>,
@@ -1621,6 +1626,13 @@ fn bgFbm(p_in: vec2<f32>) -> f32 {
     let bN = clamp(rxConc.y * 1.6, 0.0, 1.0);
     col = mix(mix(u.base.rgb, u.bot.rgb, smoothstep(0.0, 0.45, bN)),
               u.top.rgb, smoothstep(0.45, 0.92, bN));
+  }
+  if (kind == 11) {
+    // Tissue: seamless tile in world coords. 800 world-pixel tile
+    // at bgScale = 1; the slider re-scales the wrap frequency.
+    let TILE_PX: f32 = 800.0;
+    let tuv = fract(worldPx * (bgS / TILE_PX));
+    col = textureSample(tissueTex, tissueSamp, tuv).rgb;
   }
 
   // Vignette: darken the corners. Aspect-corrected so the falloff
@@ -2804,6 +2816,120 @@ export class WebGPURenderer extends RendererBase {
     });
   }
 
+  // ── Tissue (image-tiled) bg — lazy GPU texture upload ──────
+  // Cached per-URL. The BG shader binds the 1x1 dummy until the
+  // image decodes (`_tissueTexView(url)` returns the dummy view
+  // while pending); a one-shot async upload swaps it in on
+  // completion and the next frame samples the real bytes.
+  _tissueSampler() {
+    if (this._tissueSamp) return this._tissueSamp;
+    this._tissueSamp = this.device.createSampler({
+      magFilter: 'linear', minFilter: 'linear', mipmapFilter: 'linear',
+      addressModeU: 'repeat', addressModeV: 'repeat',
+    });
+    return this._tissueSamp;
+  }
+  _tissueDummyView() {
+    if (this._tissueDummy) return this._tissueDummy;
+    const device = this.device;
+    const tex = device.createTexture({
+      size: [1, 1], format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
+    device.queue.writeTexture(
+      { texture: tex }, new Uint8Array([64, 32, 36, 255]),
+      { bytesPerRow: 4 }, [1, 1],
+    );
+    this._tissueDummy = tex.createView();
+    return this._tissueDummy;
+  }
+  _tissueTexView(url) {
+    if (!this._tissueCache) this._tissueCache = new Map();
+    const cache = this._tissueCache;
+    const slot = cache.get(url);
+    if (slot && slot.view) return slot.view;
+    if (slot && slot.pending) return this._tissueDummyView();
+    cache.set(url, { pending: true });
+    loadTexture(url).then((img) => {
+      const device = this.device;
+      const w = img.width, h = img.height;
+      // Mip count for proper minification on aggressive bgScale.
+      const mipCount = Math.max(1, 1 + Math.floor(Math.log2(Math.max(w, h))));
+      const tex = device.createTexture({
+        size: [w, h, 1],
+        format: 'rgba8unorm',
+        mipLevelCount: mipCount,
+        usage: GPUTextureUsage.TEXTURE_BINDING
+             | GPUTextureUsage.COPY_DST
+             | GPUTextureUsage.RENDER_ATTACHMENT,
+      });
+      device.queue.copyExternalImageToTexture(
+        { source: img }, { texture: tex }, [w, h, 1],
+      );
+      // Cheap mip-gen via render-pipeline blit chain. Skipped if
+      // only one mip level (1×1 texture etc.).
+      if (mipCount > 1) this._tissueGenerateMips(tex, w, h, mipCount);
+      cache.set(url, { view: tex.createView() });
+    }).catch((e) => {
+      console.warn('[webgpu tissue] load failed:', e && e.message);
+      cache.set(url, { view: this._tissueDummyView() });
+    });
+    return this._tissueDummyView();
+  }
+  // Bare-bones mip-chain blitter — draws each mip level into the
+  // next using a copy-shader-equivalent (render-pass + sample).
+  // For shipping simplicity we use a single linear-min blit per
+  // level which is good enough for a static bg.
+  _tissueGenerateMips(tex, w, h, mipCount) {
+    const device = this.device;
+    if (!this._mipPipeline) {
+      const mod = device.createShaderModule({ code: /* wgsl */ `
+        @vertex fn vs(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+          let x = f32((vi << 1u) & 2u) * 2.0 - 1.0;
+          let y = f32(vi & 2u) * 2.0 - 1.0;
+          return vec4<f32>(x, y, 0.0, 1.0);
+        }
+        @group(0) @binding(0) var s : sampler;
+        @group(0) @binding(1) var t : texture_2d<f32>;
+        @fragment fn fs(@builtin(position) p: vec4<f32>) -> @location(0) vec4<f32> {
+          let dim = vec2<f32>(textureDimensions(t, 0));
+          let uv = p.xy / vec2<f32>(dim.x * 0.5, dim.y * 0.5);
+          return textureSample(t, s, uv);
+        }
+      ` });
+      this._mipPipeline = device.createRenderPipeline({
+        layout: 'auto',
+        vertex:   { module: mod, entryPoint: 'vs' },
+        fragment: { module: mod, entryPoint: 'fs', targets: [{ format: 'rgba8unorm' }] },
+        primitive: { topology: 'triangle-list' },
+      });
+    }
+    const enc = device.createCommandEncoder();
+    for (let mip = 1; mip < mipCount; mip++) {
+      const srcView = tex.createView({ baseMipLevel: mip - 1, mipLevelCount: 1 });
+      const dstView = tex.createView({ baseMipLevel: mip, mipLevelCount: 1 });
+      const bg = device.createBindGroup({
+        layout: this._mipPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: this._tissueSampler() },
+          { binding: 1, resource: srcView },
+        ],
+      });
+      const pass = enc.beginRenderPass({
+        colorAttachments: [{
+          view: dstView,
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          loadOp: 'clear', storeOp: 'store',
+        }],
+      });
+      pass.setPipeline(this._mipPipeline);
+      pass.setBindGroup(0, bg);
+      pass.draw(3, 1, 0, 0);
+      pass.end();
+    }
+    device.queue.submit([enc.finish()]);
+  }
+
   _reactorMakeRt(w, h) {
     const device = this.device;
     const tex = device.createTexture({
@@ -3630,6 +3756,13 @@ export class WebGPURenderer extends RendererBase {
         const bgTexView = isReactor
           ? this._reactorRt(this._reactorFront).view
           : this._reactorDummyView;
+        // Tissue (kind == 11) lazy texture lookup. Returns a 1x1
+        // dummy view until the image decodes — the shader simply
+        // shows uniform tint in the meantime.
+        const isTissue = (bg.kind === 'tissue');
+        const tissueView = isTissue
+          ? this._tissueTexView(bg.textureUrl)
+          : this._tissueDummyView();
         const pipeline = (li === 0)
           ? this._bgPipeline
           : (this._bgBlendPipelines[bg.blend] || this._bgBlendPipelines.normal);
@@ -3639,6 +3772,8 @@ export class WebGPURenderer extends RendererBase {
             { binding: 0, resource: { buffer: this._bgUniformBuffer } },
             { binding: 1, resource: this._reactorSampler },
             { binding: 2, resource: bgTexView },
+            { binding: 3, resource: this._tissueSampler() },
+            { binding: 4, resource: tissueView },
           ],
         });
         const pass = this._frameEncoder.beginRenderPass({
@@ -3711,6 +3846,7 @@ export class WebGPURenderer extends RendererBase {
     else if (bg.kind === 'reactor') kind = 8;
     else if (bg.kind === 'bloodflow') kind = 9;
     else if (bg.kind === 'cell-shadow') kind = 10;
+    else if (bg.kind === 'tissue') kind = 11;
 
     const data = this._bgUniformData;
     // misc (kind, vignette, gridStep, time)
