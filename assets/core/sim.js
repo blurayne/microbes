@@ -131,14 +131,18 @@ export class Sim {
       wobbleSeed: Math.random() * 1000,
       wobbleFreq: 0.55 + Math.random() * 0.45,
       flash: 0,
-      // Squash axis for the bump-feedback effect: unit-ish vector
-      // along the impact normal, scaled by impact intensity 0..1.
-      // Renderer reads it via the cell instance attribute and applies
-      // a non-uniform body scale (squish toward the impact side,
-      // bulge on the far side). Decayed each frame in update(dt)
-      // next to flash.
+      // Bump-feedback squash envelope. bumpPeakX/Y is the stored
+      // impact axis (unit-ish vector × intensity 0..1) at the
+      // moment of collision; bumpT is the elapsed seconds since
+      // that impact. update(dt) advances bumpT, evaluates the
+      // smoothstep-attack + linear-decay envelope (timings come
+      // from S.bumpAttack / S.bumpDuration), and writes
+      // bumpX/bumpY = bumpPeakX/Y × env for the renderer to read.
       bumpX: 0,
       bumpY: 0,
+      bumpPeakX: 0,
+      bumpPeakY: 0,
+      bumpT: 0,
       mouthFlashKind: null,
       mouthFlashTimer: 0,
       lookX: 0,
@@ -551,13 +555,34 @@ export class Sim {
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
       if (c.flash > 0) c.flash = Math.max(0, c.flash - dt * 2);
-      // Exponential decay of the bump-squash axis. ≈150 ms half-life
-      // — matches the flash feel without an explicit duration timer.
-      if (c.bumpX !== 0 || c.bumpY !== 0) {
-        const k = Math.exp(-dt * 5);
-        c.bumpX *= k; c.bumpY *= k;
-        if (Math.abs(c.bumpX) < 1e-3 && Math.abs(c.bumpY) < 1e-3) {
+      // Bump-feedback envelope. bumpPeak is the stored impact
+      // axis × intensity; bumpT ticks up since that impact. The
+      // envelope ramps in over `attack` seconds (smoothstep, so
+      // the squash eases in rather than popping) and then fades
+      // linearly across the remaining `duration - attack`
+      // seconds. Slider defaults give ~200 ms attack + 1.5 s
+      // total — slower and rounder than the original 150 ms
+      // exponential decay.
+      if (c.bumpPeakX !== 0 || c.bumpPeakY !== 0) {
+        c.bumpT += dt;
+        const attack = Math.max(0.001, S.bumpAttack ?? 0.20);
+        const total  = Math.max(attack + 0.05, S.bumpDuration ?? 1.5);
+        const decay  = total - attack;
+        let env;
+        if (c.bumpT < attack) {
+          const u = c.bumpT / attack;
+          env = u * u * (3 - 2 * u);
+        } else {
+          const u = (c.bumpT - attack) / decay;
+          env = u >= 1 ? 0 : 1 - u;
+        }
+        if (env <= 0) {
+          c.bumpPeakX = 0; c.bumpPeakY = 0;
           c.bumpX = 0; c.bumpY = 0;
+          c.bumpT = 0;
+        } else {
+          c.bumpX = c.bumpPeakX * env;
+          c.bumpY = c.bumpPeakY * env;
         }
       }
       if (c.mouthFlashTimer > 0) {
@@ -832,12 +857,24 @@ export class Sim {
                   // Squash axis points INTO each cell along the
                   // contact normal — for a (origin side) the normal
                   // (nx,ny) goes toward b, so the impact direction
-                  // ON a is -(nx,ny); for b it's +(nx,ny). No
-                  // flash write: c.flash stays reserved for damage
-                  // + antibody emit cues so a collision doesn't
-                  // visually masquerade as a hit.
-                  a.bumpX = -nx * k; a.bumpY = -ny * k;
-                  b.bumpX =  nx * k; b.bumpY =  ny * k;
+                  // ON a is -(nx,ny); for b it's +(nx,ny). Write
+                  // the PEAK (renderer reads c.bumpX/Y which the
+                  // update-loop envelope writes from peak × env);
+                  // reset bumpT so the smoothstep attack starts
+                  // fresh. Only replace an in-progress bump if the
+                  // new impact is stronger than the stored peak —
+                  // a weaker mid-decay nudge shouldn't restart the
+                  // envelope and skip the existing tail.
+                  const aPeak = Math.hypot(a.bumpPeakX, a.bumpPeakY);
+                  if (k > aPeak) {
+                    a.bumpPeakX = -nx * k; a.bumpPeakY = -ny * k;
+                    a.bumpT = 0;
+                  }
+                  const bPeak = Math.hypot(b.bumpPeakX, b.bumpPeakY);
+                  if (k > bPeak) {
+                    b.bumpPeakX =  nx * k; b.bumpPeakY =  ny * k;
+                    b.bumpT = 0;
+                  }
                 }
               }
             }

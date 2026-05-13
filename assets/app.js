@@ -1002,6 +1002,8 @@ bindRange('throwStrength', 'throwStrength', 'throwVal', v => v.toFixed(2) + '×'
 bindRange('wobbleAmp', 'wobbleAmp', 'wobbleVal', v => v.toFixed(2));
 bindCheckbox('bumpFeedback', 'bumpFeedback');
 bindRange('bumpFeedbackIntensity', 'bumpFeedbackIntensity', 'bumpFeedbackIntensityVal', v => v.toFixed(1) + '×');
+bindRange('bumpAttack', 'bumpAttack', 'bumpAttackVal', v => (v * 1000).toFixed(0) + ' ms');
+bindRange('bumpDuration', 'bumpDuration', 'bumpDurationVal', v => v.toFixed(2) + ' s');
 
 const useHl = document.getElementById('useHighlight');
 if (useHl) {
