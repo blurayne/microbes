@@ -3735,7 +3735,11 @@ export class WebGPURenderer extends RendererBase {
       u[7] = (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55;
       const hl = hexToRgb(currentHighlightColor());
       u[8] = hl[0]; u[9] = hl[1]; u[10] = hl[2];
-      u[11] = (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0;
+      // GPU border = base cell-border slider × global line-thickness
+      // slider (same composition as webgl2.js so the two backends
+      // stay visually aligned).
+      u[11] = ((typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0)
+            * ((typeof S.lineThickness === 'number') ? S.lineThickness : 1.0);
       u[12] = cam.rotation || 0;
       // u[13] cell-shader theme id (0 legacy, 1 microscope, 2 cartoon,
       // 3 kurzgesagt, 4 classic) — read by fs_main as u.cameraRot.y.
