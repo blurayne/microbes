@@ -182,6 +182,12 @@ export class Sim {
     });
     owner.mouthFlashKind = 'fangs';
     owner.mouthFlashTimer = 0.30;
+    // Fire glow on the emitting B-cell — reuses the existing
+    // `c.flash` channel (decays at `dt * 2` in update(), so 0.4
+    // fades to 0 in ~0.2 s — matches the user-requested
+    // duration). Renderer overlays already pick this up to draw
+    // a brief halo over the cell body.
+    owner.flash = Math.max(owner.flash || 0, 0.4);
     // Optional event hook so app.js can play SFX without sim.js
     // having to import Audio. Owner is the firing B-cell; the
     // listener can read owner.x/y to decide an on-screen volume.
