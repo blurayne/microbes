@@ -987,6 +987,29 @@ bindCheckbox('pinchRotation', 'pinchRotation', (on) => {
     sim.pinch = null;
   }
 });
+// Settings dialog accordion: when one `<details class="settings-section">`
+// opens, close the others. Default on; the user can disable to fall
+// back to free-form multi-open. We listen at the panel root via
+// event delegation so newly-added sections inherit the behaviour
+// automatically. The handler short-circuits when the toggle is off
+// AND when the just-fired event is a CLOSE (open=false) — only
+// opening a section should collapse its siblings.
+bindCheckbox('settingsAccordion', 'settingsAccordion');
+(function wireSettingsAccordion() {
+  const panel = document.querySelector('#settings .settings-panel');
+  if (!panel) return;
+  panel.addEventListener('toggle', (ev) => {
+    if (!S.settingsAccordion) return;
+    const t = ev.target;
+    if (!(t instanceof HTMLDetailsElement)) return;
+    if (!t.classList.contains('settings-section')) return;
+    if (!t.open) return;
+    const others = panel.querySelectorAll('details.settings-section');
+    for (const d of others) {
+      if (d !== t && d.open) d.open = false;
+    }
+  }, true);   // capture: the `toggle` event doesn't bubble
+})();
 bindCheckbox('randomSplit', 'randomSplit');
 bindCheckbox('metaSplit', 'metaSplit');
 // Game mode. Today the simulator IS Free Game (docs/ch04-konzept.md

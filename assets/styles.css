@@ -276,6 +276,26 @@ body.is-paused #aboutDialog {
   border-radius: 6px;
 }
 .settings-panel .close:hover { background: #ffffff14; }
+/* "Accordion" toggle in the Settings header — pushes itself to the
+   right of the title via `margin-left: auto`, then sits 8 px before
+   the close button. Subtle styling (12 px label, accent-on-checked)
+   so it reads as a meta-control, not a primary setting. */
+.settings-accordion-toggle {
+  margin-left: auto;
+  margin-right: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.settings-accordion-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+}
 
 .settings-panel section {
   border-top: 1px solid var(--line);

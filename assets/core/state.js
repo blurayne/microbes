@@ -113,6 +113,7 @@ export const DEFAULTS = {
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
   showObjectCount: false,   // append live cell + particle count to the FPS line
+  settingsAccordion: true,  // when opening a `<details class="settings-section">` in the Settings dialog, automatically collapse the others. Acts like a single-pane accordion. Toggleable via the matching checkbox; on by default per user spec.
   navMode: 'fixed',         // off-screen-cell arrow layout. 'none' = hidden; 'fixed' = 4 fixed-edge aggregate arrows (the original look); 'anchored' = per-cell arrows sliding along the screen edge, 1D-greedy clustered when crowded; 'circular' = arrows on a ring just outside the microscope focus circle, pointing outward toward each off-screen cell. The standalone `navArrows` bool was retired in favour of `'none'` here (migration shim in loadSettings).
   extendedCells: false,     // opt-in cells flagged `extended: true` in CELL_TYPES (e.g. eukaryote). Off by default; user must enable in Settings → Display to see them in the Add dialog + help list.
   showRenderer: false,      // append actual renderer info to the FPS line
@@ -555,7 +556,7 @@ if (!S._langSet) {
 // ---------- i18n ----------
 export const LOCALES = {
   en: {
-    settings_title: 'Settings',
+    settings_title: 'Settings', settings_accordion: 'Accordion',
     bg_solid: 'Solid color',
     bg_bloodstream: 'Bloodstream (crimson)',
     bg_bloodflow: 'Bloodflow (vermilion)',
@@ -764,7 +765,7 @@ export const LOCALES = {
     cell_toxin_desc: 'Jagged toxin crystal that drifts and burns on contact.',
   },
   de: {
-    settings_title: 'Einstellungen',
+    settings_title: 'Einstellungen', settings_accordion: 'Akkordeon',
     bg_solid: 'Volltonfarbe',
     bg_bloodstream: 'Blutstrom (Karmin)',
     bg_bloodflow: 'Blutfluss (Zinnober)',
