@@ -591,9 +591,24 @@ if (eyeBtn) {
 // captured at pause-onset; while paused, every renderer call gets
 // that frozen value so shader u_time stops advancing too (background
 // fbm, virus capsid pulse, kurzgesagt halo, etc. all freeze).
+//
+// `_autoPaused` is a SECOND pause flag tracking window focus /
+// visibility — set by the `blur` + `visibilitychange` listeners
+// further down. It freezes the sim + mutes music identically to
+// `_paused`, but does NOT touch the PAUSE overlay, the pause
+// button's aria-pressed state, or the body.is-paused class. Auto-
+// resume is automatic once focus returns; user-pause stays in
+// effect across focus changes (the two flags compose with OR).
 let _paused = false;
+let _autoPaused = false;
 let _pauseFreezeTs = null;
 let _musicPlayer = null;
+// Effective pause = either the user clicked pause OR the window
+// lost focus. Frame loop + music gate read this.
+function _isPausedOrAuto() { return _paused || _autoPaused; }
+function _musicShouldPlay() {
+  return !_isPausedOrAuto() && !!S.musicEnabled && (S.musicVolume || 0) > 0;
+}
 function setPaused(p) {
   _paused = !!p;
   if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(_paused));
@@ -606,8 +621,18 @@ function setPaused(p) {
   // accidental side-clicks behind the blur).
   document.body.classList.toggle('is-paused', _paused);
   // Music plays when (a) the dedicated toggle is on, (b) the sim isn't
-  // paused, and (c) the volume slider isn't dialled to 0.
-  if (_musicPlayer) _musicPlayer.setEnabled(!_paused && !!S.musicEnabled && (S.musicVolume || 0) > 0);
+  // paused (user OR auto), and (c) the volume slider isn't dialled to 0.
+  if (_musicPlayer) _musicPlayer.setEnabled(_musicShouldPlay());
+}
+// Focus / visibility-driven pause. Skips every user-pause side
+// effect (overlay, aria-pressed, body class) so the moment the
+// window regains focus the sim resumes without an explicit user
+// gesture. Music mutes / restores in lockstep.
+function setAutoPaused(p) {
+  const next = !!p;
+  if (next === _autoPaused) return;
+  _autoPaused = next;
+  if (_musicPlayer) _musicPlayer.setEnabled(_musicShouldPlay());
 }
 // `?pose=1` URL override → freeze the sim AND mark the document with
 // `body.is-pose-clean` so every chrome layer (pause overlay, FABs,
@@ -1303,8 +1328,8 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
   // 0 AND the game isn't paused. The toggle defaults to off so the
   // page loads silent — autoplay policies would block playback even
   // if it were on, but explicit-off is the clearer UX.
-  player.setEnabled(!!S.musicEnabled && (S.musicVolume || 0) > 0 && !_paused);
   _musicPlayer = player;
+  player.setEnabled(_musicShouldPlay());
 
   const sfx = new SfxPlayer();
   sfx.setVolume(S.sfxVolume);
@@ -1333,19 +1358,43 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
   bindCheckbox('musicEnabled', 'musicEnabled');
   const musicEnabledEl = document.getElementById('musicEnabled');
   if (musicEnabledEl) musicEnabledEl.addEventListener('change', () => {
-    player.setEnabled(!!S.musicEnabled && (S.musicVolume || 0) > 0 && !_paused);
+    player.setEnabled(_musicShouldPlay());
   });
   const musicVolEl = document.getElementById('musicVolume');
   if (musicVolEl) musicVolEl.addEventListener('input', () => {
     const v = parseFloat(musicVolEl.value);
     player.setVolume(v);
     // Crossing zero re-arms / silences the player.
-    player.setEnabled(!!S.musicEnabled && v > 0 && !_paused);
+    player.setEnabled(_musicShouldPlay());
   });
   const sfxVolEl = document.getElementById('sfxVolume');
   if (sfxVolEl) sfxVolEl.addEventListener('input', () => sfx.setVolume(parseFloat(sfxVolEl.value)));
   const nextBtn = document.getElementById('musicNext');
   if (nextBtn) nextBtn.addEventListener('click', () => player.next());
+
+  // Window focus / visibility — auto-pause the sim + mute music when
+  // the tab loses focus or the page is hidden (alt-tab on desktop,
+  // home-screen / app-switch on mobile). Auto-resume on return.
+  // Uses the dedicated `setAutoPaused` helper so the PAUSE overlay
+  // doesn't show — the user didn't ask to pause, the OS did, so
+  // we silently freeze + restore without their intervention.
+  //
+  // Listening to all three events is belt-and-braces:
+  //   * `visibilitychange` — most reliable on mobile (tab hidden,
+  //     app backgrounded). Document.hidden is the source of truth.
+  //   * `blur` — desktop window focus lost (e.g. cmd-tab). Doesn't
+  //     fire on every mobile browser, so we still need the above.
+  //   * `focus` — desktop window focus restored. Mobile typically
+  //     fires `visibilitychange` too, so this is mainly desktop.
+  function _syncAutoPauseFromVisibility() {
+    setAutoPaused(document.hidden);
+  }
+  document.addEventListener('visibilitychange', _syncAutoPauseFromVisibility);
+  window.addEventListener('blur',  () => setAutoPaused(true));
+  window.addEventListener('focus', () => setAutoPaused(false));
+  // Seed from whatever the document's current visibility is — in
+  // case we boot inside a backgrounded tab.
+  _syncAutoPauseFromVisibility();
 
   // Floating combat text — sim emits {x, y, text, kind} on damage
   // (kind:'damage', "-N") and on fresh activation (kind:'activate',
@@ -2097,7 +2146,9 @@ function frame(ts) {
   // Pause: freeze ts at the moment pause started so shader u_time stops
   // advancing too. Renderer + sim see the frozen value; lastTs is held
   // at the frozen ts, then re-anchored on resume so dt doesn't blow up.
-  if (_paused) {
+  // Auto-pause (window blur / hidden tab) freezes identically.
+  const _frozen = _isPausedOrAuto();
+  if (_frozen) {
     if (_pauseFreezeTs == null) _pauseFreezeTs = ts;
     ts = _pauseFreezeTs;
     lastTs = ts;
@@ -2106,13 +2157,13 @@ function frame(ts) {
     _pauseFreezeTs = null;
   }
   if (!lastTs) lastTs = ts;
-  const dt = _paused ? 0 : Math.min(0.05, (ts - lastTs) / 1000);
+  const dt = _frozen ? 0 : Math.min(0.05, (ts - lastTs) / 1000);
   lastTs = ts;
 
   // Skip simulation when paused; the renderer still runs so the
   // PAUSE overlay can fade in over the existing field, and the
   // resume transition is seamless.
-  if (!_paused) sim.update(dt);
+  if (!_frozen) sim.update(dt);
 
   const t = ts * 0.001;
   const shapes = getShapes(sim.cells, t, sim.camera, sim.W, sim.H);
@@ -2136,7 +2187,7 @@ function frame(ts) {
   // Floating combat text — tick the lifetimes (skipped while paused
   // so labels freeze in place under the PAUSE overlay) and re-place
   // every active label using the current camera transform.
-  if (!_paused) floatingText.tick(dt);
+  if (!_frozen) floatingText.tick(dt);
   floatingText.render(sim);
 
   // Cell-type overlay (S.cellTypeOverlay / eye-toggle FAB). Always
