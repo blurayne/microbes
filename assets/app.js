@@ -1581,11 +1581,11 @@ function applyBuildInfoVis(on) {
 }
 bindCheckbox('showBuildInfo', 'showBuildInfo', applyBuildInfoVis);
 applyBuildInfoVis(S.showBuildInfo);
-// Object count rides on the FPS overlay's visibility. The checkbox
-// only persists the toggle; updateFPS reads S.showObjectCount each
-// throttled tick and appends "· N objs" to the line when on. With
-// the FPS overlay hidden, the count is hidden too.
-bindCheckbox('showObjectCount', 'showObjectCount');
+// Cell total rides on the FPS overlay's visibility. The checkbox
+// only persists the toggle; updateFPS reads S.showCellTotal each
+// throttled tick and appends "· N cells" to the line when on.
+// With the FPS overlay hidden, the count is hidden too.
+bindCheckbox('showCellTotal', 'showCellTotal');
 // Off-screen navigation arrows: unified 4-way select. 'none' = hidden;
 // 'fixed' = 4 fixed-edge aggregate arrows (the original look);
 // 'anchored' = per-cell arrows sliding along the screen edge with
@@ -2166,18 +2166,37 @@ function renderBuildStamp() {
       when = `${mm}-${dd} ${hh}:${mi}`;
     }
   }
-  const parts = [];
-  if (b.branch) parts.push(b.branch);
-  parts.push(sha);
+  // Short branches (≤ 5 chars like "main") read fine inline as
+  // the first element. Longer branches (e.g. "claude/hud-rework")
+  // dominate the row and push the useful sha/run/codename off the
+  // right edge on narrow viewports, so promote them to their own
+  // second line below the main info row.
+  const branch = b.branch || '';
+  const promote = branch && branch.length > 5;
+  const head = [];
+  if (branch && !promote) head.push(branch);
+  head.push(sha);
   if (b.run > 0) {
     // Each deploy run gets a deterministic codename so the user
     // can tell at a glance which build is loaded after a refresh.
     // See assets/core/build-codename.js for the word lists.
-    parts.push(`#${b.run} · ${buildCodename(b.run)}`);
+    head.push(`#${b.run} · ${buildCodename(b.run)}`);
   }
-  if (when) parts.push(when);
-  _currentBuildLabel = parts.join(' · ');
-  if (el) el.textContent = _currentBuildLabel;
+  if (when) head.push(when);
+  _currentBuildLabel = promote
+    ? `${head.join(' · ')}\n${branch}`
+    : head.join(' · ');
+  if (el) {
+    if (promote) {
+      const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      el.innerHTML = `${esc(head.join(' · '))}<br>${esc(branch)}`;
+    } else {
+      el.textContent = _currentBuildLabel;
+    }
+  }
+  // CSS reads .build-2line to offset the #fps pill further down
+  // when the build stamp wraps to two rows.
+  document.body.classList.toggle('build-2line', !!promote);
 }
 renderBuildStamp();
 
@@ -2220,13 +2239,12 @@ function updateFPS(dt, ts) {
   const fps = avg > 0 ? Math.round(1 / avg) : 0;
   const info = (renderer && typeof renderer.info === 'string') ? renderer.info : '';
   // "15fps (webgpu)" — renderer is always part of the overlay when
-  // it's visible at all (user spec). With showObjectCount on, the
-  // total live cell + particle count is appended after a separator.
+  // it's visible at all (user spec). With showCellTotal on, the
+  // live cell count is appended after a separator.
   let line = info ? `${fps}fps (${info})` : `${fps}fps`;
-  if (S.showObjectCount && sim) {
+  if (S.showCellTotal && sim) {
     const cells = (sim.cells && sim.cells.length) || 0;
-    const parts = (sim.particles && sim.particles.length) || 0;
-    line += ` · ${cells + parts} objs`;
+    line += ` · ${cells} cells`;
   }
   fpsEl.textContent = line;
 }

@@ -1,9 +1,16 @@
 name: Deploy to GitHub Pages
 
+# Build runs on every branch push so each branch's artifacts
+# carry real build/branch/sha/run info in assets/build.js (the
+# Stamp Build Info step). Deploy is gated to refs/heads/main —
+# GitHub Pages can only host one site, so non-main branches just
+# build for stamp parity (consumed by visual tests, manual
+# downloads of the upload-pages-artifact, etc).
+
 on:
   push:
     branches:
-      - main
+      - '**'
   workflow_dispatch:
 
 permissions:
@@ -12,7 +19,10 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  # Per-ref so feature branches don't cancel main deploys (and
+  # vice versa). Without this, a fast main push during a feature
+  # branch build would abort the feature build with no record.
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -67,6 +77,10 @@ jobs:
 
   deploy:
     needs: build
+    # Only main actually publishes to GitHub Pages — feature
+    # branches build (above) to stamp build.js with their branch
+    # name but skip the deploy step.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
