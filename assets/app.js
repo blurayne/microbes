@@ -734,10 +734,8 @@ gearBtn.addEventListener('click', () => {
 function renderAddDialogContents() {
   renderPaletteGrid();
   const showBad = !!S.allowBadGuys;
-  const pathTitle = document.querySelector('.add-section-pathogens');
-  const pathGrid  = document.getElementById('cellGridBad');
-  if (pathTitle) pathTitle.hidden = !showBad;
-  if (pathGrid)  pathGrid.hidden  = !showBad;
+  const pathGrid = document.getElementById('cellGridBad');
+  if (pathGrid) pathGrid.hidden = !showBad;
   if (showBad) renderPaletteBadGrid();
   renderHelpList();   // populate the list view in the same dialog
 }
@@ -1782,12 +1780,13 @@ function appendRelationsRow(parent, labelKey, keys, kind, viewerKey) {
   parent.appendChild(row);
 }
 
-function appendHelpSection(parent, title, entries) {
+function appendHelpSection(parent, title, entries, headingClass) {
   if (!entries.length) return;
   const section = document.createElement('li');
   section.className = 'cell-list-section';
   section.style.listStyle = 'none';
   const h = document.createElement('h3');
+  if (headingClass) h.classList.add(headingClass);
   h.textContent = title;
   section.appendChild(h);
   for (const [key] of entries) {
@@ -1848,7 +1847,7 @@ function renderHelpList() {
   if (!cellListEl) return;
   cellListEl.innerHTML = '';
   const goodEntries = Object.entries(CELL_TYPES).filter(([, t]) => t.category === 'good' && isVisibleCell(t));
-  appendHelpSection(cellListEl, T('help_group_good'), goodEntries);
+  appendHelpSection(cellListEl, T('help_group_good'), goodEntries, 'good');
   if (S.allowBadGuys) {
     for (const g of PATHOGEN_GROUPS) {
       const entries = g.members.map(k => [k, CELL_TYPES[k]]).filter(([, t]) => t && isVisibleCell(t));
