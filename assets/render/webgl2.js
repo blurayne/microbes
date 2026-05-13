@@ -3255,8 +3255,13 @@ export class WebGL2Renderer extends RendererBase {
       gl.uniform3fv(this._diskU.highlight, hexToVec3(currentHighlightColor()));
       gl.uniform1f(this._diskU.membraneIntensity,
         (typeof S.membraneIntensity === 'number') ? S.membraneIntensity : 0.55);
+      // GPU border = base cell-border slider × global line-thickness
+      // slider. The global control is the one the user expects to
+      // affect every line/stroke; the per-shader knob is the legacy
+      // GPU-only band thickness from the disk-outline pass.
       gl.uniform1f(this._diskU.borderThickness,
-        (typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0);
+        ((typeof S.cellBorderThickness === 'number') ? S.cellBorderThickness : 3.0)
+        * ((typeof S.lineThickness === 'number') ? S.lineThickness : 1.0));
       gl.uniform1f(this._diskU.theme, _themeId(S.theme));
       gl.bindVertexArray(this._diskVao);
       gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, singletons.length);

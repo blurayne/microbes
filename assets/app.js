@@ -871,6 +871,12 @@ bindRange('bgScale', 'bgScale', 'bgScaleVal', v => v.toFixed(2) + '×');
 bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
 bindRange('membraneIntensity', 'membraneIntensity', 'membraneVal', v => v.toFixed(2));
 bindRange('cellBorderThickness', 'cellBorderThickness', 'cellBorderVal', v => v.toFixed(1) + '×');
+// Global line-thickness multiplier — scales antibody stroke width
+// (canvas2d), cell outline lineWidth (canvas2d), and the GPU
+// border-shader uniform (webgl2 / webgpu). GPU antibody Y's are
+// `line-list` topology with no thickness control, so the slider
+// is a no-op there. See state.js DEFAULTS.lineThickness.
+bindRange('lineThickness', 'lineThickness', 'lineThicknessVal', v => v.toFixed(1) + '×');
 bindRange('cellSizeMul', 'cellSizeMul', 'cellSizeVal', v => v.toFixed(2) + '×');
 bindRange('faceScale', 'faceScale', 'faceScaleVal', v => v.toFixed(2) + '×');
 bindRange('friction', 'friction', 'frictionVal', v => v.toFixed(2));

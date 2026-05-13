@@ -20,6 +20,7 @@ export const DEFAULTS = {
   bgFlowSpeed: 0.55,
   bgScale: 1.0,             // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0..4×.
   outlinePx: 5,
+  lineThickness: 1.0,        // global multiplier on antibody stroke width (canvas2d) + cell outline width (canvas2d) + cell-border shader uniform (webgl2 / webgpu). 1.0 keeps the previous look. Clamped 0.3..3.0 in loadSettings. GPU antibody Y's stay at 1 device-px because line-list topology has no thickness control — the slider is a no-op there.
   faceScale: 0.7,           // multiplier on cartoon face size — scales eye radius, pupil radius, eye horizontal spread, and mouth width uniformly across all renderers. 0.7 is the new default (was 1.0); clamped 0.2..2.2 in loadSettings.
   showDebugField: false,
   // Visual style for the cell rendering itself. Was the lone "theme"
@@ -447,6 +448,10 @@ export function loadSettings() {
       parsed.cellBorderThickness = DEFAULTS.cellBorderThickness;
     }
     parsed.cellBorderThickness = Math.max(0.5, Math.min(5.0, parsed.cellBorderThickness));
+    if (typeof parsed.lineThickness !== 'number' || !Number.isFinite(parsed.lineThickness)) {
+      parsed.lineThickness = DEFAULTS.lineThickness;
+    }
+    parsed.lineThickness = Math.max(0.3, Math.min(3.0, parsed.lineThickness));
     if (typeof parsed.bgScale !== 'number' || !Number.isFinite(parsed.bgScale)) {
       parsed.bgScale = DEFAULTS.bgScale;
     }
@@ -665,6 +670,7 @@ export const LOCALES = {
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
     wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background size', outline_px: 'Outline px', face_size: 'Face size',
     membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
+    line_thickness: 'Line thickness',
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
     mode_kill: 'Kill mode', mode_kill_tip: 'Tap a cell to make it explode',
@@ -863,6 +869,7 @@ export const LOCALES = {
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
     wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundgröße', outline_px: 'Umrandung px', face_size: 'Gesichtsgröße',
     membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
+    line_thickness: 'Linienstärke',
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
     mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zelle antippen, sie zerplatzt',

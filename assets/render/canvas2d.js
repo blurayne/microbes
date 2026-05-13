@@ -708,7 +708,8 @@ export class Canvas2DRenderer extends RendererBase {
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       ctx.globalAlpha = a;
-      ctx.lineWidth = Math.max(2, S.outlinePx * 0.85) / cam.scale;
+      const _lt = (typeof S.lineThickness === 'number' ? S.lineThickness : 1);
+      ctx.lineWidth = Math.max(2, S.outlinePx * 0.85) * _lt / cam.scale;
 
       // Group SPLITTING shapes by cell.id when we'll merge them; the
       // remaining shapes use the original per-shape stroke loop.
@@ -863,7 +864,7 @@ export class Canvas2DRenderer extends RendererBase {
     const N = 8;
     ctx.save();
     ctx.lineJoin = 'round';
-    ctx.lineWidth = Math.max(1.5, px * 0.7) / cam.scale;
+    ctx.lineWidth = Math.max(1.5, px * 0.7) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     ctx.strokeStyle = theme.outline.color;
     ctx.fillStyle = cc.accent;
     const tipLen = s.r * 0.55;
@@ -953,7 +954,7 @@ export class Canvas2DRenderer extends RendererBase {
     const N = 10;
     ctx.save();
     ctx.lineJoin = 'round';
-    ctx.lineWidth = Math.max(1.5, px * 0.7) / cam.scale;
+    ctx.lineWidth = Math.max(1.5, px * 0.7) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     ctx.strokeStyle = theme.outline.color;
     ctx.fillStyle = cc.accent;
     const baseHalf = s.r * 0.09;
@@ -1321,7 +1322,10 @@ export class Canvas2DRenderer extends RendererBase {
         ctx.scale(scale, scale);
         ctx.globalAlpha = alpha;
         ctx.strokeStyle = a.color;
-        ctx.lineWidth = 1.0;        // in unit-Y space; scale=r → 1·r screen px
+        // Unit-Y space — `scale = r` so the on-screen width is
+        // `lineThickness · r · device-px`. Default 1.0 keeps the
+        // original look; the slider scales 0.3..3.0.
+        ctx.lineWidth = (typeof S.lineThickness === 'number' ? S.lineThickness : 1);
         ctx.beginPath();
         // Stem (behind the projectile).
         ctx.moveTo(-2.4, 0);
