@@ -195,6 +195,12 @@ body.is-paused #aboutDialog {
   letter-spacing: 0.08em;
   color: #ffd0d8aa;
 }
+/* "Immune system & body" section header tints green to mirror the
+   pathogen sections' pink — visually splits friend vs. foe without
+   needing an icon. */
+.cell-list-section > h3.good {
+  color: #b8f0c4cc;
+}
 .fab:hover, #gear:hover { transform: scale(1.06); }
 .fab:active, #gear:active { transform: scale(0.95); }
 #gear:hover { transform: rotate(20deg); }
@@ -1162,16 +1168,8 @@ body.adding #stage    { cursor: crosshair; }
   font-size: 10.5px;
   white-space: nowrap;
 }
-.add-section-title {
-  margin: 4px 0 6px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--accent, var(--ink));
-}
-.add-section-title:first-child { margin-top: 0; }
-.add-section-title + #cellGrid,
-.add-section-title + #cellGridBad {
+#cellGrid,
+#cellGridBad {
   margin-bottom: 16px;
 }
 .add-footer {
