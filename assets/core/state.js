@@ -49,6 +49,9 @@ export const DEFAULTS = {
   cellTypeOverlay: false,   // eye-toggle: per-cell ring + text label identifying the cell type. HTML overlay above the canvas; renderer-agnostic.
   causticsOverlay: false,   // water-turbulence post-process applied on top of the rendered background. WebGL2 + WebGPU only; Canvas2D is a no-op.
   liquidRipples: false,     // bg post-process: each on-screen cell radiates concentric ripples that distort the background — reads as cells moving through liquid. WebGL2 + WebGPU only; Canvas2D is a no-op.
+  glassMembrane: false,     // overlay post-process: lensing refraction in a thin band just outside each cell, making the membrane read as glass that bends the scene behind it. WebGL2 + WebGPU only; Canvas2D is a no-op.
+  glassStrength: 1.0,       // multiplier on the glass-membrane refraction strength. Slider in Settings → Overlays, range 0.1..3.0. Default 1.0 keeps the previous look.
+  glassChroma: false,       // optional chromatic-split toggle on top of the always-on lensing — when true, the three RGB channels sample the scene at slightly different displacements so the rim shows a prism-edge colour fringe.
   // Caustics tint — modulates the green/teal cast added on top of
   // the rendered scene. Defaults reproduce the historical (0, 1.35,
   // 0.5) bias; lower values toward 0 fade toward neutral white.
@@ -208,7 +211,7 @@ const OVERLAY_SCENE_PIN   = 'scene';
 const KNOWN_OVERLAY_KINDS = [
   'duotone', 'noise', 'vignette', 'crosshair',
   'microscope', 'caustics', 'celltype',
-  'ripples',
+  'ripples', 'glass',
   OVERLAY_SCENE_PIN,
 ];
 
@@ -416,6 +419,13 @@ export function loadSettings() {
       parsed.crosshair        = false;
       parsed._microscopeFxResetV1 = true;
     }
+    // One-shot reset for the new glass-membrane overlay so existing
+    // users boot with it off (matches the historical pattern above).
+    if (!parsed._glassOverlayV1) {
+      parsed.glassMembrane = false;
+      parsed.glassChroma = false;
+      parsed._glassOverlayV1 = true;
+    }
     // bgLayers: array of { kind, opacity, blend, enabled, ...params }.
     // Missing / malformed → empty; renderers fall back to S.background.
     if (!Array.isArray(parsed.bgLayers)) {
@@ -458,6 +468,12 @@ export function loadSettings() {
       parsed.faceScale = DEFAULTS.faceScale;
     }
     parsed.faceScale = Math.max(0.2, Math.min(2.2, parsed.faceScale));
+    if (typeof parsed.glassStrength !== 'number' || !Number.isFinite(parsed.glassStrength)) {
+      parsed.glassStrength = DEFAULTS.glassStrength;
+    }
+    parsed.glassStrength = Math.max(0.1, Math.min(3.0, parsed.glassStrength));
+    parsed.glassMembrane = !!parsed.glassMembrane;
+    parsed.glassChroma = !!parsed.glassChroma;
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Rheinhessisch was renamed to Mainzerisch (Mainz city dialect).
@@ -640,6 +656,9 @@ export const LOCALES = {
     overlay_kind_caustics:   'Caustics',
     overlay_kind_celltype:   'Cell-type labels',
     overlay_kind_ripples:    'Liquid ripples',
+    overlay_kind_glass:      'Glass membrane',
+    glass_strength:          'Refraction strength',
+    glass_chroma:            'Chromatic split',
     fx_kind_noise: 'Static noise',
     fx_kind_vignette: 'Vignette',
     fx_kind_crosshair: 'Crosshair',
@@ -846,6 +865,9 @@ export const LOCALES = {
     overlay_kind_caustics:   'Kaustik',
     overlay_kind_celltype:   'Zelltyp-Beschriftung',
     overlay_kind_ripples:    'Flüssigkeitswellen',
+    overlay_kind_glass:      'Glasmembran',
+    glass_strength:          'Brechungsstärke',
+    glass_chroma:            'Farbsaum',
     fx_kind_noise: 'Rauschen',
     fx_kind_vignette: 'Vignette',
     fx_kind_crosshair: 'Fadenkreuz',

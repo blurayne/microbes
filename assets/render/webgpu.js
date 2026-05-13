@@ -1113,6 +1113,68 @@ fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
 // is packed as vec4(uvX, uvY, uvR, _); WGSL pads vec3 arrays to
 // vec4 anyway, so explicit vec4 keeps the JS-side layout simple.
 const RIPPLE_MAX_WGPU = 24;
+const GLASS_MAX_WGPU = 24;
+
+// Glass-membrane lensing overlay. Mirrors RIPPLE_BG_WGSL's
+// scene-FBO sampling + per-cell iteration, but the displacement
+// is a half-sine lens peak in a thin band JUST OUTSIDE each cell
+// (0.85*r .. 1.15*r). Chromatic split (RGB sampled at slightly
+// different displacements) is gated by `params.y`.
+const GLASS_BG_WGSL = /* wgsl */ `
+struct GlassU {
+  header: vec4<f32>,        // (time, cellCount, resW, resH)
+  params: vec4<f32>,        // (strength, chroma, _, _)
+  cells:  array<vec4<f32>, ${GLASS_MAX_WGPU}>,
+};
+@group(0) @binding(0) var<uniform> U : GlassU;
+@group(0) @binding(1) var bgSamp : sampler;
+@group(0) @binding(2) var bgTex  : texture_2d<f32>;
+
+@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
+  let x = f32((vi << 1u) & 2u) * 2.0 - 1.0;
+  let y = f32(vi & 2u) * 2.0 - 1.0;
+  return vec4<f32>(x, y, 0.0, 1.0);
+}
+
+@fragment fn fs_main(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
+  let res = vec2<f32>(U.header.z, U.header.w);
+  let uv  = frag.xy / res;
+  var disp = vec2<f32>(0.0, 0.0);
+  let minAx = min(res.x, res.y);
+  let n = i32(U.header.y + 0.5);
+  let strength = U.params.x;
+  let chroma   = U.params.y;
+  for (var i: i32 = 0; i < ${GLASS_MAX_WGPU}; i = i + 1) {
+    if (i >= n) { break; }
+    let c = U.cells[i];
+    let dvUv = uv - c.xy;
+    let dvPx = dvUv * res;
+    let dPx  = length(dvPx);
+    let rPx  = max(c.z * minAx, 4.0);
+    let lo   = rPx * 0.85;
+    let hi   = rPx * 1.15;
+    if (dPx < lo || dPx > hi) { continue; }
+    let t = (dPx - lo) / max(1e-4, hi - lo);
+    let lens = sin(t * 3.14159);                     // peak mid-band
+    let normal = dvUv / max(1e-4, length(dvUv));
+    disp = disp + normal * lens;
+  }
+  let baseDisp = disp * (8.0 / minAx) * strength;
+  if (chroma > 0.5) {
+    // Prism-edge: sample R/G/B at slightly different displacements.
+    let uvR = clamp(uv + baseDisp * 0.85, vec2<f32>(0.0), vec2<f32>(1.0));
+    let uvG = clamp(uv + baseDisp * 1.00, vec2<f32>(0.0), vec2<f32>(1.0));
+    let uvB = clamp(uv + baseDisp * 1.15, vec2<f32>(0.0), vec2<f32>(1.0));
+    let r = textureSample(bgTex, bgSamp, uvR).r;
+    let g = textureSample(bgTex, bgSamp, uvG).g;
+    let b = textureSample(bgTex, bgSamp, uvB).b;
+    return vec4<f32>(r, g, b, 1.0);
+  }
+  let uvD = clamp(uv + baseDisp, vec2<f32>(0.0), vec2<f32>(1.0));
+  let rgb = textureSample(bgTex, bgSamp, uvD).rgb;
+  return vec4<f32>(rgb, 1.0);
+}
+`;
 const RIPPLE_BG_WGSL = /* wgsl */ `
 struct RippleU {
   // Header (16 bytes — 4 floats):
@@ -3131,6 +3193,68 @@ export class WebGPURenderer extends RendererBase {
     return n;
   }
 
+  // ── Glass-membrane overlay ────────────────────────────────
+  // Same per-cell SDF / scene-FBO sampling as ripples; different
+  // displacement formula (half-sine lens peak in 0.85*r..1.15*r
+  // band). Shares the ripple sampler (linear / clamp-to-edge) but
+  // owns its own pipeline + UBO because the params layout differs.
+  _glassEnsurePipeline() {
+    if (this._glassPipeline) return;
+    const device = this.device;
+    const mod = device.createShaderModule({ code: GLASS_BG_WGSL });
+    this._glassPipeline = device.createRenderPipeline({
+      layout: 'auto',
+      vertex:   { module: mod, entryPoint: 'vs_main' },
+      fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format }] },
+      primitive: { topology: 'triangle-list' },
+    });
+    // Reuse ripple sampler if it already exists; allocate a fresh
+    // one (same params) otherwise so the glass pass works even
+    // when ripples is off.
+    if (!this._rippleBgSampler) {
+      this._rippleBgSampler = device.createSampler({
+        magFilter: 'linear', minFilter: 'linear',
+        addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
+      });
+    }
+    // Layout: header vec4 + params vec4 + N × vec4 cells.
+    const floats = 4 + 4 + GLASS_MAX_WGPU * 4;
+    this._glassUbo = device.createBuffer({
+      size: floats * 4,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    });
+    this._glassUboData = new Float32Array(floats);
+  }
+  _glassDestroy() {
+    if (this._glassUbo) { try { this._glassUbo.destroy(); } catch (_) { /* noop */ } this._glassUbo = null; }
+    this._glassPipeline = null;
+    this._glassUboData = null;
+  }
+  // Same cell-pack shape as ripples — copy/paste of the per-cell
+  // visibility test + UV/radius pack.
+  _glassCollectCells() {
+    const buf = this._glassUboData;
+    const cells = (this.sim && this.sim.cells) || [];
+    const W = this.W, H = this.H;
+    const minAx = Math.max(1, Math.min(W, H));
+    const CELLS_OFF = 8;
+    let n = 0;
+    for (let i = 0; i < cells.length && n < GLASS_MAX_WGPU; i++) {
+      const c = cells[i];
+      const s = this.sim.worldToScreen(c.x, c.y);
+      const m = c.r * 1.5;
+      if (s.x < -m || s.y < -m || s.x > W + m || s.y > H + m) continue;
+      const off = CELLS_OFF + n * 4;
+      buf[off + 0] = s.x / W;
+      buf[off + 1] = s.y / H;
+      buf[off + 2] = (c.r * this.camera.scale) / minAx;
+      buf[off + 3] = 0;
+      n++;
+    }
+    for (let i = CELLS_OFF + n * 4; i < buf.length; i++) buf[i] = 0;
+    return n;
+  }
+
   _buildDiskPipeline() {
     const device = this.device;
 
@@ -3387,6 +3511,8 @@ export class WebGPURenderer extends RendererBase {
           this._postChain.push('ripples');
         } else if (k === 'caustics' && S.causticsOverlay) {
           this._postChain.push('caustics');
+        } else if (k === 'glass' && S.glassMembrane) {
+          this._postChain.push('glass');
         } else if ((k === 'microscope' || k === 'duotone')
                    && (S.microscopeBlur || S.makeItReal)) {
           if (!this._postChain.includes('sceneFx')) this._postChain.push('sceneFx');
@@ -3404,6 +3530,7 @@ export class WebGPURenderer extends RendererBase {
       for (const k of this._postChain) {
         if (k === 'ripples')  this._rippleBgEnsurePipeline();
         if (k === 'caustics') this._causticBgEnsurePipeline();
+        if (k === 'glass')    this._glassEnsurePipeline();
         if (k === 'sceneFx')  this._sceneFxEnsurePipeline();
       }
       this._postSource = this._postRtA;
@@ -4307,6 +4434,41 @@ export class WebGPURenderer extends RendererBase {
         }],
       });
       post.setPipeline(this._rippleBgPipeline);
+      post.setBindGroup(0, bg);
+      post.draw(3, 1, 0, 0);
+      post.end();
+    } else if (kind === 'glass' && this._glassPipeline) {
+      const cellCount = this._glassCollectCells();
+      const u = this._glassUboData;
+      u[0] = t;
+      u[1] = cellCount;
+      u[2] = this.canvas.width;
+      u[3] = this.canvas.height;
+      u[4] = S.glassStrength ?? 1.0;
+      u[5] = S.glassChroma ? 1.0 : 0.0;
+      u[6] = 0;
+      u[7] = 0;
+      this.device.queue.writeBuffer(
+        this._glassUbo, 0,
+        u.buffer, u.byteOffset, u.byteLength,
+      );
+      const bg = this.device.createBindGroup({
+        layout: this._glassPipeline.getBindGroupLayout(0),
+        entries: [
+          { binding: 0, resource: { buffer: this._glassUbo } },
+          { binding: 1, resource: this._rippleBgSampler },
+          { binding: 2, resource: srcView },
+        ],
+      });
+      const post = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: dstView,
+          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      post.setPipeline(this._glassPipeline);
       post.setBindGroup(0, bg);
       post.draw(3, 1, 0, 0);
       post.end();

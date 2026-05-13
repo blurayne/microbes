@@ -1180,6 +1180,17 @@ bindRange('rippleDensity',  'rippleDensity',  'rippleDensityVal',  v => v.toFixe
 bindRange('rippleReach',    'rippleReach',    'rippleReachVal',    v => v.toFixed(1) + '×');
 bindRange('rippleStrength', 'rippleStrength', 'rippleStrengthVal', v => v.toFixed(1) + '×');
 
+// Glass-membrane overlay — mirrors the ripples wiring above. The
+// per-frame uniform pack lives inside the renderer; the controls
+// block hides itself when the overlay is off.
+const glassControlsEl = document.getElementById('glassControls');
+function applyGlassControlsVis() {
+  if (glassControlsEl) glassControlsEl.hidden = !S.glassMembrane;
+}
+applyGlassControlsVis();
+bindRange('glassStrength', 'glassStrength', 'glassStrengthVal', v => v.toFixed(1) + '×');
+bindCheckbox('glassChroma', 'glassChroma');
+
 // Static-noise overlay. Renderer reads S.staticNoise* each frame
 // inside the post-pass, so the sliders + blend dropdown just
 // persist to settings — no per-change handler needed.
@@ -1239,6 +1250,7 @@ const OVERLAY_KIND_META = {
     if (eyeBtn) eyeBtn.setAttribute('aria-pressed', String(!!S.cellTypeOverlay));
   } },
   ripples:    { stateField: 'liquidRipples',   labelKey: 'overlay_kind_ripples',    subId: 'rippleControls',         onChange: () => applyRippleControlsVis() },
+  glass:      { stateField: 'glassMembrane',   labelKey: 'overlay_kind_glass',      subId: 'glassControls',          onChange: () => applyGlassControlsVis() },
 };
 let _overlayDragFromIndex = -1;
 function renderOverlayOrderList() {
