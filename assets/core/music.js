@@ -14,6 +14,7 @@ export const TRACKS = [
   { id: 'inside-the-artery',   src: 'assets/audio/inside-the-artery.mp3',   label: 'Inside the Artery' },
   { id: 'pulse-through-veins', src: 'assets/audio/pulse-through-veins.mp3', label: 'Pulse Through Veins' },
   { id: 'warm-pulse-drift',    src: 'assets/audio/warm-pulse-drift.mp3',    label: 'Warm Pulse Drift' },
+  { id: 'tidal-drift',         src: 'assets/audio/tidal-drift.mp3',         label: 'Tidal Drift' },
 ];
 
 export class MusicPlayer {
