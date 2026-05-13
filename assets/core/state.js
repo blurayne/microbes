@@ -138,15 +138,12 @@ export const DEFAULTS = {
   upscaleMode: 'blur',
   scanlinesAlpha: 0.08,     // 0..1 strength of the CRT scanlines overlay; 0 = off (replaces the old scanlines: bool toggle)
   useHighlight: true,                       // selection ring uses theme accent when on
-  // Audio. Music ON by default — user wants the game to greet the
-  // player with music. The first play() call is autoplay-blocked
-  // until the user has interacted; music.js retries on the very
-  // first pointerdown so the track starts the moment the player
-  // touches anything. Volumes are 0..1 floats.
-  // The dedicated music on/off toggle was removed — volume = 0 is the
-  // mute control now. musicEnabled stays in DEFAULTS as a no-op so
-  // loadSettings doesn't see an unknown saved field and reset others.
-  musicEnabled: true,
+  // Audio. Explicit `musicEnabled` toggle drives playback — default OFF
+  // so the page loads silent and the user opts in via Settings → Audio.
+  // Volume stays independent so flipping the toggle back on remembers
+  // whatever level the user set. SFX volume unaffected by either knob.
+  // Volumes are 0..1 floats.
+  musicEnabled: false,
   musicVolume: 0.5,
   sfxVolume: 0.7,
   renderer: 'webgpu',       // 'canvas2d' | 'webgl2' | 'webgpu'
