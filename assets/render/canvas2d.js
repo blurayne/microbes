@@ -893,7 +893,7 @@ export class Canvas2DRenderer extends RendererBase {
     const N = 13;
     ctx.save();
     ctx.lineCap = 'round';
-    ctx.lineWidth = Math.max(1.5, px * 0.5) / cam.scale;
+    ctx.lineWidth = Math.max(1.5, px * 0.5) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     ctx.strokeStyle = cc.cytoBot;
     for (let i = 0; i < N; i++) {
       const baseAng = (i / N) * Math.PI * 2 + c.phase;
@@ -922,7 +922,7 @@ export class Canvas2DRenderer extends RendererBase {
     const px = S.outlinePx;
     ctx.save();
     ctx.lineCap = 'round';
-    ctx.lineWidth = Math.max(1.2, px * 0.4) / cam.scale;
+    ctx.lineWidth = Math.max(1.2, px * 0.4) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     ctx.strokeStyle = cc.accent;
     const stem = s.r * 0.22;
     const arms = s.r * 0.13;
@@ -983,7 +983,7 @@ export class Canvas2DRenderer extends RendererBase {
     const N = 6;
     ctx.save();
     ctx.lineCap = 'round';
-    ctx.lineWidth = Math.max(2, px * 0.7) / cam.scale;
+    ctx.lineWidth = Math.max(2, px * 0.7) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     ctx.strokeStyle = cc.cytoBot;
     for (let i = 0; i < N; i++) {
       const baseAng = (i / N) * Math.PI * 2 + c.phase;
@@ -1018,7 +1018,7 @@ export class Canvas2DRenderer extends RendererBase {
     const N = 24;
     ctx.save();
     ctx.lineCap = 'round';
-    ctx.lineWidth = Math.max(2, px * 0.6) / cam.scale;
+    ctx.lineWidth = Math.max(2, px * 0.6) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     ctx.strokeStyle = cc.accent;
     ctx.beginPath();
     for (let i = 0; i <= N; i++) {
@@ -1042,7 +1042,7 @@ export class Canvas2DRenderer extends RendererBase {
     ctx.save();
     ctx.fillStyle = cc.cytoBot;
     ctx.strokeStyle = theme.outline.color;
-    ctx.lineWidth = Math.max(1.5, S.outlinePx * 0.5) / cam.scale;
+    ctx.lineWidth = Math.max(1.5, S.outlinePx * 0.5) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     for (let i = 0; i < N; i++) {
       const dirAng = Math.PI * 0.5 - 0.40 + (i / (N - 1)) * 0.80;
       const base = shapeVertex(s, dirAng, t);
@@ -1069,7 +1069,7 @@ export class Canvas2DRenderer extends RendererBase {
     const N = 10;
     ctx.save();
     ctx.lineCap = 'round';
-    ctx.lineWidth = Math.max(2, px * 0.6) / cam.scale;
+    ctx.lineWidth = Math.max(2, px * 0.6) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     ctx.strokeStyle = theme.outline.color;
     for (let i = 0; i < N; i++) {
       const theta = (i / N) * Math.PI * 2;
@@ -1098,7 +1098,7 @@ export class Canvas2DRenderer extends RendererBase {
     const N = 22;
     ctx.save();
     ctx.lineCap = 'round';
-    ctx.lineWidth = Math.max(1.4, px * 0.4) / cam.scale;
+    ctx.lineWidth = Math.max(1.4, px * 0.4) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     ctx.strokeStyle = cc.accent;
     ctx.globalAlpha = 0.85;
     for (let i = 0; i < N; i++) {
@@ -1387,7 +1387,7 @@ export class Canvas2DRenderer extends RendererBase {
 
         const inflated = { x: c.x, y: c.y, r: c.r * 1.30, cell: c };
         ctx.save();
-        ctx.lineWidth = Math.max(2, S.outlinePx * 1.4) / cam.scale;
+        ctx.lineWidth = Math.max(2, S.outlinePx * 1.4) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
         ctx.strokeStyle = cc.cytoBot;
         ctx.shadowColor = hl;
         ctx.shadowBlur = 18 / cam.scale;
@@ -1507,7 +1507,7 @@ export class Canvas2DRenderer extends RendererBase {
     const theme = currentTheme();
     const cc = cellColors(cell);
     ctx.save();
-    ctx.lineWidth = Math.max(2, S.outlinePx * 0.6) / cam.scale;
+    ctx.lineWidth = Math.max(2, S.outlinePx * 0.6) * (typeof S.lineThickness === 'number' ? S.lineThickness : 1) / cam.scale;
     ctx.strokeStyle = theme.outline.color;
     const type = CELL_TYPES[cell.type] || CELL_TYPES.neutrophil;
     let kind = type.nucleus.kind;
