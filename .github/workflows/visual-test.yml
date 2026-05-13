@@ -1,32 +1,31 @@
 name: Visual tests (Playwright)
 
-# Gates renderer + cell-port changes on PRs only. Two test specs:
+# PAUSED — disabled on PR + push. Re-enable by restoring the
+# `pull_request:` block below once the prerequisites are
+# adjusted (see PR #199 + the diff-result discussion in the
+# session that introduced this pause). `workflow_dispatch`
+# remains so the rig can still be triggered manually from the
+# Actions UI for one-off diagnostics.
 #
-#   tests/visual/game-vs-shader-test.spec.js  — pair-diffs the game's
-#     #stage canvas against the shader-test page's #stage for the
-#     same `?cellType=…&theme=…` URL. No on-disk baselines needed;
-#     the shader-test render IS the truth. Always runnable.
-#
-#   tests/visual/cells.spec.js                — historical-baseline
-#     gate. Skipped when no baselines exist; per-cell port PRs grow
-#     the baseline set.
-#
-# Job stays `continue-on-error: true` until the game/shader-test
-# divergence is brought under the configured threshold and the
-# baseline set is non-empty. Flip back to default gating once both.
+# When re-enabling:
+#   1. Restore the `pull_request:` block + its paths filter.
+#   2. Decide whether to keep `continue-on-error: true` (advisory)
+#      or flip to gating.
+#   3. Bring `MAX_DIFF_RATIO` in tests/visual/game-vs-shader-test.spec.js
+#      down once cell ports narrow divergence below it.
 on:
-  pull_request:
-    paths:
-      - 'assets/**'
-      - 'docs/cell-zoo.html'
-      - 'docs/shader-test.html'
-      - 'tests/visual/**'
-      - 'index.html'
-      - 'playwright.config.js'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/visual-test.yml'
   workflow_dispatch:
+  # pull_request:
+  #   paths:
+  #     - 'assets/**'
+  #     - 'docs/cell-zoo.html'
+  #     - 'docs/shader-test.html'
+  #     - 'tests/visual/**'
+  #     - 'index.html'
+  #     - 'playwright.config.js'
+  #     - 'package.json'
+  #     - 'package-lock.json'
+  #     - '.github/workflows/visual-test.yml'
 
 permissions:
   contents: read
