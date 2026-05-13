@@ -18,7 +18,7 @@ export const DEFAULTS = {
   autoSplitSeconds: 10,
   maxCells: 512,            // population cap. UI number input in Settings → Population; clamps to [32, 4096], invalid input resets to 512. Reached cap = spawnAtWorld/beginSplit recycle the oldest cell (#136); see TODO.md for future ideas.
   bgFlowSpeed: 0.55,
-  bgScale: 1.0,             // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0..4×.
+  bgScale: 1.0,             // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0.05..20× (the floor matches the shader's `max(u_bgScale, 0.05)` clamp; the 20× ceiling gives enough headroom to shrink features below the obvious-default size).
   outlinePx: 5,
   lineThickness: 1.0,        // global multiplier on antibody stroke width (canvas2d) + every cell outline / decoration / nucleus / face line in canvas2d + cell-border shader uniform (webgl2 / webgpu). 1.0 keeps the previous look. Clamped 0.3..10.0 in loadSettings. GPU antibody Y's stay at 1 device-px because line-list topology has no thickness control — the slider is a no-op there.
   faceScale: 0.7,           // multiplier on cartoon face size — scales eye radius, pupil radius, eye horizontal spread, and mouth width uniformly across all renderers. 0.7 is the new default (was 1.0); clamped 0.2..2.2 in loadSettings.
@@ -455,7 +455,7 @@ export function loadSettings() {
     if (typeof parsed.bgScale !== 'number' || !Number.isFinite(parsed.bgScale)) {
       parsed.bgScale = DEFAULTS.bgScale;
     }
-    parsed.bgScale = Math.max(0, Math.min(4, parsed.bgScale));
+    parsed.bgScale = Math.max(0.05, Math.min(20, parsed.bgScale));
     if (typeof parsed.faceScale !== 'number' || !Number.isFinite(parsed.faceScale)) {
       parsed.faceScale = DEFAULTS.faceScale;
     }
@@ -668,7 +668,7 @@ export const LOCALES = {
     meta_outline_hint_polygon: ' — polygon-union rim, sharp / no blur.',
     auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
-    wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background size', outline_px: 'Outline px', face_size: 'Face size',
+    wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background scaling', outline_px: 'Outline px', face_size: 'Face size',
     membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
     line_thickness: 'Line thickness',
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
@@ -867,7 +867,7 @@ export const LOCALES = {
     random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
-    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundgröße', outline_px: 'Umrandung px', face_size: 'Gesichtsgröße',
+    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundskalierung', outline_px: 'Umrandung px', face_size: 'Gesichtsgröße',
     membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
     line_thickness: 'Linienstärke',
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
@@ -1011,7 +1011,7 @@ export const LOCALES = {
     random_split: 'División aleatoria', meta_split: 'División metaball',
     auto_split: 'Auto-división (s)',
     friction: 'Fricción', bounce: 'Rebote', throw_strength: 'Fuerza de lanzamiento',
-    wobble: 'Oscilación', bg_flow: 'Flujo de fondo', bg_scale: 'Tamaño de fondo', outline_px: 'Contorno px', face_size: 'Tamaño de cara',
+    wobble: 'Oscilación', bg_flow: 'Flujo de fondo', bg_scale: 'Escala de fondo', outline_px: 'Contorno px', face_size: 'Tamaño de cara',
     membrane: 'Membrana', cell_size: 'Tamaño de célula', use_highlight: 'Usar color de resalte',
     mode_target: 'Modo objetivo', mode_target_tip: 'Toca para seleccionar / enviar',
     mode_split: 'Modo división', mode_split_tip: 'Toca una célula para dividirla',
@@ -1137,7 +1137,7 @@ export const LOCALES = {
     random_split: 'Zoifällige Teilung', meta_split: 'Metaball-Doaln',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wuafkraft',
-    wobble: 'Wackln', bg_flow: 'Hintagrundgflies', bg_scale: 'Hintagrundgrässn', outline_px: 'Umrandung px', face_size: 'Gsichtsgreßn',
+    wobble: 'Wackln', bg_flow: 'Hintagrundgflies', bg_scale: 'Hintagrundskaliarung', outline_px: 'Umrandung px', face_size: 'Gsichtsgreßn',
     membrane: 'Membran', cell_size: 'Zoingrässn', use_highlight: 'Akzentfarb vawendn',
     mode_target: 'Zuimodus', mode_target_tip: 'Drauflanga: aussuacha / Zui setzn',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Drauflanga deid de Zoin teiln',
@@ -1518,7 +1518,7 @@ export const LOCALES = {
     random_split: 'Divisio casualis', meta_split: 'Divisio metaballi',
     auto_split: 'Auto-divisio (s)',
     friction: 'Frictio', bounce: 'Resilientia', throw_strength: 'Vis jactus',
-    wobble: 'Tremor', bg_flow: 'Fluxus tergi', bg_scale: 'Magnitudo tergi', outline_px: 'Linea (px)', face_size: 'Magnitudo faciei',
+    wobble: 'Tremor', bg_flow: 'Fluxus tergi', bg_scale: 'Scala tergi', outline_px: 'Linea (px)', face_size: 'Magnitudo faciei',
     membrane: 'Membrana', cell_size: 'Magnitudo cellulae',
     use_highlight: 'Colore luminis utere',
     mode_target: 'Modus signi', mode_target_tip: 'Tange ut elige / mitte',
