@@ -1,14 +1,18 @@
 // Off-screen navigation arrows.
 //
-// Two display modes (S.navMode):
-//   * 'floating' — four edge-anchored aggregate arrows (top / bottom /
+// Display modes (S.navMode; 'none' short-circuits in update()):
+//   * 'fixed'    — four edge-anchored aggregate arrows (top / bottom /
 //     left / right). Each arrow encodes ALL cells exiting through that
-//     cardinal direction, sized & coloured by counts. Original UX.
+//     cardinal direction, sized & coloured by counts. Original UX
+//     (renamed from 'floating'; legacy value migrated in loadSettings).
 //   * 'anchored' — per-cell arrows projected onto the screen rectangle
 //     at the cell's exit point, sliding along the edge as the cell
 //     moves. When many off-screen cells crowd into the same arc of
 //     the perimeter they are merged via 1D greedy threshold clustering
 //     (see ALGORITHMS.md → "Edge-anchored navigation arrows: clustering").
+//   * 'circular' — same clustering on a ring centred on the viewport,
+//     positioned just outside the microscope focus circle. Each arrow
+//     points outward toward its cluster's mean off-screen position.
 //
 // In both modes each arrow's appearance encodes:
 //   - hue: lerp red ↔ green by good/(good+bad) ratio (CELL_TYPES
@@ -181,9 +185,9 @@ export class NavArrows {
     this._prevAnchoredCentroids = null;
   }
 
-  // Public: called once per frame-loop tick from app.js. `enabled` is
-  // S.navArrows; mode is read from S.navMode so the call site stays
-  // tiny.
+  // Public: called once per frame-loop tick from app.js. `enabled`
+  // is `S.navMode !== 'none'`; the specific layout comes from
+  // S.navMode so the call site stays tiny.
   update(sim, enabled) {
     const W = sim && sim.W;
     const H = sim && sim.H;
@@ -192,11 +196,15 @@ export class NavArrows {
       this._hideAnchored();
       return;
     }
-    const mode = (S.navMode === 'anchored') ? 'anchored' : 'floating';
+    const mode = S.navMode;
     if (mode === 'anchored') {
       this._hideFloating();
       this._updateAnchored(sim, W, H);
+    } else if (mode === 'circular') {
+      this._hideFloating();
+      this._updateCircular(sim, W, H);
     } else {
+      // 'fixed' (and any legacy / unrecognised value) → 4 edge arrows.
       this._hideAnchored();
       this._updateFloating(sim, W, H);
     }
@@ -402,12 +410,8 @@ export class NavArrows {
   }
 
   _renderAnchoredCluster(slot, cluster, W, H) {
-    const { wrap, poly, badge } = slot;
-    const { count, good, bad, sumS, sumScreenX, sumScreenY } = cluster;
-    if (count <= 0) {
-      wrap.classList.add('hidden');
-      return;
-    }
+    const { count, sumS, sumScreenX, sumScreenY } = cluster;
+    if (count <= 0) { slot.wrap.classList.add('hidden'); return; }
     const meanS = sumS / count;
     const pt = perimeterPoint(meanS, W, H);
     // Inset the position slightly so the arrow doesn't graze the edge.
@@ -416,20 +420,26 @@ export class NavArrows {
     if (pt.edge === 'bottom') posY = H - EDGE_INSET_PX;
     if (pt.edge === 'left')   posX = EDGE_INSET_PX;
     if (pt.edge === 'right')  posX = W - EDGE_INSET_PX;
+    this._renderClusterAt(slot, cluster, posX, posY, sumScreenX / count, sumScreenY / count);
+  }
 
+  // Shared render path. Given a cluster, where to place its arrow
+  // (`posX`, `posY`), and the cluster's mean off-screen target
+  // (`avgScreenX`, `avgScreenY`), set the DOM transform + size + hue.
+  // Both anchored (edge) and circular (ring) modes call this after
+  // computing layout-specific positions.
+  _renderClusterAt(slot, cluster, posX, posY, avgScreenX, avgScreenY) {
+    const { wrap, poly, badge } = slot;
+    const { count, good, bad } = cluster;
+    if (count <= 0) { wrap.classList.add('hidden'); return; }
     // Rotate the arrow tip toward the cluster's mean off-screen cell
     // position so the indicator shows a real bearing, not just an
-    // outward-from-edge stub. atan2 on the (anchor → cluster-mean)
-    // vector gives the angle of that vector measured from +x; the
-    // SVG triangle's natural orientation is tip-up (= -y), so a +90°
-    // offset converts the angle into the CSS rotate() value where
-    // 0° = up, 90° = right, 180° = down, -90° = left.
-    const avgScreenX = sumScreenX / count;
-    const avgScreenY = sumScreenY / count;
+    // outward stub. atan2 gives the angle from +x; the SVG triangle's
+    // natural orientation is tip-up (= -y), so +90° converts to the
+    // CSS rotate() value where 0° = up, 90° = right, 180° = down.
     const dirX = avgScreenX - posX;
     const dirY = avgScreenY - posY;
     const angleDeg = Math.atan2(dirY, dirX) * 180 / Math.PI + 90;
-
     const total = good + bad;
     const t = Math.min(1, Math.max(0, (total - 1) / 31));
     const sat = 50 + 50 * t;
@@ -437,24 +447,121 @@ export class NavArrows {
     poly.setAttribute('fill', `hsl(${hue.toFixed(0)}, ${sat.toFixed(0)}%, 55%)`);
     const length    = 18 + (44 - 18) * t;
     const thickness = 14 + (32 - 14) * t;
-
     wrap.classList.remove('hidden');
-    // translate(-50%, -50%) centres the SVG on (posX, posY); the
-    // rotation aims the tip at the cluster's mean off-screen position.
     wrap.style.left = `${posX.toFixed(1)}px`;
     wrap.style.top  = `${posY.toFixed(1)}px`;
     wrap.style.transform =
       `translate(-50%, -50%) rotate(${angleDeg.toFixed(1)}deg)`;
-    // SVG dimensions (pre-rotation: thickness × length, tip pointing
-    // along local +Y → after rotation, tip points at the cluster).
     wrap.style.setProperty('--nav-arrow-thickness', `${thickness.toFixed(1)}px`);
     wrap.style.setProperty('--nav-arrow-length',    `${length.toFixed(1)}px`);
-
     if (count > 1) {
       badge.textContent = String(count);
       badge.classList.remove('hidden');
     } else {
       badge.classList.add('hidden');
     }
+  }
+
+  // ---- Circular: arrows on a ring around screen centre ---------------
+  // Layout the off-screen cells on a circle anchored at the viewport
+  // centre, with a radius just outside the microscope focus circle
+  // (S.microscopeFocus). Each cluster's arrow points outward toward
+  // the mean projected position of its constituent cells, giving the
+  // user a one-glance compass of what's happening off-canvas without
+  // the arrows hugging the screen edges. Clustering uses the same
+  // greedy 1D algorithm as the anchored mode but in angular space
+  // (CLUSTER_GAP_PX of arc length at the ring radius). No Schmitt-
+  // hysteresis here: the circle is small enough that boundary
+  // flicker is much less common than on the screen perimeter.
+  _updateCircular(sim, W, H) {
+    const cells = sim.cells;
+    const cx = W * 0.5;
+    const cy = H * 0.5;
+    const halfMin = Math.min(W, H) * 0.5;
+    // Microscope focus is a fraction of `min(W,H)/2`; we add a 24-px
+    // gutter and floor at 60 px so the ring doesn't collapse to a
+    // pixel when the user dials the microscope all the way down.
+    const focus = (typeof S.microscopeFocus === 'number' && S.microscopeFocus > 0)
+      ? S.microscopeFocus : 0.4;
+    const R = Math.max(60, halfMin * focus + 24);
+
+    const items = [];
+    for (let i = 0; i < cells.length; i++) {
+      const c = cells[i];
+      const s = sim.worldToScreen(c.x, c.y);
+      const r = c.r || 0;
+      if (s.x + r >= 0 && s.x - r <= W && s.y + r >= 0 && s.y - r <= H) continue;
+      const angle = Math.atan2(s.y - cy, s.x - cx);
+      const meta = CELL_TYPES[c.type];
+      const cat = meta && meta.category;
+      items.push({ angle, cat, screenX: s.x, screenY: s.y });
+    }
+    items.sort((a, b) => a.angle - b.angle);
+
+    const angularGap = CLUSTER_GAP_PX / Math.max(1, R);
+    const clusters = [];
+    for (const it of items) {
+      const cur = clusters[clusters.length - 1];
+      if (cur && (it.angle - cur.lastAngle) < angularGap) {
+        cur.count++;
+        if (it.cat === 'bad') cur.bad++; else cur.good++;
+        cur.sumAngle += it.angle;
+        cur.lastAngle = it.angle;
+        cur.sumScreenX += it.screenX;
+        cur.sumScreenY += it.screenY;
+      } else {
+        clusters.push({
+          count: 1,
+          good: it.cat === 'bad' ? 0 : 1,
+          bad:  it.cat === 'bad' ? 1 : 0,
+          sumAngle: it.angle,
+          lastAngle: it.angle,
+          sumScreenX: it.screenX,
+          sumScreenY: it.screenY,
+        });
+      }
+    }
+    // Wrap-around merge across the -π / +π seam: if first and last
+    // clusters are within angularGap going the short way, fold them.
+    if (clusters.length > 1) {
+      const first = clusters[0];
+      const last  = clusters[clusters.length - 1];
+      const firstMean = first.sumAngle / first.count;
+      const lastMean  = last.sumAngle  / last.count;
+      const wrapGap   = (Math.PI - lastMean) + (firstMean + Math.PI);
+      if (wrapGap < angularGap) {
+        const merged = {
+          count: first.count + last.count,
+          good:  first.good  + last.good,
+          bad:   first.bad   + last.bad,
+          sumAngle:  first.sumAngle + (last.sumAngle - 2 * Math.PI * last.count),
+          lastAngle: first.lastAngle,
+          sumScreenX: first.sumScreenX + last.sumScreenX,
+          sumScreenY: first.sumScreenY + last.sumScreenY,
+        };
+        clusters.shift();
+        clusters.pop();
+        clusters.unshift(merged);
+      }
+    }
+
+    // Reuse the anchored pool of DOM elements — the circular mode
+    // shares the same arrow shape + badge.
+    while (this.anchoredPool.length < clusters.length) this._growAnchoredPool();
+    for (let i = 0; i < clusters.length; i++) {
+      this._renderCircularCluster(this.anchoredPool[i], clusters[i], cx, cy, R);
+    }
+    for (let i = clusters.length; i < this.anchoredPool.length; i++) {
+      this.anchoredPool[i].wrap.classList.add('hidden');
+    }
+  }
+
+  _renderCircularCluster(slot, cluster, cx, cy, R) {
+    const { count, sumAngle, sumScreenX, sumScreenY } = cluster;
+    if (count <= 0) { slot.wrap.classList.add('hidden'); return; }
+    const meanAngle = sumAngle / count;
+    const posX = cx + R * Math.cos(meanAngle);
+    const posY = cy + R * Math.sin(meanAngle);
+    this._renderClusterAt(slot, cluster, posX, posY, sumScreenX / count, sumScreenY / count);
   }
 }

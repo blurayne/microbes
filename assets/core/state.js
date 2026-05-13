@@ -112,8 +112,7 @@ export const DEFAULTS = {
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
   showObjectCount: false,   // append live cell + particle count to the FPS line
-  navArrows: true,          // edge-of-screen arrows pointing at off-screen cells
-  navMode: 'floating',      // 'floating' = 4 fixed-edge aggregate arrows; 'anchored' = per-cell arrows sliding along the screen edge, with 1D-greedy clustering when crowded. Default keeps the original UX.
+  navMode: 'fixed',         // off-screen-cell arrow layout. 'none' = hidden; 'fixed' = 4 fixed-edge aggregate arrows (the original look); 'anchored' = per-cell arrows sliding along the screen edge, 1D-greedy clustered when crowded; 'circular' = arrows on a ring just outside the microscope focus circle, pointing outward toward each off-screen cell. The standalone `navArrows` bool was retired in favour of `'none'` here (migration shim in loadSettings).
   extendedCells: false,     // opt-in cells flagged `extended: true` in CELL_TYPES (e.g. eukaryote). Off by default; user must enable in Settings → Display to see them in the Add dialog + help list.
   showRenderer: false,      // append actual renderer info to the FPS line
   showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
@@ -359,7 +358,14 @@ export function loadSettings() {
     // Migrate legacy renderer values (pixi / pixi-webgpu / pixi-webgl2) to
     // the new default. Pixi support was removed in favour of native WebGPU.
     if (!validRenderers.includes(parsed.renderer)) parsed.renderer = DEFAULTS.renderer;
-    const validNavModes = ['floating', 'anchored'];
+    // Migrate the legacy `navArrows` bool + `navMode: 'floating'` to
+    // the unified 4-way `navMode` selector. `navArrows === false`
+    // collapses to `'none'`; the old `'floating'` value renames to
+    // `'fixed'`. Then drop the dead key.
+    if (parsed.navArrows === false) parsed.navMode = 'none';
+    if (parsed.navMode === 'floating') parsed.navMode = 'fixed';
+    delete parsed.navArrows;
+    const validNavModes = ['none', 'fixed', 'anchored', 'circular'];
     if (!validNavModes.includes(parsed.navMode)) parsed.navMode = DEFAULTS.navMode;
     const validMetaRtModes = ['bbox', 'fullCanvas', 'sharedMax'];
     if (!validMetaRtModes.includes(parsed.metaRtMode)) parsed.metaRtMode = DEFAULTS.metaRtMode;
@@ -664,7 +670,11 @@ export const LOCALES = {
     mode_kill: 'Kill mode', mode_kill_tip: 'Tap a cell to make it explode',
     cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS', show_renderer: 'Show renderer', show_build_info: 'Show build info', show_object_count: 'Show object count', nav_arrows: 'Off-screen arrows',
     extended_cells: 'Show extended (non-game) cells',
-    nav_mode: 'Arrow mode', nav_mode_floating: 'Floating (4 fixed)', nav_mode_anchored: 'Anchored (slide along edge)',
+    nav_mode: 'Arrow mode',
+    nav_mode_none: 'None',
+    nav_mode_fixed: 'Fixed (4 edges)',
+    nav_mode_anchored: 'Anchored (slide along edge)',
+    nav_mode_circular: 'Anchored (circular)',
     copy_build: 'Copy build SHA', toast_build_copied: 'Build SHA copied to clipboard', toast_build_copy_failed: 'Copy failed', build_stamp_copy_hint: 'Click to copy full build SHA', github: 'GitHub',
     screenshot_btn: 'Screenshot', toast_screenshot_saved: 'Screenshot saved', toast_screenshot_failed: 'Screenshot failed',
     show_field: 'Show metaball field', render_scale: 'Render scale',
@@ -858,7 +868,11 @@ export const LOCALES = {
     mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zelle antippen, sie zerplatzt',
     cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen', show_object_count: 'Objektanzahl anzeigen', nav_arrows: 'Pfeile außerhalb des Bildes',
     extended_cells: 'Erweiterte (nicht spielrelevante) Zellen zeigen',
-    nav_mode: 'Pfeilmodus', nav_mode_floating: 'Schwebend (4 fest)', nav_mode_anchored: 'Verankert (am Rand entlang)',
+    nav_mode: 'Pfeilmodus',
+    nav_mode_none: 'Aus',
+    nav_mode_fixed: 'Fest (4 Ränder)',
+    nav_mode_anchored: 'Verankert (am Rand entlang)',
+    nav_mode_circular: 'Verankert (kreisförmig)',
     copy_build: 'Build-SHA kopieren', toast_build_copied: 'Build-SHA in Zwischenablage kopiert', toast_build_copy_failed: 'Kopieren fehlgeschlagen', build_stamp_copy_hint: 'Klicken, um die vollständige Build-SHA zu kopieren', github: 'GitHub',
     screenshot_btn: 'Screenshot', toast_screenshot_saved: 'Screenshot gespeichert', toast_screenshot_failed: 'Screenshot fehlgeschlagen',
     show_field: 'Metaball-Feld zeigen', render_scale: 'Renderskala',

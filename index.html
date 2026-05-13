@@ -228,12 +228,13 @@
         <label><input type="checkbox" id="showFPS" /> <span data-i18n="show_fps">Show FPS</span></label>
         <label><input type="checkbox" id="showBuildInfo" /> <span data-i18n="show_build_info">Show build info</span></label>
         <label><input type="checkbox" id="showObjectCount" /> <span data-i18n="show_object_count">Show object count</span></label>
-        <label><input type="checkbox" id="navArrows" /> <span data-i18n="nav_arrows">Off-screen arrows</span></label>
         <label><input type="checkbox" id="extendedCells" /> <span data-i18n="extended_cells">Show extended (non-game) cells</span></label>
-        <label><span data-i18n="nav_mode">Arrow mode</span>
+        <label><span data-i18n="nav_arrows">Off-screen arrows</span>
           <select id="navMode">
-            <option value="floating" data-i18n="nav_mode_floating">Floating (4 fixed)</option>
+            <option value="none"     data-i18n="nav_mode_none">None</option>
+            <option value="fixed"    data-i18n="nav_mode_fixed">Fixed (4 edges)</option>
             <option value="anchored" data-i18n="nav_mode_anchored">Anchored (slide along edge)</option>
+            <option value="circular" data-i18n="nav_mode_circular">Anchored (circular)</option>
           </select>
         </label>
         <label><input type="checkbox" id="showDebugField" /> <span data-i18n="show_field">Show metaball field</span></label>

@@ -1395,17 +1395,18 @@ applyBuildInfoVis(S.showBuildInfo);
 // throttled tick and appends "· N objs" to the line when on. With
 // the FPS overlay hidden, the count is hidden too.
 bindCheckbox('showObjectCount', 'showObjectCount');
-// Off-screen navigation arrows: just the toggle persistence; the
-// frame-loop hook (updateNavArrows) reads S.navArrows each tick.
-bindCheckbox('navArrows', 'navArrows');
-// Arrow mode select — 'floating' = 4 fixed edge arrows (original),
+// Off-screen navigation arrows: unified 4-way select. 'none' = hidden;
+// 'fixed' = 4 fixed-edge aggregate arrows (the original look);
 // 'anchored' = per-cell arrows sliding along the screen edge with
-// greedy 1D clustering. NavArrows.update reads S.navMode directly.
+// greedy 1D clustering; 'circular' = arrows on a ring just outside the
+// microscope focus circle, one per off-screen cell. NavArrows.update
+// reads S.navMode directly and short-circuits on 'none'.
 const navModeSel = document.getElementById('navMode');
+const NAV_MODE_VALUES = ['none', 'fixed', 'anchored', 'circular'];
 if (navModeSel) {
   navModeSel.value = S.navMode;
   navModeSel.addEventListener('change', () => {
-    if (navModeSel.value === 'floating' || navModeSel.value === 'anchored') {
+    if (NAV_MODE_VALUES.includes(navModeSel.value)) {
       S.navMode = navModeSel.value;
       saveSettings();
     }
@@ -2075,7 +2076,7 @@ let _navArrowsThrottle = 0;
 function updateNavArrows(ts) {
   if (ts - _navArrowsThrottle < 250) return;
   _navArrowsThrottle = ts;
-  navArrows.update(sim, !!S.navArrows);
+  navArrows.update(sim, S.navMode !== 'none');
 }
 
 function frame(ts) {
