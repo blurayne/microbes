@@ -477,13 +477,16 @@ export class NavArrows {
     const cells = sim.cells;
     const cx = W * 0.5;
     const cy = H * 0.5;
-    const halfMin = Math.min(W, H) * 0.5;
-    // Microscope focus is a fraction of `min(W,H)/2`; we add a 24-px
-    // gutter and floor at 60 px so the ring doesn't collapse to a
-    // pixel when the user dials the microscope all the way down.
-    const focus = (typeof S.microscopeFocus === 'number' && S.microscopeFocus > 0)
-      ? S.microscopeFocus : 0.4;
-    const R = Math.max(60, halfMin * focus + 24);
+    // Ring sized so the arrows sit just inside the shorter screen
+    // edge — a 1% gap of min(W,H) between the arrow centre and the
+    // edge. Independent of the microscope focus circle; the user
+    // wants the indicators near the viewport perimeter regardless
+    // of the optical effect.
+    //   gap = 0.01 * min(W, H)
+    //   R   = halfMin - gap = halfMin * (1 - 2 * 0.01) = halfMin * 0.98
+    const minWH = Math.min(W, H);
+    const halfMin = minWH * 0.5;
+    const R = halfMin - 0.01 * minWH;
 
     const items = [];
     for (let i = 0; i < cells.length; i++) {
