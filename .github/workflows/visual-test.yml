@@ -1,16 +1,19 @@
 name: Visual tests (Playwright)
 
-# Gates renderer + cell-port changes on PRs only. We do NOT run on
-# `push: main` — main is what the PR was merged INTO; running again
-# adds no signal and historically caused two-stage failures (push
-# fails AFTER the merge succeeded, leaving a red badge on main with
-# no fix-it path). The Pages-deploy workflow handles main-push CI.
+# Gates renderer + cell-port changes on PRs only. Two test specs:
 #
-# The visual suite is currently advisory: the baseline set lives at
-# tests/visual/baselines/ and is populated incrementally by per-cell
-# port PRs (Plan 13 — see .claude/plan/13-shader-test-visuals.md).
-# Until the baseline set is non-empty, `continue-on-error: true`
-# keeps the CI badge informational so unrelated PRs aren't blocked.
+#   tests/visual/game-vs-shader-test.spec.js  — pair-diffs the game's
+#     #stage canvas against the shader-test page's #stage for the
+#     same `?cellType=…&theme=…` URL. No on-disk baselines needed;
+#     the shader-test render IS the truth. Always runnable.
+#
+#   tests/visual/cells.spec.js                — historical-baseline
+#     gate. Skipped when no baselines exist; per-cell port PRs grow
+#     the baseline set.
+#
+# Job stays `continue-on-error: true` until the game/shader-test
+# divergence is brought under the configured threshold and the
+# baseline set is non-empty. Flip back to default gating once both.
 on:
   pull_request:
     paths:
@@ -32,8 +35,8 @@ jobs:
   visual:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Advisory until baselines exist. Flip to `false` (default) once
-    # the first per-cell port PR lands `tests/visual/baselines/*.png`.
+    # Advisory until divergence narrows. Failing pairs still upload
+    # diff PNGs as artifacts so the PR author can see what's off.
     continue-on-error: true
     steps:
       - name: Checkout
@@ -45,8 +48,6 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      # `npm ci` is faster + deterministic now that package-lock.json
-      # ships from PR #193. Falls back to `npm install` if no lock.
       - name: Install deps
         run: |
           if [ -f package-lock.json ]; then npm ci; else npm install; fi
@@ -54,6 +55,16 @@ jobs:
       - name: Install Chromium + system deps
         run: npx playwright install --with-deps chromium
 
+      # Pair-diff against shader-test runs unconditionally — no
+      # baseline dependency. Cells that exceed the diff threshold
+      # are the candidates for the next per-cell port PR.
+      - name: Game ↔ shader-test pair-diff
+        env:
+          CI: true
+        run: npm run test:visual:diff
+
+      # Historical baselines (cells.spec.js). Smoke-skip when none
+      # exist yet — per-cell port PRs grow this set.
       - name: Count baselines
         id: baselines
         run: |
@@ -61,24 +72,17 @@ jobs:
           echo "count=$n" >> "$GITHUB_OUTPUT"
           echo "Baseline count: $n"
 
-      # If baselines is empty, skip the full Playwright run — there's
-      # nothing to diff yet. Just smoke-test that the harness wires
-      # up (config + spec parse) and exit clean.
-      - name: Smoke (no baselines yet)
-        if: steps.baselines.outputs.count == '0'
-        run: |
-          echo "No baselines committed — skipping pixel diffs."
-          echo "Verifying Playwright config + spec parse only."
-          npx playwright test --list
-
-      - name: Run visual tests
+      - name: Baseline-diff (cells.spec.js)
         if: steps.baselines.outputs.count != '0'
         env:
           CI: true
-        run: npm run test:visual
+        run: npx playwright test tests/visual/cells.spec.js
 
-      - name: Upload Playwright report on failure
-        if: failure()
+      # Always upload report + diff artifacts so reviewers can see
+      # the side-by-side composites the pair-diff spec attaches on
+      # both pass + fail (the spec attaches unconditionally).
+      - name: Upload Playwright report + diff artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report

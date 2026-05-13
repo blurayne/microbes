@@ -6,10 +6,13 @@
     "test": "node --test",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
+    "test:visual:diff": "playwright test tests/visual/game-vs-shader-test.spec.js",
     "serve": "python3 -m http.server 8000",
     "build:docs": "mkdocs build"
   },
   "devDependencies": {
-    "@playwright/test": "^1.60.0"
+    "@playwright/test": "^1.60.0",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0"
   }
 }
