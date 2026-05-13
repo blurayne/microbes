@@ -341,6 +341,31 @@ body.is-paused #aboutDialog {
   margin-bottom: 6px;
   color: var(--accent);
 }
+/* Smoothly expand/collapse the section body over 0.3 s. Native
+   `<details>` snaps instantly; we lean on `interpolate-size:
+   allow-keywords` (modern CSS) so `block-size` can transition
+   between 0 and the keyword `auto`, and on the `::details-content`
+   pseudo-element which encapsulates everything inside the
+   `<details>` except the summary. Browsers that don't yet support
+   either feature (older Firefox, Safari < 18) silently fall back
+   to the snap behaviour — same as today. */
+:root {
+  interpolate-size: allow-keywords;
+}
+.settings-section::details-content {
+  block-size: 0;
+  overflow: clip;
+  opacity: 0;
+  transition:
+    block-size 0.3s ease,
+    opacity   0.3s ease,
+    content-visibility 0.3s allow-discrete;
+  transition-behavior: allow-discrete;
+}
+.settings-section[open]::details-content {
+  block-size: auto;
+  opacity: 1;
+}
 /* Hint block under a settings control — small, dim, leaves room
    above so it reads as a footnote to the preceding label. <b>mode</b>
    tokens are tinted with the active accent. */
