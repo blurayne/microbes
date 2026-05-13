@@ -13,6 +13,7 @@ file in sync.
 - [ ] **Shader-test visual parity for in-game cells** — [`.claude/plan/13-shader-test-visuals.md`](./.claude/plan/13-shader-test-visuals.md) — split into PRs A → F; foundation PRs serially, per-cell ports parallel.
 - [ ] **Rendertest mode + Playwright artifact loop** — [`.claude/plan/14-rendertest-mode.md`](./.claude/plan/14-rendertest-mode.md) — `?debug=1&test=render` (alias `?rendertest=1`) produces deterministic single-cell renders; Playwright attaches a 672-PNG gallery as workflow artifacts.
 - [ ] **Glass-membrane follow-ups (size slider, WebGL2 Y-flip, trail fix)** — [`.claude/plan/15-glass-membrane-followups.md`](./.claude/plan/15-glass-membrane-followups.md) — new `glassSize` slider; WebGL2 lens band no longer reads from mirrored scene rows.
+- [ ] **Bump feedback (collision flash + squash)** — [`.claude/plan/16-bump-feedback.md`](./.claude/plan/16-bump-feedback.md) — per-cell squash + outline flash on collision, scaled by closing speed.
 
 ## Done
 

@@ -131,6 +131,14 @@ export class Sim {
       wobbleSeed: Math.random() * 1000,
       wobbleFreq: 0.55 + Math.random() * 0.45,
       flash: 0,
+      // Squash axis for the bump-feedback effect: unit-ish vector
+      // along the impact normal, scaled by impact intensity 0..1.
+      // Renderer reads it via the cell instance attribute and applies
+      // a non-uniform body scale (squish toward the impact side,
+      // bulge on the far side). Decayed each frame in update(dt)
+      // next to flash.
+      bumpX: 0,
+      bumpY: 0,
       mouthFlashKind: null,
       mouthFlashTimer: 0,
       lookX: 0,
@@ -543,6 +551,15 @@ export class Sim {
     for (let i = 0; i < cells.length; i++) {
       const c = cells[i];
       if (c.flash > 0) c.flash = Math.max(0, c.flash - dt * 2);
+      // Exponential decay of the bump-squash axis. ≈150 ms half-life
+      // — matches the flash feel without an explicit duration timer.
+      if (c.bumpX !== 0 || c.bumpY !== 0) {
+        const k = Math.exp(-dt * 5);
+        c.bumpX *= k; c.bumpY *= k;
+        if (Math.abs(c.bumpX) < 1e-3 && Math.abs(c.bumpY) < 1e-3) {
+          c.bumpX = 0; c.bumpY = 0;
+        }
+      }
       if (c.mouthFlashTimer > 0) {
         c.mouthFlashTimer = Math.max(0, c.mouthFlashTimer - dt);
         if (c.mouthFlashTimer === 0) c.mouthFlashKind = null;
@@ -801,6 +818,27 @@ export class Sim {
               const j = -(1 + e) * velAlongNormal / 2;
               if (!aFixed) { a.vx -= j * nx; a.vy -= j * ny; }
               if (!bFixed) { b.vx += j * nx; b.vy += j * ny; }
+              // Bump-feedback: closing speed scales the visual flash +
+              // squash. Reference speed picked so a typical cell at
+              // full swim velocity reads as ~k=0.5; head-on hits
+              // saturate at k=1. Gated by S.bumpFeedback so the
+              // physics bounce above still runs when feedback is off.
+              if (S.bumpFeedback) {
+                const closing = -velAlongNormal;
+                const REF_SPEED = 60;
+                const k = Math.min(1, closing / REF_SPEED) * (S.bumpFeedbackIntensity ?? 1);
+                if (k > 0.05) {
+                  const flashAmt = Math.min(1, 0.6 * k);
+                  if (a.flash < flashAmt) a.flash = flashAmt;
+                  if (b.flash < flashAmt) b.flash = flashAmt;
+                  // Squash axis points INTO each cell along the
+                  // contact normal — for a (origin side) the normal
+                  // (nx,ny) goes toward b, so the impact direction
+                  // ON a is -(nx,ny); for b it's +(nx,ny).
+                  a.bumpX = -nx * k; a.bumpY = -ny * k;
+                  b.bumpX =  nx * k; b.bumpY =  ny * k;
+                }
+              }
             }
           }
         });

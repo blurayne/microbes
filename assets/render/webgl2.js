@@ -44,6 +44,7 @@ layout(location=4) in vec3 a_cytoBot;
 layout(location=5) in vec3 a_nucleus;
 layout(location=6) in vec4 a_outline;        // .a = c.flash (0..1)
 layout(location=7) in float a_diskAlpha;     // per-instance fade-in (split-end)
+layout(location=8) in vec2 a_bump;           // bump-feedback squash axis (impact-normal × intensity, 0..1)
 
 uniform vec4 u_camera;
 uniform vec2 u_viewport;
@@ -56,6 +57,7 @@ out vec3 v_cytoBot;
 out vec3 v_nucleus;
 out vec4 v_outline;
 out float v_diskAlpha;
+out vec2 v_bump;
 
 void main() {
   // 1.70× r — covers wobbly body extents (up to ~1.30) plus the
@@ -80,6 +82,7 @@ void main() {
   v_nucleus = a_nucleus;
   v_outline = a_outline;
   v_diskAlpha = a_diskAlpha;
+  v_bump = a_bump;
 }`;
 
 // Body-kind constants (must match TS-side encoding in drawCells).
@@ -95,6 +98,7 @@ in vec3 v_cytoBot;
 in vec3 v_nucleus;
 in vec4 v_outline;
 in float v_diskAlpha;       // SPLITTING crossfade: 0..1 over p ∈ [0.5, 1.0]
+in vec2 v_bump;             // bump-feedback squash axis (impact-normal × intensity)
 uniform float u_time;       // seconds
 uniform float u_wobbleAmp;  // S.wobbleAmp
 uniform vec3 u_highlight;   // S.highlightColor as rgb
@@ -305,6 +309,15 @@ void main() {
     // dampen / amplify on top of the kind-specific amp.
     wob *= max(0.001, u_wobbleAmp * v_phase.w);
     bodyR = testShape(v_uv, tt) + wob;
+  }
+  // Bump-feedback squash: compress the silhouette on the impact
+  // side and bulge it on the far side. v_bump carries the impact
+  // normal x intensity (0..1). When magnitude is ~0 this is a no-op.
+  float bumpMag = length(v_bump);
+  if (bumpMag > 0.001) {
+    vec2 bumpDir = v_bump / bumpMag;
+    float along = dot(v_uv / max(1e-4, d), bumpDir);
+    bodyR *= 1.0 - 0.30 * bumpMag * along;
   }
   float sdf = d - bodyR;
   int sel = isSelected();
@@ -1577,7 +1590,7 @@ void main() {
   outColor = vec4(finalRGB, finalA);
 }`;
 
-const INSTANCE_FLOATS = 22; // see _diskVao layout in init()
+const INSTANCE_FLOATS = 24; // see _diskVao layout in init()
 
 // Body and nucleus kinds packed into a single float per instance:
 //   packedKind = bodyKind + nucKind * 16
@@ -2219,13 +2232,15 @@ export class WebGL2Renderer extends RendererBase {
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 8, 0);
 
     gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceVbo);
-    // Instance layout: 20 floats per cell —
+    // Instance layout: 24 floats per cell —
     //   0..3   inst:    (x, y, r, kindAsFloat)
     //   4..7   phase:   (phase, seed, freq, wobbleMul)
     //   8..10  cytoTop  (rgb)
     //  11..13  cytoBot  (rgb)
     //  14..16  nucleus  (rgb)
     //  17..20  outline  (rgba; .a = c.flash)
+    //  21      diskAlpha (SPLITTING crossfade)
+    //  22..23  bump     (vec2: impact-normal × intensity, bump-feedback)
     const stride = INSTANCE_FLOATS * 4;
     let off = 0;
     function attr(loc, size) {
@@ -2241,6 +2256,7 @@ export class WebGL2Renderer extends RendererBase {
     attr(5, 3); // a_nucleus
     attr(6, 4); // a_outline (rgba; .a = c.flash)
     attr(7, 1); // a_diskAlpha (SPLITTING crossfade)
+    attr(8, 2); // a_bump (bump-feedback squash axis)
     gl.bindVertexArray(null);
 
     // ---- background program ----
@@ -3421,6 +3437,8 @@ export class WebGL2Renderer extends RendererBase {
         data[j + 17] = outlineRgb[0]; data[j + 18] = outlineRgb[1]; data[j + 19] = outlineRgb[2];
         data[j + 20] = c.flash || 0;
         data[j + 21] = (s.diskAlpha !== undefined) ? s.diskAlpha : 1;
+        data[j + 22] = c.bumpX || 0;
+        data[j + 23] = c.bumpY || 0;
       }
       gl.bindBuffer(gl.ARRAY_BUFFER, this._instanceVbo);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, data, 0, singletons.length * INSTANCE_FLOATS);

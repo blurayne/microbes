@@ -53,6 +53,12 @@ export const DEFAULTS = {
   glassStrength: 1.0,       // multiplier on the glass-membrane refraction strength. Slider in Settings → Overlays, range 0.1..3.0. Default 1.0 keeps the previous look.
   glassSize: 1.0,           // multiplier on the lens-band half-width. Shader uses half = 0.15 * glassSize, so size=1.0 → band 0.85..1.15·r (original look), size=2.0 → 0.70..1.30·r, size=0.5 → 0.925..1.075·r. Range 0.2..3.0.
   glassChroma: false,       // optional chromatic-split toggle on top of the always-on lensing — when true, the three RGB channels sample the scene at slightly different displacements so the rim shows a prism-edge colour fringe.
+  // Bump-feedback: when two cells collide, both flash and squash
+  // briefly along the impact normal. Visual only — the elastic
+  // bounce physics runs regardless. Squash is rendered by webgl2 +
+  // webgpu cell shaders; canvas2d shows the flash only.
+  bumpFeedback: true,
+  bumpFeedbackIntensity: 1.0,
   // Caustics tint — modulates the green/teal cast added on top of
   // the rendered scene. Defaults reproduce the historical (0, 1.35,
   // 0.5) bias; lower values toward 0 fade toward neutral white.
@@ -481,6 +487,11 @@ export function loadSettings() {
     parsed.glassSize = Math.max(0.2, Math.min(3.0, parsed.glassSize));
     parsed.glassMembrane = !!parsed.glassMembrane;
     parsed.glassChroma = !!parsed.glassChroma;
+    if (typeof parsed.bumpFeedbackIntensity !== 'number' || !Number.isFinite(parsed.bumpFeedbackIntensity)) {
+      parsed.bumpFeedbackIntensity = DEFAULTS.bumpFeedbackIntensity;
+    }
+    parsed.bumpFeedbackIntensity = Math.max(0, Math.min(3, parsed.bumpFeedbackIntensity));
+    parsed.bumpFeedback = parsed.bumpFeedback !== false;
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Rheinhessisch was renamed to Mainzerisch (Mainz city dialect).
@@ -668,6 +679,8 @@ export const LOCALES = {
     glass_strength:          'Refraction strength',
     glass_size:              'Lens band size',
     glass_chroma:            'Chromatic split',
+    bump_feedback:           'Bump feedback',
+    bump_feedback_intensity: 'Bump intensity',
     fx_kind_noise: 'Static noise',
     fx_kind_vignette: 'Vignette',
     fx_kind_crosshair: 'Crosshair',
@@ -879,6 +892,8 @@ export const LOCALES = {
     glass_strength:          'Brechungsstärke',
     glass_size:              'Linsenbreite',
     glass_chroma:            'Farbsaum',
+    bump_feedback:           'Stoss-Effekt',
+    bump_feedback_intensity: 'Stoss-Stärke',
     fx_kind_noise: 'Rauschen',
     fx_kind_vignette: 'Vignette',
     fx_kind_crosshair: 'Fadenkreuz',
