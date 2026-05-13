@@ -1205,11 +1205,13 @@ export class Canvas2DRenderer extends RendererBase {
           // multiplier) × S.faceScale so the user slider scales mouth
           // width in lockstep with eye radius.
           const mW = cr * 0.34 * 1.2 * (S.faceScale != null ? S.faceScale : 1);
-          const cc = cellColors(c);
           ctx.lineWidth = lw * 1.3;
           ctx.lineCap = 'round';   // soft endpoints (matches GPU shader's smoothstep fix)
-          ctx.strokeStyle = cc.nucleus;
-          ctx.fillStyle = cc.nucleus;
+          // Mouth base reads black on every theme — single high-contrast
+          // colour that the user can spot at any zoom without mistaking
+          // it for a nucleus.
+          ctx.strokeStyle = '#000';
+          ctx.fillStyle = '#000';
           if (mouthKind === 'smile') {
             // Solid filled circular segment below the chord (the
             // arc + closePath connects the chord). Reads as a U.
