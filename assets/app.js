@@ -605,8 +605,9 @@ function setPaused(p) {
   // the user has to interact with the overlay to resume (no
   // accidental side-clicks behind the blur).
   document.body.classList.toggle('is-paused', _paused);
-  // Music plays when not paused AND the user hasn't muted via volume = 0.
-  if (_musicPlayer) _musicPlayer.setEnabled(!_paused && (S.musicVolume || 0) > 0);
+  // Music plays when (a) the dedicated toggle is on, (b) the sim isn't
+  // paused, and (c) the volume slider isn't dialled to 0.
+  if (_musicPlayer) _musicPlayer.setEnabled(!_paused && !!S.musicEnabled && (S.musicVolume || 0) > 0);
 }
 // `?pose=1` URL override → freeze the sim AND mark the document with
 // `body.is-pose-clean` so every chrome layer (pause overlay, FABs,
@@ -1298,12 +1299,12 @@ const SFX_OFFSCREEN_SCALE = 0.8;
 Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ MusicPlayer }, { SfxPlayer }]) => {
   const player = new MusicPlayer();
   player.setVolume(S.musicVolume);
-  // Music plays whenever volume > 0 — the dedicated on/off checkbox
-  // was removed (the slider is the only control). Pause-state still
-  // calls setEnabled(false) to silence music while the game is paused.
-  player.setEnabled((S.musicVolume || 0) > 0);
+  // Music plays when the dedicated toggle is on AND the volume isn't
+  // 0 AND the game isn't paused. The toggle defaults to off so the
+  // page loads silent — autoplay policies would block playback even
+  // if it were on, but explicit-off is the clearer UX.
+  player.setEnabled(!!S.musicEnabled && (S.musicVolume || 0) > 0 && !_paused);
   _musicPlayer = player;
-  if (_paused) player.setEnabled(false);
 
   const sfx = new SfxPlayer();
   sfx.setVolume(S.sfxVolume);
@@ -1326,12 +1327,20 @@ Promise.all([import('./core/music.js'), import('./core/sfx.js')]).then(([{ Music
 
   bindRange('musicVolume', 'musicVolume', 'musicVolumeVal', v => Math.round(v * 100) + '%');
   bindRange('sfxVolume',   'sfxVolume',   'sfxVolumeVal',   v => Math.round(v * 100) + '%');
+  // Music master toggle. Persisted via bindCheckbox (writes S.musicEnabled
+  // + saveSettings); explicit change listener re-evaluates the player's
+  // enabled state without depending on bindCheckbox's emit order.
+  bindCheckbox('musicEnabled', 'musicEnabled');
+  const musicEnabledEl = document.getElementById('musicEnabled');
+  if (musicEnabledEl) musicEnabledEl.addEventListener('change', () => {
+    player.setEnabled(!!S.musicEnabled && (S.musicVolume || 0) > 0 && !_paused);
+  });
   const musicVolEl = document.getElementById('musicVolume');
   if (musicVolEl) musicVolEl.addEventListener('input', () => {
     const v = parseFloat(musicVolEl.value);
     player.setVolume(v);
     // Crossing zero re-arms / silences the player.
-    player.setEnabled(v > 0 && !_paused);
+    player.setEnabled(!!S.musicEnabled && v > 0 && !_paused);
   });
   const sfxVolEl = document.getElementById('sfxVolume');
   if (sfxVolEl) sfxVolEl.addEventListener('input', () => sfx.setVolume(parseFloat(sfxVolEl.value)));
