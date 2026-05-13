@@ -14,6 +14,7 @@ file in sync.
 - [ ] **Rendertest mode + Playwright artifact loop** — [`.claude/plan/14-rendertest-mode.md`](./.claude/plan/14-rendertest-mode.md) — `?debug=1&test=render` (alias `?rendertest=1`) produces deterministic single-cell renders; Playwright attaches a 672-PNG gallery as workflow artifacts.
 - [ ] **Glass-membrane follow-ups (size slider, WebGL2 Y-flip, trail fix)** — [`.claude/plan/15-glass-membrane-followups.md`](./.claude/plan/15-glass-membrane-followups.md) — new `glassSize` slider; WebGL2 lens band no longer reads from mirrored scene rows.
 - [ ] **Bump feedback (collision flash + squash)** — [`.claude/plan/16-bump-feedback.md`](./.claude/plan/16-bump-feedback.md) — per-cell squash + outline flash on collision, scaled by closing speed.
+- [ ] **HUD rework: rename + move-to-debug + every-branch build stamp** — [`.claude/plan/17-hud-rework.md`](./.claude/plan/17-hud-rework.md) — three top-left HUD toggles move to Debug, share one pill style, build wraps to 2 rows for long branches, pages.yml builds on every branch.
 
 ## Done
 

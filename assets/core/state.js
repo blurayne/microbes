@@ -122,7 +122,7 @@ export const DEFAULTS = {
   rippleStrength: 1.0,      // peak UV displacement amplitude. Multiplier on the baseline ~6 px.
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
   showFPS: false,
-  showObjectCount: false,   // append live cell + particle count to the FPS line
+  showCellTotal: false,     // append live cell count to the FPS line (renamed from showObjectCount in PR-after-#233 — now counts cells only, no particles)
   settingsAccordion: true,  // when opening a `<details class="settings-section">` in the Settings dialog, automatically collapse the others. Acts like a single-pane accordion. Toggleable via the matching checkbox; on by default per user spec.
   navMode: 'fixed',         // off-screen-cell arrow layout. 'none' = hidden; 'fixed' = 4 fixed-edge aggregate arrows (the original look); 'anchored' = per-cell arrows sliding along the screen edge, 1D-greedy clustered when crowded; 'circular' = arrows on a ring just outside the microscope focus circle, pointing outward toward each off-screen cell. The standalone `navArrows` bool was retired in favour of `'none'` here (migration shim in loadSettings).
   extendedCells: false,     // opt-in cells flagged `extended: true` in CELL_TYPES (e.g. eukaryote). Off by default; user must enable in Settings → Display to see them in the Add dialog + help list.
@@ -328,6 +328,14 @@ export function loadSettings() {
       parsed.activeTypes = [...DEFAULTS.activeTypes];
     }
     if (parsed.splitMode === 'fixedGrid') parsed.splitMode = 'bondDrift';
+    // 2026 rename: showObjectCount → showCellTotal. The display
+    // also dropped particles from the count, so migrating the
+    // old value preserves the toggle state but the displayed
+    // number will now be cells-only.
+    if (typeof parsed.showObjectCount === 'boolean' && typeof parsed.showCellTotal !== 'boolean') {
+      parsed.showCellTotal = parsed.showObjectCount;
+    }
+    delete parsed.showObjectCount;
     // 2026 rename: S.theme used to hold the colour-palette key
     // (bloodstream, aurora, …). Now S.theme holds the cell-shader
     // theme (legacy/microscope/…) and S.interfaceColor holds the
@@ -713,7 +721,7 @@ export const LOCALES = {
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
     mode_split: 'Split mode', mode_split_tip: 'Tap a cell to split it',
     mode_kill: 'Kill mode', mode_kill_tip: 'Tap a cell to make it explode',
-    cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS', show_renderer: 'Show renderer', show_build_info: 'Show build info', show_object_count: 'Show object count', nav_arrows: 'Off-screen arrows',
+    cartoon_mode: 'Cartoon mode (faces)', show_fps: 'Show FPS + renderer', show_renderer: 'Show renderer', show_build_info: 'Show build info', show_cell_total: 'Show cell total', nav_arrows: 'Off-screen arrows',
     extended_cells: 'Show extended (non-game) cells',
     nav_mode: 'Arrow mode',
     nav_mode_none: 'None',
@@ -919,7 +927,7 @@ export const LOCALES = {
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Antippen teilt die Zelle',
     mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zelle antippen, sie zerplatzt',
-    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen', show_object_count: 'Objektanzahl anzeigen', nav_arrows: 'Pfeile außerhalb des Bildes',
+    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS + Renderer anzeigen', show_renderer: 'Renderer anzeigen', show_build_info: 'Build-Info anzeigen', show_cell_total: 'Zellanzahl anzeigen', nav_arrows: 'Pfeile außerhalb des Bildes',
     extended_cells: 'Erweiterte (nicht spielrelevante) Zellen zeigen',
     nav_mode: 'Pfeilmodus',
     nav_mode_none: 'Aus',
@@ -1062,7 +1070,7 @@ export const LOCALES = {
     mode_target: 'Modo objetivo', mode_target_tip: 'Toca para seleccionar / enviar',
     mode_split: 'Modo división', mode_split_tip: 'Toca una célula para dividirla',
     mode_kill: 'Modo matar', mode_kill_tip: 'Toca una célula para que explote',
-    cartoon_mode: 'Modo dibujo (caras)', show_fps: 'Mostrar FPS', show_renderer: 'Mostrar renderer', show_build_info: 'Mostrar info de build',
+    cartoon_mode: 'Modo dibujo (caras)', show_fps: 'Mostrar FPS + renderer', show_renderer: 'Mostrar renderer', show_build_info: 'Mostrar info de build', show_cell_total: 'Mostrar total de células',
     show_field: 'Mostrar campo metaball', render_scale: 'Escala de render',
     upscale: 'Reescalar', scanlines: 'Líneas de barrido (CRT)',
     renderer_engine: 'Motor de render',
@@ -1188,7 +1196,7 @@ export const LOCALES = {
     mode_target: 'Zuimodus', mode_target_tip: 'Drauflanga: aussuacha / Zui setzn',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Drauflanga deid de Zoin teiln',
     mode_kill: 'Schomattmodus', mode_kill_tip: 'Drauflanga und d\'Zoin macht boom',
-    cartoon_mode: 'Cartoon-Modus (Gsichta)', show_fps: 'FPS oazoang', show_renderer: 'Render oazoang', show_build_info: 'Build-Info oazoang',
+    cartoon_mode: 'Cartoon-Modus (Gsichta)', show_fps: 'FPS + Render oazoang', show_renderer: 'Render oazoang', show_build_info: 'Build-Info oazoang', show_cell_total: 'Zelln-Anzoi oazoang',
     show_field: 'Metaball-Föd zoang', render_scale: 'Renderskala',
     upscale: 'Aufskaliern', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Render',
@@ -1316,7 +1324,7 @@ export const LOCALES = {
     mode_target: 'Zielmodus', mode_target_tip: 'Drufftippe: aussuche / Ziel setze',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Drufftippe teilt die Zell',
     mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zell antippe, dann macht\'s puff',
-    cartoon_mode: 'Cartoon-Modus (Gesischter)', show_fps: 'FPS aazaiche', show_renderer: 'Renderer aazaiche', show_build_info: 'Build-Info aazaiche',
+    cartoon_mode: 'Cartoon-Modus (Gesischter)', show_fps: 'FPS + Renderer aazaiche', show_renderer: 'Renderer aazaiche', show_build_info: 'Build-Info aazaiche', show_cell_total: 'Zellaazoah aazaiche',
     show_field: 'Metaball-Feld zaiche', render_scale: 'Renderskala',
     upscale: 'Hochskaliere', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
@@ -1444,7 +1452,7 @@ export const LOCALES = {
     mode_target: 'Zielmodus', mode_target_tip: 'Druffdibbe: aussuche / Ziel setze',
     mode_split: 'Teilungsmodus', mode_split_tip: 'Druffdibbe teilt die Zell',
     mode_kill: 'Tötungsmodus', mode_kill_tip: 'Zell andibbe, dann gibt\'s peng',
-    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS zeische', show_renderer: 'Renderer zeische', show_build_info: 'Build-Info zeische',
+    cartoon_mode: 'Cartoon-Modus (Gesichter)', show_fps: 'FPS + Renderer zeische', show_renderer: 'Renderer zeische', show_build_info: 'Build-Info zeische', show_cell_total: 'Zellzahl zeische',
     show_field: 'Metaball-Feld zeische', render_scale: 'Renderskala',
     upscale: 'Hochskaliere', scanlines: 'Scanlines (CRT)',
     renderer_engine: 'Renderer',
@@ -1570,7 +1578,7 @@ export const LOCALES = {
     mode_target: 'Modus signi', mode_target_tip: 'Tange ut elige / mitte',
     mode_split: 'Modus divisionis', mode_split_tip: 'Tange cellulam ut dividas',
     mode_kill: 'Modus necandi', mode_kill_tip: 'Tange cellulam ut displodatur',
-    cartoon_mode: 'Modus picturae (vultus)', show_fps: 'Monstra FPS', show_renderer: 'Monstra machinam', show_build_info: 'Monstra info constructionis',
+    cartoon_mode: 'Modus picturae (vultus)', show_fps: 'Monstra FPS + machinam', show_renderer: 'Monstra machinam', show_build_info: 'Monstra info constructionis', show_cell_total: 'Monstra summam cellularum',
     show_field: 'Monstra campum metaball', render_scale: 'Scala depingendi',
     upscale: 'Augmentum', scanlines: 'Lineae televisorii',
     renderer_engine: 'Machina depingendi',
