@@ -51,6 +51,7 @@ export const DEFAULTS = {
   liquidRipples: false,     // bg post-process: each on-screen cell radiates concentric ripples that distort the background — reads as cells moving through liquid. WebGL2 + WebGPU only; Canvas2D is a no-op.
   glassMembrane: false,     // overlay post-process: lensing refraction in a thin band just outside each cell, making the membrane read as glass that bends the scene behind it. WebGL2 + WebGPU only; Canvas2D is a no-op.
   glassStrength: 1.0,       // multiplier on the glass-membrane refraction strength. Slider in Settings → Overlays, range 0.1..3.0. Default 1.0 keeps the previous look.
+  glassSize: 1.0,           // multiplier on the lens-band half-width. Shader uses half = 0.15 * glassSize, so size=1.0 → band 0.85..1.15·r (original look), size=2.0 → 0.70..1.30·r, size=0.5 → 0.925..1.075·r. Range 0.2..3.0.
   glassChroma: false,       // optional chromatic-split toggle on top of the always-on lensing — when true, the three RGB channels sample the scene at slightly different displacements so the rim shows a prism-edge colour fringe.
   // Caustics tint — modulates the green/teal cast added on top of
   // the rendered scene. Defaults reproduce the historical (0, 1.35,
@@ -474,6 +475,10 @@ export function loadSettings() {
       parsed.glassStrength = DEFAULTS.glassStrength;
     }
     parsed.glassStrength = Math.max(0.1, Math.min(3.0, parsed.glassStrength));
+    if (typeof parsed.glassSize !== 'number' || !Number.isFinite(parsed.glassSize)) {
+      parsed.glassSize = DEFAULTS.glassSize;
+    }
+    parsed.glassSize = Math.max(0.2, Math.min(3.0, parsed.glassSize));
     parsed.glassMembrane = !!parsed.glassMembrane;
     parsed.glassChroma = !!parsed.glassChroma;
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
@@ -661,6 +666,7 @@ export const LOCALES = {
     overlay_kind_ripples:    'Liquid ripples',
     overlay_kind_glass:      'Glass membrane',
     glass_strength:          'Refraction strength',
+    glass_size:              'Lens band size',
     glass_chroma:            'Chromatic split',
     fx_kind_noise: 'Static noise',
     fx_kind_vignette: 'Vignette',
@@ -871,6 +877,7 @@ export const LOCALES = {
     overlay_kind_ripples:    'Flüssigkeitswellen',
     overlay_kind_glass:      'Glasmembran',
     glass_strength:          'Brechungsstärke',
+    glass_size:              'Linsenbreite',
     glass_chroma:            'Farbsaum',
     fx_kind_noise: 'Rauschen',
     fx_kind_vignette: 'Vignette',

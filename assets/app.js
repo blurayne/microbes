@@ -1189,6 +1189,7 @@ function applyGlassControlsVis() {
 }
 applyGlassControlsVis();
 bindRange('glassStrength', 'glassStrength', 'glassStrengthVal', v => v.toFixed(1) + '×');
+bindRange('glassSize',     'glassSize',     'glassSizeVal',     v => v.toFixed(1) + '×');
 bindCheckbox('glassChroma', 'glassChroma');
 
 // Static-noise overlay. Renderer reads S.staticNoise* each frame

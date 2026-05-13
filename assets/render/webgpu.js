@@ -1124,7 +1124,7 @@ const GLASS_MAX_WGPU = 24;
 const GLASS_BG_WGSL = /* wgsl */ `
 struct GlassU {
   header: vec4<f32>,        // (time, cellCount, resW, resH)
-  params: vec4<f32>,        // (strength, chroma, _, _)
+  params: vec4<f32>,        // (strength, chroma, size, _)
   cells:  array<vec4<f32>, ${GLASS_MAX_WGPU}>,
 };
 @group(0) @binding(0) var<uniform> U : GlassU;
@@ -1145,6 +1145,8 @@ struct GlassU {
   let n = i32(U.header.y + 0.5);
   let strength = U.params.x;
   let chroma   = U.params.y;
+  let size     = max(U.params.z, 0.01);
+  let halfBand = 0.15 * size;
   for (var i: i32 = 0; i < ${GLASS_MAX_WGPU}; i = i + 1) {
     if (i >= n) { break; }
     let c = U.cells[i];
@@ -1152,8 +1154,8 @@ struct GlassU {
     let dvPx = dvUv * res;
     let dPx  = length(dvPx);
     let rPx  = max(c.z * minAx, 4.0);
-    let lo   = rPx * 0.85;
-    let hi   = rPx * 1.15;
+    let lo   = rPx * (1.0 - halfBand);
+    let hi   = rPx * (1.0 + halfBand);
     if (dPx < lo || dPx > hi) { continue; }
     let t = (dPx - lo) / max(1e-4, hi - lo);
     let lens = sin(t * 3.14159);                     // peak mid-band
@@ -4582,7 +4584,7 @@ export class WebGPURenderer extends RendererBase {
       u[3] = this.canvas.height;
       u[4] = S.glassStrength ?? 1.0;
       u[5] = S.glassChroma ? 1.0 : 0.0;
-      u[6] = 0;
+      u[6] = S.glassSize ?? 1.0;
       u[7] = 0;
       this.device.queue.writeBuffer(
         this._glassUbo, 0,

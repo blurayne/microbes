@@ -1231,8 +1231,17 @@ void main() {
 const RIPPLE_MAX = 24;
 const GLASS_MAX = 24;
 // Glass-membrane lensing overlay. Parity port of GLASS_BG_WGSL in
-// webgpu.js — same band geometry (0.85*r..1.15*r), same half-sine
-// lens peak, optional chromatic-split via u_glassParams.y.
+// webgpu.js — band geometry now driven by u_glassParams.z (size):
+// half-width = 0.15 * size, so size=1.0 reproduces the original
+// 0.85..1.15 band. Half-sine lens peak; optional chromatic-split
+// via u_glassParams.y.
+//
+// WebGL2 Y-inversion fix: VERT_FULLSCREEN's v_uv uses canvas
+// convention (y=0 top) but the scene FBO this pass samples has
+// texel y=0 at the BOTTOM (default WebGL convention). Sampling
+// directly with v_uv would mirror the image vertically and the
+// lens band would appear to bend the WRONG row of pixels. Map
+// canvas-uv → texture-uv by flipping y when issuing the lookup.
 const FRAG_GLASS_BG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -1241,8 +1250,14 @@ uniform float u_time;
 uniform vec2 u_resolution;
 uniform int u_cellCount;
 uniform vec3 u_cells[${GLASS_MAX}];      // (uvX, uvY, uvR_minAxis)
-uniform vec2 u_glassParams;              // (strength, chroma)
+uniform vec3 u_glassParams;              // (strength, chroma, size)
 out vec4 outColor;
+
+vec4 sampleBg(vec2 canvasUv) {
+  // Canvas-uv (y=0 top) → texture-uv (y=0 bottom).
+  vec2 texUv = vec2(canvasUv.x, 1.0 - canvasUv.y);
+  return texture(u_bg, clamp(texUv, 0.0, 1.0));
+}
 
 void main() {
   vec2 uv = v_uv;
@@ -1250,6 +1265,8 @@ void main() {
   float minAx = min(u_resolution.x, u_resolution.y);
   float strength = u_glassParams.x;
   float chroma   = u_glassParams.y;
+  float size     = max(u_glassParams.z, 0.01);
+  float half_    = 0.15 * size;
   for (int i = 0; i < ${GLASS_MAX}; i++) {
     if (i >= u_cellCount) break;
     vec3 c = u_cells[i];
@@ -1257,8 +1274,8 @@ void main() {
     vec2 dvPx = dvUv * u_resolution;
     float dPx  = length(dvPx);
     float rPx  = max(c.z * minAx, 4.0);
-    float lo   = rPx * 0.85;
-    float hi   = rPx * 1.15;
+    float lo   = rPx * (1.0 - half_);
+    float hi   = rPx * (1.0 + half_);
     if (dPx < lo || dPx > hi) continue;
     float t = (dPx - lo) / max(1e-4, hi - lo);
     float lens = sin(t * 3.14159);
@@ -1267,15 +1284,12 @@ void main() {
   }
   vec2 baseDisp = disp * (8.0 / minAx) * strength;
   if (chroma > 0.5) {
-    vec2 uvR = clamp(uv + baseDisp * 0.85, 0.0, 1.0);
-    vec2 uvG = clamp(uv + baseDisp * 1.00, 0.0, 1.0);
-    vec2 uvB = clamp(uv + baseDisp * 1.15, 0.0, 1.0);
-    float r = texture(u_bg, uvR).r;
-    float g = texture(u_bg, uvG).g;
-    float b = texture(u_bg, uvB).b;
+    float r = sampleBg(uv + baseDisp * 0.85).r;
+    float g = sampleBg(uv + baseDisp * 1.00).g;
+    float b = sampleBg(uv + baseDisp * 1.15).b;
     outColor = vec4(r, g, b, 1.0);
   } else {
-    vec3 rgb = texture(u_bg, clamp(uv + baseDisp, 0.0, 1.0)).rgb;
+    vec3 rgb = sampleBg(uv + baseDisp).rgb;
     outColor = vec4(rgb, 1.0);
   }
 }
@@ -4277,9 +4291,10 @@ export class WebGL2Renderer extends RendererBase {
       gl.uniform2f(this._glassU.res, this.canvas.width, this.canvas.height);
       gl.uniform1i(this._glassU.cellCount, cellCount);
       gl.uniform3fv(this._glassU.cells, this._glassCellsBuf);
-      gl.uniform2f(this._glassU.params,
+      gl.uniform3f(this._glassU.params,
                    S.glassStrength ?? 1.0,
-                   S.glassChroma ? 1.0 : 0.0);
+                   S.glassChroma ? 1.0 : 0.0,
+                   S.glassSize ?? 1.0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     } else if (kind === 'caustics' && this._causticProg) {
       gl.useProgram(this._causticProg);
