@@ -815,6 +815,50 @@ for (const d of allDialogs) {
     el.addEventListener('click', () => d.classList.add('hidden'));
   });
 }
+// Swipe-right-to-close: every dialog slides in from the right edge,
+// so a horizontal rightward swipe is the natural dismiss gesture.
+// Wired via pointer events for unified touch + mouse support.
+//
+// Filters:
+//   * skip drags that start on an interactive control (range slider,
+//     checkbox, select, button, textarea) so the gesture doesn't
+//     hijack form interactions. Adjusting a slider stays a slider
+//     adjustment; tapping a button stays a button tap.
+//   * skip drags on the .overlay-order-row drag handles — they own
+//     their own pointer-drag for re-ordering.
+//   * skip drags on the SCROLLABLE pane while it's mid-scroll —
+//     vertical scroll always wins; we only act when the gesture is
+//     unambiguously horizontal (deltaX > deltaY * 1.5).
+//
+// Commit threshold: 80 px rightward AND horizontal-dominant. Below
+// either bar the dialog stays put.
+const SWIPE_CLOSE_DX_PX = 80;
+const SWIPE_CLOSE_DOMINANCE = 1.5;
+function attachSwipeClose(dialogEl) {
+  let startX = 0, startY = 0, tracking = false;
+  const interactiveSel = 'input, select, textarea, button, .overlay-order-row, [contenteditable]';
+  dialogEl.addEventListener('pointerdown', (ev) => {
+    const t = ev.target;
+    if (t && t.closest && t.closest(interactiveSel)) {
+      tracking = false;
+      return;
+    }
+    startX = ev.clientX;
+    startY = ev.clientY;
+    tracking = true;
+  });
+  dialogEl.addEventListener('pointerup', (ev) => {
+    if (!tracking) return;
+    tracking = false;
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    if (dx > SWIPE_CLOSE_DX_PX && Math.abs(dx) > Math.abs(dy) * SWIPE_CLOSE_DOMINANCE) {
+      dialogEl.classList.add('hidden');
+    }
+  });
+  dialogEl.addEventListener('pointercancel', () => { tracking = false; });
+}
+for (const d of allDialogs) attachSwipeClose(d);
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if (sim.addMode) cancelAddMode();
