@@ -833,33 +833,77 @@ for (const d of allDialogs) {
 //     vertical scroll always wins; we only act when the gesture is
 //     unambiguously horizontal (deltaX > deltaY * 1.5).
 //
-// Commit threshold: 80 px rightward AND horizontal-dominant. Below
-// either bar the dialog stays put.
+// Commit threshold + arming threshold:
+//   * Arm once the pointer has moved > 16 px horizontally AND the
+//     gesture is unambiguously horizontal (|dx| > |dy| * 1.3). At
+//     that moment we grab pointer capture so subsequent moves all
+//     route to us regardless of which inner element they cross,
+//     and any post-gesture `click` on a control is suppressed.
+//   * Commit (close the dialog) when the pointerup dx > 80 px.
+//   * Below the arm threshold the gesture is treated as a normal
+//     click / drag — sliders, checkboxes, scroll all still work.
+const SWIPE_CLOSE_ARM_PX = 16;
 const SWIPE_CLOSE_DX_PX = 80;
-const SWIPE_CLOSE_DOMINANCE = 1.5;
+const SWIPE_CLOSE_DOMINANCE = 1.3;
 function attachSwipeClose(dialogEl) {
-  let startX = 0, startY = 0, tracking = false;
-  const interactiveSel = 'input, select, textarea, button, .overlay-order-row, [contenteditable]';
+  let startX = 0, startY = 0, pointerId = -1;
+  let tracking = false;   // pointerdown was on a non-disqualifying surface
+  let armed = false;      // gesture has crossed the horizontal-only threshold
+  // Sliders rely on horizontal pointer drag for value adjustment —
+  // hijacking those would break the control. The overlay-order
+  // rows own a similar drag for re-ordering. Everything else
+  // (selects, buttons, checkboxes, summary, hint text, label
+  // text) can be the swipe origin because they don't react to
+  // pointer DRAG, only to discrete clicks / changes.
+  const blockedSel = 'input[type="range"], .overlay-order-row';
   dialogEl.addEventListener('pointerdown', (ev) => {
+    armed = false;
     const t = ev.target;
-    if (t && t.closest && t.closest(interactiveSel)) {
+    if (t && t.closest && t.closest(blockedSel)) {
       tracking = false;
       return;
     }
     startX = ev.clientX;
     startY = ev.clientY;
+    pointerId = ev.pointerId;
     tracking = true;
+  });
+  dialogEl.addEventListener('pointermove', (ev) => {
+    if (!tracking || armed) return;
+    const dx = ev.clientX - startX;
+    const dy = ev.clientY - startY;
+    if (Math.abs(dx) >= SWIPE_CLOSE_ARM_PX && Math.abs(dx) > Math.abs(dy) * SWIPE_CLOSE_DOMINANCE) {
+      armed = true;
+      try { dialogEl.setPointerCapture(pointerId); } catch {}
+    }
   });
   dialogEl.addEventListener('pointerup', (ev) => {
     if (!tracking) return;
+    const wasArmed = armed;
     tracking = false;
+    armed = false;
+    try { dialogEl.releasePointerCapture(pointerId); } catch {}
+    if (!wasArmed) return;
     const dx = ev.clientX - startX;
     const dy = ev.clientY - startY;
     if (dx > SWIPE_CLOSE_DX_PX && Math.abs(dx) > Math.abs(dy) * SWIPE_CLOSE_DOMINANCE) {
       dialogEl.classList.add('hidden');
     }
   });
-  dialogEl.addEventListener('pointercancel', () => { tracking = false; });
+  dialogEl.addEventListener('pointercancel', () => {
+    tracking = false;
+    armed = false;
+    try { dialogEl.releasePointerCapture(pointerId); } catch {}
+  });
+  // Once the gesture is armed, swallow the post-up click so a
+  // long swipe across a checkbox / summary / button doesn't fire
+  // their default action.
+  dialogEl.addEventListener('click', (ev) => {
+    if (armed) {
+      ev.stopPropagation();
+      ev.preventDefault();
+    }
+  }, true);
 }
 for (const d of allDialogs) attachSwipeClose(d);
 document.addEventListener('keydown', (e) => {

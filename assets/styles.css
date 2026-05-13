@@ -238,6 +238,12 @@ body.is-paused #aboutDialog {
   transform: translateX(0);
   transition: transform 240ms cubic-bezier(.2,.8,.2,1);
   box-shadow: -8px 0 24px #0008;
+  /* `pan-y` lets the browser run its own vertical-scroll gesture
+     without claiming horizontal moves — those route to our
+     swipe-right-to-close listener (assets/app.js
+     `attachSwipeClose`). Without this, iOS Safari occasionally
+     swallows the gesture as a page-navigation swipe. */
+  touch-action: pan-y;
 }
 #settings.hidden .settings-panel { transform: translateX(100%); }
 
@@ -1070,6 +1076,10 @@ body.adding #stage    { cursor: crosshair; }
   transform: translateX(0);
   transition: transform 240ms cubic-bezier(.2,.8,.2,1);
   box-shadow: -8px 0 24px #0008;
+  /* Same swipe-right-to-close support as `.settings-panel` —
+     yield vertical scroll to the browser, route horizontal moves
+     to the JS gesture detector. */
+  touch-action: pan-y;
 }
 .dialog.hidden .dialog-panel { transform: translateX(100%); }
 .dialog-panel header {
