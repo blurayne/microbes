@@ -818,23 +818,24 @@ export class Sim {
               const j = -(1 + e) * velAlongNormal / 2;
               if (!aFixed) { a.vx -= j * nx; a.vy -= j * ny; }
               if (!bFixed) { b.vx += j * nx; b.vy += j * ny; }
-              // Bump-feedback: closing speed scales the visual flash +
-              // squash. Reference speed picked so a typical cell at
-              // full swim velocity reads as ~k=0.5; head-on hits
-              // saturate at k=1. Gated by S.bumpFeedback so the
-              // physics bounce above still runs when feedback is off.
+              // Bump-feedback: closing speed scales the squash
+              // along the impact normal. Reference speed picked so
+              // a typical cell at full swim velocity reads as
+              // ~k=0.5; head-on hits saturate at k=1. Gated by
+              // S.bumpFeedback so the physics bounce above still
+              // runs when feedback is off.
               if (S.bumpFeedback) {
                 const closing = -velAlongNormal;
                 const REF_SPEED = 60;
                 const k = Math.min(1, closing / REF_SPEED) * (S.bumpFeedbackIntensity ?? 1);
                 if (k > 0.05) {
-                  const flashAmt = Math.min(1, 0.6 * k);
-                  if (a.flash < flashAmt) a.flash = flashAmt;
-                  if (b.flash < flashAmt) b.flash = flashAmt;
                   // Squash axis points INTO each cell along the
                   // contact normal — for a (origin side) the normal
                   // (nx,ny) goes toward b, so the impact direction
-                  // ON a is -(nx,ny); for b it's +(nx,ny).
+                  // ON a is -(nx,ny); for b it's +(nx,ny). No
+                  // flash write: c.flash stays reserved for damage
+                  // + antibody emit cues so a collision doesn't
+                  // visually masquerade as a hit.
                   a.bumpX = -nx * k; a.bumpY = -ny * k;
                   b.bumpX =  nx * k; b.bumpY =  ny * k;
                 }
