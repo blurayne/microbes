@@ -180,6 +180,7 @@ export const KNOWN_BACKGROUND_KEYS = [
   'lung', 'aurora', 'underwater',
   'lavaFire', 'reactor',
   'mitochondria', 'neuron', 'bile',
+  'tissue',
 ];
 
 // Map old THEMES keys → new accent keys for the interfaceColor
@@ -192,6 +193,7 @@ const LEGACY_INTERFACE_COLOR_MIGRATION = {
   aurora: 'green',      underwater: 'cyan',
   mitochondria: 'amber',
   neuron: 'cyan',       bile: 'green',
+  tissue: 'red',
   // Removed scenes — fold to a sensible accent.
   dracula: 'violet',
 };
@@ -588,6 +590,7 @@ export const LOCALES = {
     bg_mitochondria: 'Mitochondria (amber)',
     bg_neuron: 'Neuron (electric blue)',
     bg_bile: 'Bile (chartreuse)',
+    bg_tissue: 'Tissue (texture)',
     ic_pink: 'Pink', ic_red: 'Red', ic_amber: 'Amber', ic_yellow: 'Yellow',
     ic_green: 'Green', ic_cyan: 'Cyan', ic_blue: 'Blue', ic_violet: 'Violet', ic_mono: 'Mono',
     theme: 'Theme', interface_color: 'Interface color', background: 'Background', gameplay: 'Gameplay',
@@ -800,6 +803,7 @@ export const LOCALES = {
     bg_mitochondria: 'Mitochondrium (Bernstein)',
     bg_neuron: 'Neuron (Elektroblau)',
     bg_bile: 'Galle (Chartreuse)',
+    bg_tissue: 'Gewebe (Textur)',
     ic_pink: 'Rosa', ic_red: 'Rot', ic_amber: 'Bernstein', ic_yellow: 'Gelb',
     ic_green: 'Grün', ic_cyan: 'Cyan', ic_blue: 'Blau', ic_violet: 'Violett', ic_mono: 'Mono',
     theme: 'Thema', interface_color: 'Schnittstellenfarbe', background: 'Hintergrund', gameplay: 'Spiel',
@@ -1787,6 +1791,17 @@ export const THEMES = {
     bg: { kind: 'reactor', base: '#051010', botColor: '#1a6633', topColor: '#7dff8a', vignette: 0, seedCount: 6, reseedSec: 10, simSpeed: 5 },
     outline: { color: '#0a1816', defaultPx: 4 },
     ui: { panelAccent: '#7eff8a' },
+  },
+  // Tissue (texture) — first image-sampled bg in the codebase. The
+  // shader path samples a tiled `tissue.jpg` via fract(worldUv) so
+  // the pattern is seamless at any bgScale. Canvas2D uses
+  // ctx.createPattern. Outline + accent picked to match the warm
+  // ochre tones of the texture so existing chrome reads.
+  tissue: {
+    label: 'Tissue (texture)',
+    bg: { kind: 'tissue', base: '#3a1820', textureUrl: 'assets/textures/tissue.jpg', spotCount: 0, vignette: 0 },
+    outline: { color: '#1a0a0e', defaultPx: 4 },
+    ui: { panelAccent: '#d97a85' },
   },
 };
 

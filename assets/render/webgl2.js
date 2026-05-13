@@ -20,6 +20,7 @@ import { effectiveMouthKind } from '../core/sim-faces.js';
 import { testKindFor } from '../core/cell-kinds.js';
 import { RendererBase } from './renderer.js';
 import { URL_OVERRIDES } from '../core/url-overrides.js';
+import { loadTexture } from '../core/texture-loader.js';
 
 // Rendertest translucent mode: paint to a canvas that retains its
 // alpha channel so the captured PNG composites onto an arbitrary
@@ -666,8 +667,9 @@ const FRAG_BG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
 
-uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid, 4 lung (smoke), 5 aurora, 6 underwater, 7 lava, 8 reactor, 9 bloodflow, 10 cell-shadow
+uniform int u_kind;          // 0 flat, 1 gradient, 2 agar, 3 cybergrid, 4 lung (smoke), 5 aurora, 6 underwater, 7 lava, 8 reactor, 9 bloodflow, 10 cell-shadow, 11 tissue (image)
 uniform sampler2D u_reactorTex;  // bound when u_kind == 8 (Gray-Scott RT)
+uniform sampler2D u_tissueTex;   // bound when u_kind == 11 (seamless tiled image)
 uniform vec3 u_base;
 uniform vec3 u_top;
 uniform vec3 u_bot;
@@ -981,6 +983,17 @@ void main() {
     float bN = clamp(rxConc.y * 1.6, 0.0, 1.0);
     col = mix(mix(u_base, u_bot, smoothstep(0.0, 0.45, bN)),
               u_top, smoothstep(0.45, 0.92, bN));
+  }
+  if (u_kind == 11) {
+    // Tissue (texture) — seamless tile sampled in world coords.
+    // TILE_PX = 800 world-pixels per repeat at bgScale = 1; the
+    // slider re-scales the wrap frequency without touching the
+    // camera. fract() wraps both positive and negative worldPx
+    // into [0,1) so the camera can pan freely without visible
+    // seams.
+    float TILE_PX = 800.0;
+    vec2 tuv = fract(worldPx * (bgS / TILE_PX));
+    col = texture(u_tissueTex, tuv).rgb;
   }
 
   // Vignette: darken the corners. Aspect-corrected so the falloff
@@ -2236,6 +2249,7 @@ export class WebGL2Renderer extends RendererBase {
     this._bgU.rbc = bu('u_rbc');
     this._bgU.bgScale = bu('u_bgScale');
     this._bgU.reactorTex = bu('u_reactorTex');
+    this._bgU.tissueTex = bu('u_tissueTex');
     this._bgU.opacity = bu('u_opacity');
 
     // Reactor (Gray-Scott) — programs compile lazily on first use,
@@ -3003,6 +3017,49 @@ export class WebGL2Renderer extends RendererBase {
       this._rippleU = null;
     }
   }
+  // Lazy WebGL2 texture upload for tissue bg (kind=11). Cached
+  // per-URL on the renderer so re-selecting the same texture is
+  // free. While the image is loading, returns a 1x1 fallback so
+  // the sampler always has something valid bound — the shader
+  // then shows a near-uniform tint until the real bytes arrive.
+  _tissueTexFor(url) {
+    const gl = this.gl;
+    if (!this._tissueTexCache) this._tissueTexCache = new Map();
+    const cache = this._tissueTexCache;
+    if (!this._tissueFallbackTex) {
+      // 1x1 mid-grey placeholder; replaced once the image decodes.
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+                    new Uint8Array([64, 32, 36, 255]));
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      this._tissueFallbackTex = t;
+    }
+    if (!url) return this._tissueFallbackTex;
+    const slot = cache.get(url);
+    if (slot && slot.tex) return slot.tex;
+    if (slot && slot.pending) return this._tissueFallbackTex;
+    cache.set(url, { pending: true });
+    loadTexture(url).then((img) => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      // Mip + trilinear so small bgScale (tiny tiles) doesn't shimmer.
+      gl.generateMipmap(gl.TEXTURE_2D);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
+      cache.set(url, { tex });
+    }).catch((e) => {
+      console.warn('[webgl2 tissue] load failed:', e && e.message);
+      cache.set(url, { tex: this._tissueFallbackTex });
+    });
+    return this._tissueFallbackTex;
+  }
+
   // ── Glass-membrane overlay (WebGL2 parity of glass on webgpu.js) ──
   _glassEnsureProg() {
     if (this._glassProg) return;
@@ -3191,6 +3248,7 @@ export class WebGL2Renderer extends RendererBase {
     else if (bg.kind === 'reactor') kind = 8;
     else if (bg.kind === 'bloodflow') kind = 9;
     else if (bg.kind === 'cell-shadow') kind = 10;
+    else if (bg.kind === 'tissue') kind = 11;
     // 'flat' / 'navy-ghost' / unknown all fall through to flat.
 
     const count = Math.min(MAX_SPOTS, bg.spotCount || 0);
@@ -3229,6 +3287,15 @@ export class WebGL2Renderer extends RendererBase {
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, this._reactorRt(this._reactorFront).tex);
       gl.uniform1i(this._bgU.reactorTex, 0);
+    }
+    if (kind === 11) {
+      // Tissue: lazy GPU texture upload. _tissueTexFor returns the
+      // WebGLTexture once the image has decoded; until then we bind
+      // a 1x1 fallback so the sampler has something valid.
+      const tex = this._tissueTexFor(bg.textureUrl);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.uniform1i(this._bgU.tissueTex, 1);
     }
   }
 

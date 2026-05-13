@@ -13,6 +13,7 @@ import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
 import { RendererBase } from './renderer.js';
 import { URL_OVERRIDES } from '../core/url-overrides.js';
+import { loadTexture } from '../core/texture-loader.js';
 
 // Rendertest translucent mode: skip the opaque black fill in
 // drawBackground so the canvas's native transparency shows through.
@@ -100,6 +101,29 @@ export class Canvas2DRenderer extends RendererBase {
   beginFrame() { /* no-op for Canvas2D */ }
   endFrame() { /* no-op for Canvas2D */ }
 
+  // Cached CanvasPattern lookup for the tissue bg (and any future
+  // image-tiled bgs). Lazy: kicks off the async fetch on first
+  // call, returns null until decode completes. The result is a
+  // repeat-pattern bound to this renderer's 2D context.
+  _tissuePatternFor(url) {
+    if (!this._tissuePatternCache) this._tissuePatternCache = new Map();
+    const cache = this._tissuePatternCache;
+    if (cache.has(url)) {
+      const v = cache.get(url);
+      return (v === 'pending' || v === 'failed') ? null : v;
+    }
+    cache.set(url, 'pending');
+    loadTexture(url).then((img) => {
+      try {
+        const pat = this.ctx.createPattern(img, 'repeat');
+        cache.set(url, pat || 'failed');
+      } catch (_) {
+        cache.set(url, 'failed');
+      }
+    }).catch(() => { cache.set(url, 'failed'); });
+    return null;
+  }
+
   /** Short identifier for the FPS overlay's renderer suffix. */
   get info() { return 'canvas2d'; }
 
@@ -176,6 +200,32 @@ export class Canvas2DRenderer extends RendererBase {
     const wy = -cam.ty / bgEff;
     const ww = W / bgEff;
     const wh = H / bgEff;
+
+    if (bg.kind === 'tissue') {
+      // Tiled image bg. createPattern is lazy: we kick off the
+      // texture-loader on first draw, cache the resulting Pattern,
+      // and short-circuit subsequent frames. Until the image
+      // resolves the canvas shows just the base fill from above.
+      const url = bg.textureUrl;
+      const pat = url ? this._tissuePatternFor(url) : null;
+      if (pat) {
+        ctx.save();
+        // Tile size in world units. Independent of cam.scale so
+        // bgScale alone controls the visible repeat frequency.
+        // 0.5 px-per-world-px keeps the tile readable at default
+        // scale; bigger bgScale → smaller tiles.
+        const TILE_WORLD = 0.5;
+        const m = (typeof DOMMatrix !== 'undefined')
+          ? new DOMMatrix().scale(TILE_WORLD, TILE_WORLD)
+          : null;
+        if (m && typeof pat.setTransform === 'function') {
+          try { pat.setTransform(m); } catch (_) { /* old Safari */ }
+        }
+        ctx.fillStyle = pat;
+        ctx.fillRect(wx, wy, ww, wh);
+        ctx.restore();
+      }
+    }
 
     if (bg.kind === 'agar') {
       ctx.save();
