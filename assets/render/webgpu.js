@@ -26,6 +26,15 @@ import { shapeVertex } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
 import { testKindFor } from '../core/cell-kinds.js';
 import { RendererBase } from './renderer.js';
+import { URL_OVERRIDES } from '../core/url-overrides.js';
+
+// Rendertest translucent mode: paint to a canvas that retains its
+// alpha channel so the captured PNG composites onto an arbitrary
+// backdrop. Default is opaque (existing behaviour). Read once at
+// module load — `URL_OVERRIDES` is frozen.
+const RT_TRANSLUCENT = !!URL_OVERRIDES.translucent;
+const RT_ALPHA_MODE = RT_TRANSLUCENT ? 'premultiplied' : 'opaque';
+const RT_CLEAR_A = RT_TRANSLUCENT ? 0.0 : 1.0;
 
 // ---------- Layout constants (must match WGSL `VsIn` + JS pack loop) ----------
 //
@@ -2166,7 +2175,7 @@ export class WebGPURenderer extends RendererBase {
     if (!context) throw new Error('WebGPU: canvas.getContext("webgpu") returned null');
 
     const format = navigator.gpu.getPreferredCanvasFormat();
-    context.configure({ device, format, alphaMode: 'opaque' });
+    context.configure({ device, format, alphaMode: RT_ALPHA_MODE });
 
     this.device = device;
     this.context = context;
@@ -3350,7 +3359,7 @@ export class WebGPURenderer extends RendererBase {
     this.canvas.style.width = W + 'px';
     this.canvas.style.height = H + 'px';
     // Re-configure to match new size; format / device unchanged.
-    this.context.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
+    this.context.configure({ device: this.device, format: this.format, alphaMode: RT_ALPHA_MODE });
     // Pool textures are sized to the canvas in 'fullCanvas' mode; force
     // a rebuild on resize. Also invalidates 'sharedMax' / 'bbox' since
     // padding scales with canvas; safest is to wipe the pool.
@@ -3413,6 +3422,22 @@ export class WebGPURenderer extends RendererBase {
   drawBackground(timeMs) {
     if (!this._frameEncoder || !this._frameView) return;
     if (!this._bgPipeline) return;       // pipeline not yet created
+    // Rendertest translucent: skip every bg pipeline and just emit a
+    // clear-only pass with alpha=0 to the scene target. Cell passes
+    // composite on top with their own alpha where they paint.
+    if (RT_TRANSLUCENT) {
+      const pass = this._frameEncoder.beginRenderPass({
+        colorAttachments: [{
+          view: this._sceneView,
+          clearValue: { r: 0, g: 0, b: 0, a: 0 },
+          loadOp: 'clear',
+          storeOp: 'store',
+        }],
+      });
+      pass.end();
+      this._lastFrameSec = (timeMs || 0) * 0.001 * (S.bgFlowSpeed || 1);
+      return;
+    }
     const layers = currentBgLayers();
     const t = (timeMs || 0) * 0.001 * (S.bgFlowSpeed || 1);
 
@@ -3459,7 +3484,7 @@ export class WebGPURenderer extends RendererBase {
       const pass = this._frameEncoder.beginRenderPass({
         colorAttachments: [{
           view: bgTarget,
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          clearValue: { r: 0, g: 0, b: 0, a: RT_CLEAR_A },
           loadOp: 'clear',
           storeOp: 'store',
         }],
@@ -3494,7 +3519,7 @@ export class WebGPURenderer extends RendererBase {
             view: bgTarget,
             // First layer clears; subsequent layers composite onto
             // whatever the previous layers wrote.
-            clearValue: { r: 0, g: 0, b: 0, a: 1 },
+            clearValue: { r: 0, g: 0, b: 0, a: RT_CLEAR_A },
             loadOp: (li === 0) ? 'clear' : 'load',
             storeOp: 'store',
           }],
@@ -3534,7 +3559,7 @@ export class WebGPURenderer extends RendererBase {
       const post = this._frameEncoder.beginRenderPass({
         colorAttachments: [{
           view: this._sceneView,
-          clearValue: { r: 0, g: 0, b: 0, a: 1 },
+          clearValue: { r: 0, g: 0, b: 0, a: RT_CLEAR_A },
           loadOp: 'clear',
           storeOp: 'store',
         }],

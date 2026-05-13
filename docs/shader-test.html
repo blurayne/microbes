@@ -2525,14 +2525,38 @@ const __SHADER_TEST_OVERRIDES = (() => {
     return null;
   }
 
-  return {
-    cellType:   resolveInt(q.get('cellType'), CELL_NAME_TO_INT, 20),
-    theme:      resolveInt(q.get('theme'),    THEME_NAME_TO_INT, 3),
-    bg:         resolveInt(q.get('bg'),       BG_NAME_TO_INT, 6),
-    pose:       q.get('pose') === '1' || q.get('pose') === 'true',
-    screenshot: q.get('screenshot') === '1' || q.get('screenshot') === 'true',
-    t:          q.get('t') != null ? parseFloat(q.get('t')) : null,
+  function parseBool(v) {
+    return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+  }
+  function parseSize(v) {
+    const n = parseInt(v, 10);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(64, Math.min(4096, n));
+  }
+  const cellTypeRaw = q.get('cellType');
+  const themeRaw = q.get('theme');
+  const debug = q.has('debug') ? parseBool(q.get('debug')) : false;
+  const testRaw = q.get('test');
+  const test = (testRaw === 'render') ? 'render' : null;
+  const rendertest = parseBool(q.get('rendertest')) || (debug && test === 'render');
+  const out = {
+    cellType:     resolveInt(cellTypeRaw, CELL_NAME_TO_INT, 20),
+    cellTypeName: cellTypeRaw && Object.prototype.hasOwnProperty.call(CELL_NAME_TO_INT, cellTypeRaw) ? cellTypeRaw : null,
+    theme:        resolveInt(themeRaw,    THEME_NAME_TO_INT, 3),
+    themeName:    themeRaw && Object.prototype.hasOwnProperty.call(THEME_NAME_TO_INT, themeRaw) ? themeRaw : null,
+    bg:           resolveInt(q.get('bg'), BG_NAME_TO_INT, 6),
+    pose:         parseBool(q.get('pose')) || rendertest,    // rendertest implies pose
+    screenshot:   parseBool(q.get('screenshot')),
+    t:            q.get('t') != null ? parseFloat(q.get('t')) : null,
+    debug,
+    test,
+    rendertest,
+    translucent:  parseBool(q.get('translucent')),
+    download:     parseBool(q.get('download')),
+    w:            q.has('w') ? parseSize(q.get('w')) : null,
+    h:            q.has('h') ? parseSize(q.get('h')) : null,
   };
+  return out;
 })();
 
 // Apply overrides to the selects + params object. Done immediately
@@ -2549,6 +2573,23 @@ if (__SHADER_TEST_OVERRIDES.bg != null) {
   bgkindSel.value = String(__SHADER_TEST_OVERRIDES.bg);
   params.bgKind = __SHADER_TEST_OVERRIDES.bg;
 }
+// Rendertest mode: deterministic single-cell framing.
+//   * zoom 2.0 shrinks UV space by ~2.5× so the SDF body (which
+//     lives in ~unit radius) fills ~80% of the canvas with ~10%
+//     padding on each side.
+//   * offsets pinned to 0 so the cell sits at canvas centre
+//     regardless of any previously persisted drag state.
+//   * bgKind defaults to black (6) when not explicitly overridden
+//     so the artifact gallery has a uniform backdrop.
+if (__SHADER_TEST_OVERRIDES.rendertest) {
+  params.zoom = 2.0;
+  params.cellOffsetX = 0;
+  params.cellOffsetY = 0;
+  if (__SHADER_TEST_OVERRIDES.bg == null) {
+    params.bgKind = 6;
+    if (bgkindSel) bgkindSel.value = '6';
+  }
+}
 
 // ── Screenshot helper ────────────────────────────────────────
 // Calls `canvas.toBlob('image/png')` → downloads via a hidden
@@ -2557,7 +2598,7 @@ if (__SHADER_TEST_OVERRIDES.bg != null) {
 // regardless of which context is bound. Exposed as
 // `window.__SHADER_TEST_SCREENSHOT__()` so the Playwright rig +
 // browser DevTools can both call it.
-function __takeShaderTestShot() {
+function __takeShaderTestShot(opts) {
   const c = document.getElementById('stage');
   if (!c || typeof c.toBlob !== 'function') {
     console.error('[shader-test] #stage canvas missing or toBlob unsupported');
@@ -2566,22 +2607,28 @@ function __takeShaderTestShot() {
   return new Promise((resolve, reject) => {
     c.toBlob((blob) => {
       if (!blob) { reject(new Error('toBlob returned null')); return; }
-      const stamp = (() => {
-        const d = new Date();
-        const pad = n => String(n).padStart(2, '0');
-        return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
-             + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
-      })();
-      const cellInt = params.cellType | 0;
-      const themeInt = params.theme | 0;
-      const bgInt = params.bgKind | 0;
-      const name = `shader-test-c${cellInt}-t${themeInt}-bg${bgInt}-${stamp}.png`;
+      const explicit = opts && opts.filename;
+      let name;
+      if (explicit) {
+        name = explicit;
+      } else {
+        const stamp = (() => {
+          const d = new Date();
+          const pad = n => String(n).padStart(2, '0');
+          return d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate())
+               + '-' + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+        })();
+        const cellInt = params.cellType | 0;
+        const themeInt = params.theme | 0;
+        const bgInt = params.bgKind | 0;
+        name = `shader-test-c${cellInt}-t${themeInt}-bg${bgInt}-${stamp}.png`;
+      }
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = name; a.style.display = 'none';
       document.body.appendChild(a); a.click();
       setTimeout(() => { a.remove(); URL.revokeObjectURL(url); }, 0);
-      resolve(stamp);
+      resolve(name);
     }, 'image/png');
   });
 }
@@ -3059,7 +3106,10 @@ async function initWebGPU() {
     const ctx = canvas.getContext('webgpu');
     console.log('[webgpu] context:', ctx ? 'ok' : 'null');
     if (!ctx) return null;
-    ctx.configure({ device, format, alphaMode: 'opaque' });
+    ctx.configure({
+      device, format,
+      alphaMode: __SHADER_TEST_OVERRIDES.translucent ? 'premultiplied' : 'opaque',
+    });
 
     // 8 floats = 32 bytes (matches std140-ish padding in WGSL Uniforms)
     const uboSize = 64;
@@ -3077,10 +3127,17 @@ async function initWebGPU() {
     let firstFrameLogged = false;
 
     function frame(time) {
-      // resize-safe
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const w = canvas.clientWidth  * dpr | 0;
-      const h = canvas.clientHeight * dpr | 0;
+      // resize-safe. Rendertest mode locks to a fixed size with
+      // dpr=1 so Playwright captures don't drift between machines.
+      let w, h;
+      if (__SHADER_TEST_OVERRIDES.rendertest) {
+        w = __SHADER_TEST_OVERRIDES.w || 512;
+        h = __SHADER_TEST_OVERRIDES.h || 512;
+      } else {
+        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+        w = canvas.clientWidth  * dpr | 0;
+        h = canvas.clientHeight * dpr | 0;
+      }
       if (canvas.width !== w || canvas.height !== h) {
         if (w === 0 || h === 0) {
           // Bail this frame — drawing into a 0x0 canvas yields a
@@ -3181,7 +3238,11 @@ async function initWebGPU() {
 
 function initWebGL2() {
   console.log('[webgl2] init: requesting context');
-  const gl = canvas.getContext('webgl2', { antialias: true, premultipliedAlpha: false });
+  const gl = canvas.getContext('webgl2', {
+    antialias: true,
+    premultipliedAlpha: false,
+    alpha: !!__SHADER_TEST_OVERRIDES.translucent,
+  });
   if (!gl) { console.error('[webgl2] no context'); return null; }
   console.log('[webgl2] context ok · vendor:', gl.getParameter(gl.VENDOR), '· renderer:', gl.getParameter(gl.RENDERER));
 
@@ -3226,9 +3287,15 @@ function initWebGL2() {
   gl.bindVertexArray(vao);
 
   function frame(time) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = canvas.clientWidth  * dpr | 0;
-    const h = canvas.clientHeight * dpr | 0;
+    let w, h;
+    if (__SHADER_TEST_OVERRIDES.rendertest) {
+      w = __SHADER_TEST_OVERRIDES.w || 512;
+      h = __SHADER_TEST_OVERRIDES.h || 512;
+    } else {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = canvas.clientWidth  * dpr | 0;
+      h = canvas.clientHeight * dpr | 0;
+    }
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w; canvas.height = h;
     }
@@ -3300,6 +3367,21 @@ function updateFps(now) {
       // the compositor internally so the PNG matches the frame.
       if (_ov.screenshot && typeof __takeShaderTestShot === 'function') {
         __takeShaderTestShot();
+      }
+      // Rendertest auto-capture: download immediately when
+      // `?download=1`, and always flip the Playwright wait-flag so
+      // the spec can `waitForFunction(() => window.__RENDERTEST_READY__)`
+      // and then read the canvas pixels directly.
+      if (_ov.rendertest) {
+        if (_ov.download && typeof __takeShaderTestShot === 'function') {
+          const cellName = _ov.cellTypeName || ('c' + ((_ov.cellType | 0)));
+          const themeName = _ov.themeName || ('t' + ((_ov.theme | 0)));
+          const kindN = _ov.cellType | 0;
+          const suffix = _ov.translucent ? '_translucent' : '';
+          const filename = `shadertoy_cell-${cellName}${kindN}_${themeName}${suffix}.png`;
+          __takeShaderTestShot({ filename });
+        }
+        try { window.__RENDERTEST_READY__ = true; } catch {}
       }
     }
     if (_ov.pose) return;       // freeze the rAF chain on pose=1

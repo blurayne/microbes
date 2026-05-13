@@ -19,6 +19,14 @@ import { shapeVertex } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
 import { testKindFor } from '../core/cell-kinds.js';
 import { RendererBase } from './renderer.js';
+import { URL_OVERRIDES } from '../core/url-overrides.js';
+
+// Rendertest translucent mode: paint to a canvas that retains its
+// alpha channel so the captured PNG composites onto an arbitrary
+// backdrop. Default is opaque (existing behaviour). Read once at
+// module load — `URL_OVERRIDES` is frozen.
+const RT_TRANSLUCENT = !!URL_OVERRIDES.translucent;
+const RT_CLEAR_A = RT_TRANSLUCENT ? 0.0 : 1.0;
 
 // Each cell is one instanced quad. The fragment shader computes the
 // per-pixel body SDF for the cell's `body.kind` (round / lobed /
@@ -2040,7 +2048,7 @@ export class WebGL2Renderer extends RendererBase {
   constructor(canvas, sim) {
     super(canvas, sim);
     /** @type {WebGL2RenderingContext|null} */
-    this.gl = canvas.getContext('webgl2', { alpha: false, antialias: true, premultipliedAlpha: false });
+    this.gl = canvas.getContext('webgl2', { alpha: RT_TRANSLUCENT, antialias: true, premultipliedAlpha: false });
     if (!this.gl) throw new Error('webgl2 unavailable');
 
     // GPU resources, populated in init().
@@ -2622,7 +2630,7 @@ export class WebGL2Renderer extends RendererBase {
     // equilibrium with no B present is uniform A; this is the
     // pristine state from which seed discs grow Turing patterns.
     gl.viewport(0, 0, w, h);
-    gl.clearColor(0.05, 0.0, 0.0, 1.0);
+    gl.clearColor(0.05, 0.0, 0.0, RT_CLEAR_A);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.bindTexture(gl.TEXTURE_2D, null);
@@ -2968,6 +2976,16 @@ export class WebGL2Renderer extends RendererBase {
 
   drawBackground(timeMs) {
     const gl = this.gl;
+    // Rendertest translucent: skip the bg pipeline entirely and leave
+    // the framebuffer at alpha=0 so the captured PNG has a clean
+    // transparent backdrop. Cell + overlay passes still run on top
+    // and write their own alpha where they paint.
+    if (RT_TRANSLUCENT) {
+      gl.clearColor(0, 0, 0, 0);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+      this._lastFrameSec = timeMs * 0.001 * (S.bgFlowSpeed || 1);
+      return;
+    }
     const layers = currentBgLayers();
     const t = timeMs * 0.001 * (S.bgFlowSpeed || 1);
     this._lastFrameSec = t;     // endFrame's post-pass reads this
@@ -3018,7 +3036,7 @@ export class WebGL2Renderer extends RendererBase {
     if (layers.length === 0) {
       // No enabled layers — clear to black so cells aren't drawn over
       // stale pixels.
-      gl.clearColor(0, 0, 0, 1);
+      gl.clearColor(0, 0, 0, RT_CLEAR_A);
       gl.clear(gl.COLOR_BUFFER_BIT);
     } else {
       gl.useProgram(this._bgProg);

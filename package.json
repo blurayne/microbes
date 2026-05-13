@@ -7,6 +7,7 @@
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
     "test:visual:diff": "playwright test tests/visual/game-vs-shader-test.spec.js",
+    "test:visual:rendertest": "playwright test tests/visual/rendertest.spec.js",
     "serve": "python3 -m http.server 8000",
     "build:docs": "mkdocs build"
   },

@@ -11,6 +11,7 @@ file in sync.
 ## Open
 
 - [ ] **Shader-test visual parity for in-game cells** — [`.claude/plan/13-shader-test-visuals.md`](./.claude/plan/13-shader-test-visuals.md) — split into PRs A → F; foundation PRs serially, per-cell ports parallel.
+- [ ] **Rendertest mode + Playwright artifact loop** — [`.claude/plan/14-rendertest-mode.md`](./.claude/plan/14-rendertest-mode.md) — `?debug=1&test=render` (alias `?rendertest=1`) produces deterministic single-cell renders; Playwright attaches a 672-PNG gallery as workflow artifacts.
 
 ## Done
 

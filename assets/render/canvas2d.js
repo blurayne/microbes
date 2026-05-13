@@ -12,6 +12,13 @@ import {
 import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
 import { RendererBase } from './renderer.js';
+import { URL_OVERRIDES } from '../core/url-overrides.js';
+
+// Rendertest translucent mode: skip the opaque black fill in
+// drawBackground so the canvas's native transparency shows through.
+// Canvas2D contexts default to `alpha: true`, no constructor change
+// needed.
+const RT_TRANSLUCENT = !!URL_OVERRIDES.translucent;
 
 /**
  * Canvas2D implementation of the IRenderer interface (see renderer.js).
@@ -100,6 +107,12 @@ export class Canvas2DRenderer extends RendererBase {
   drawBackground(ts) {
     const ctx = this.ctx;
     const W = this.W, H = this.H;
+    // Rendertest translucent: skip both the layered bg path and the
+    // opaque default fill so the canvas alpha stays 0 outside cells.
+    if (RT_TRANSLUCENT) {
+      ctx.clearRect(0, 0, W, H);
+      return;
+    }
     const layers = currentBgLayers();
     if (layers.length === 0) {
       ctx.fillStyle = '#000';
