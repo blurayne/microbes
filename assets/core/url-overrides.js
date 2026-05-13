@@ -20,6 +20,18 @@ const VALID_RENDERERS = new Set(['canvas2d', 'webgl2', 'webgpu']);
 // the loadSettings shim already treats as a valid background key.
 const VALID_BG_KEYS = new Set(['solid', ...KNOWN_BACKGROUND_KEYS]);
 
+// `?test=` selectors. Capability gate is `?debug=1`; the test name
+// picks a sub-mode. The shorthand `?rendertest=1` derives to the
+// same `render` selection. Whitelist is small on purpose so future
+// modes have to opt in explicitly.
+const VALID_TESTS = new Set(['render']);
+
+// Canvas-size clamp for `?w=`/`?h=` in rendertest mode. Lower bound
+// keeps the framing math sane; upper bound stops a runaway URL from
+// allocating a 16 K × 16 K backbuffer.
+const SIZE_MIN = 64;
+const SIZE_MAX = 4096;
+
 function readParams() {
   // SSR / test environments may not have `window.location`; guard so
   // a Node import doesn't throw.
@@ -29,6 +41,12 @@ function readParams() {
 
 function parseBool(v) {
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+function parseSize(v) {
+  const n = parseInt(v, 10);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(SIZE_MIN, Math.min(SIZE_MAX, n));
 }
 
 // Parse once on module load. Frozen so consumers can read but not
@@ -70,6 +88,34 @@ function parseOverrides() {
   if (p.has('extended')) out.extended = parseBool(p.get('extended'));
   if (p.has('screenshot')) out.screenshot = parseBool(p.get('screenshot'));
   if (p.has('cartoon')) out.cartoon = parseBool(p.get('cartoon'));
+
+  // Debug capability + test selector. `?test=render` requires
+  // `?debug=1` to take effect; `?rendertest=1` is sugar for both.
+  const debug = p.has('debug') ? parseBool(p.get('debug')) : false;
+  const testRaw = p.get('test');
+  let test = null;
+  if (testRaw && VALID_TESTS.has(testRaw)) {
+    test = testRaw;
+  } else if (testRaw) {
+    console.warn(`[url-overrides] unknown test=${testRaw}`);
+  }
+  const rendertestRaw = p.has('rendertest') ? parseBool(p.get('rendertest')) : false;
+
+  out.debug = debug;
+  if (test) out.test = test;
+  out.rendertest = rendertestRaw || (debug && test === 'render');
+
+  // Rendertest mode implies a paused, chrome-hidden pose so the
+  // existing pose path runs without the user repeating `?pose=1`.
+  if (out.rendertest) out.pose = true;
+
+  if (p.has('translucent')) out.translucent = parseBool(p.get('translucent'));
+  if (p.has('download')) out.download = parseBool(p.get('download'));
+
+  const w = p.has('w') ? parseSize(p.get('w')) : null;
+  const h = p.has('h') ? parseSize(p.get('h')) : null;
+  if (w != null) out.w = w;
+  if (h != null) out.h = h;
 
   return Object.freeze(out);
 }

@@ -22,37 +22,7 @@
 import { test, expect } from '@playwright/test';
 import pixelmatch from 'pixelmatch';
 import { PNG } from 'pngjs';
-
-// Same 21-cell list as cells.spec.js. Keep in sync with
-// assets/core/state.js CELL_TYPES + the eukaryote extended entry.
-const CELLS = [
-  { key: 'neutrophil', cat: 'good' },
-  { key: 'monocyte',   cat: 'good' },
-  { key: 'mast',       cat: 'good' },
-  { key: 'nk',         cat: 'good' },
-  { key: 'macrophage', cat: 'good' },
-  { key: 'dendritic',  cat: 'good' },
-  { key: 'basophil',   cat: 'good' },
-  { key: 'platelet',   cat: 'good' },
-  { key: 'tcell',      cat: 'good' },
-  { key: 'bcell',      cat: 'good' },
-  { key: 'eosinophil', cat: 'good' },
-  { key: 'rbc',        cat: 'good' },
-  { key: 'virus',      cat: 'bad' },
-  { key: 'germ',       cat: 'bad' },
-  { key: 'bacterium',  cat: 'bad' },
-  { key: 'amoebaP',    cat: 'bad' },
-  { key: 'slime',      cat: 'bad' },
-  { key: 'mite',       cat: 'bad' },
-  { key: 'spore',      cat: 'bad' },
-  { key: 'toxin',      cat: 'bad' },
-  { key: 'eukaryote',  cat: 'extended' },
-];
-
-// shader-test has NO legacy theme — that's the in-game canvas2d-look
-// fallback. So this harness covers the 4 themes both pages can
-// produce: microscope, cartoon, kurzgesagt, classic.
-const THEMES = ['microscope', 'cartoon', 'kurzgesagt', 'classic'];
+import { CELLS, THEMES } from './_fixtures.js';
 
 const CROP_SIZE = 400;
 // Pixel-diff threshold (pixelmatch's per-pixel YIQ delta). 0.12 is

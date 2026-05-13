@@ -22,6 +22,7 @@ import {
   applyOverridesToSettings,
   applyOverridesToSim,
 } from './core/url-overrides.js';
+import { testKindFor } from './core/cell-kinds.js';
 import { CELL_RELATIONS } from './core/cell-relations.js';
 import { defaultHp, getRule } from './core/sim-rules.js';
 import { FloatingText } from './core/floating-text.js';
@@ -157,10 +158,9 @@ applyOverridesToSettings(S);
 
 // ---------- Sim + renderer ----------
 const sim = new Sim();
-// Spawn the URL-requested specimen at world centre (if any). Must
-// come AFTER `sim` is constructed but is safe to run before the
-// renderer is ready — the spawn is just a sim-state mutation.
-applyOverridesToSim(sim);
+// URL-requested cell spawn (?cellType=…) happens in the boot IIFE
+// AFTER `sim.resetSim()` runs — otherwise resetSim's default spawn
+// would clobber the override. See bottom-of-file boot block.
 const floatingText = new FloatingText(document.getElementById('floatingText'));
 const cellTags = new CellTagOverlay(document.getElementById('cellTagLayer'));
 const spawnBanner = new SpawnBanner(document.getElementById('spawnBannerLayer'));
@@ -179,12 +179,19 @@ async function makeRenderer() {
   // only — `S.renderer` is left as the user picked it so the dropdown
   // keeps showing their choice and the next reload retries. Each path
   // logs its outcome for DevTools.
+  //
+  // Strict mode: rendertest with an explicit `?renderer=` rejects
+  // fallback so Playwright sees a hard page-error instead of silently
+  // capturing a different backend. Normal users (no rendertest) still
+  // get the cascade.
+  const strict = !!URL_OVERRIDES.rendertest && !!URL_OVERRIDES.renderer;
   if (k === 'webgpu') {
     try {
       const r = await tryWebGPU();
       console.info('[microbes] WebGPURenderer ready');
       return r;
     } catch (e) {
+      if (strict) throw new Error('[rendertest] forced webgpu unavailable: ' + (e && e.message));
       console.warn('[microbes] WebGPU unavailable, trying WebGL2:', e && e.message);
     }
   }
@@ -195,8 +202,12 @@ async function makeRenderer() {
       console.info('[microbes] WebGL2Renderer ready' + (k === 'webgpu' ? ' (WebGPU fallback)' : ''));
       return r;
     } catch (e) {
+      if (strict) throw new Error('[rendertest] forced ' + k + ' unavailable: ' + (e && e.message));
       console.warn('[microbes] WebGL2 unavailable, falling back to Canvas2D for this load:', e && e.message);
     }
+  }
+  if (strict && k !== 'canvas2d') {
+    throw new Error('[rendertest] forced ' + k + ' unavailable: no Canvas2D fallback in strict mode');
   }
   const r = new Canvas2DRenderer(canvas, sim);
   r.init();
@@ -211,6 +222,21 @@ let renderer = null;
 // ---------- Resize ----------
 let dpr = 1;
 function resize() {
+  // Rendertest mode locks the canvas to a deterministic size with
+  // dpr=1 so Playwright captures match across machines (no Retina
+  // doubling, no viewport-dependent jitter). Viewport-resize events
+  // are short-circuited so the user resizing the browser mid-capture
+  // doesn't move the cell.
+  if (URL_OVERRIDES.rendertest) {
+    const W = URL_OVERRIDES.w || 512;
+    const H = URL_OVERRIDES.h || 512;
+    dpr = 1;
+    sim.setViewport(W, H);
+    renderer.resize(W, H, 1, 1);
+    applyRendertestCamera(sim, W, H);
+    sim.clampAllInside();
+    return;
+  }
   dpr = Math.min(window.devicePixelRatio || 1, 2);
   const W = window.innerWidth;
   const H = window.innerHeight;
@@ -218,6 +244,21 @@ function resize() {
   const rs = Math.max(0.125, Math.min(1, S.renderScale || 1));
   renderer.resize(W, H, dpr, rs);
   sim.clampAllInside();
+}
+
+// Frame the single spawned cell so its bbox + 10% padding fills the
+// shorter canvas axis. Called after `applyOverridesToSim` has dropped
+// the cell at world centre. Idempotent — safe to call from `resize`.
+function applyRendertestCamera(sim, W, H) {
+  if (!sim || !sim.camera || !Array.isArray(sim.cells) || sim.cells.length === 0) return;
+  const c = sim.cells[0];
+  if (!c || !(c.r > 0)) return;
+  const half = Math.min(W, H) / 2;
+  const scale = half / (c.r * 1.1);
+  sim.camera.scale = scale;
+  sim.camera.tx = W / 2 - scale * c.x;
+  sim.camera.ty = H / 2 - scale * c.y;
+  sim.camera.rotation = 0;
 }
 
 // ---------- Input ----------
@@ -584,6 +625,32 @@ if (URL_OVERRIDES.pose) {
 if (URL_OVERRIDES.screenshot) {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => { _screenshotNow(); });
+  });
+}
+// `?rendertest=1` (or `?debug=1&test=render`) → after the first two
+// frames settle, expose `window.__RENDERTEST_READY__ = true` so
+// Playwright's `waitForFunction` can pick up the captured PNG. If
+// `?download=1` is also set, trigger an automatic browser download
+// with the deterministic filename pattern. Filename:
+//   {origin}_cell-{cellType}{kindN}_{theme}[_translucent].png
+if (URL_OVERRIDES.rendertest) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      // Re-frame in case spawn settled the cell radius after the
+      // first resize() call (decoration sizing, etc.).
+      applyRendertestCamera(sim, sim.W, sim.H);
+      if (URL_OVERRIDES.download) {
+        const cellType = URL_OVERRIDES.cellType || (sim.cells[0] && sim.cells[0].type) || 'unknown';
+        const kindN = testKindFor(cellType);
+        const theme = URL_OVERRIDES.theme || S.theme || 'legacy';
+        const origin = 'game-' + ((renderer && renderer.info) || S.renderer || 'unknown');
+        const suffix = URL_OVERRIDES.translucent ? '_translucent' : '';
+        const filename = `${origin}_cell-${cellType}${kindN}_${theme}${suffix}.png`;
+        takeScreenshot({ S, sim, renderer, filename, skipSidecar: true })
+          .catch(err => console.warn('[rendertest] download failed:', err));
+      }
+      try { window.__RENDERTEST_READY__ = true; } catch {}
+    });
   });
 }
 if (pauseBtn) {
@@ -2075,7 +2142,24 @@ function frame(ts) {
 (async () => {
   renderer = await makeRenderer();
   resize();
-  window.addEventListener('resize', resize);
+  // Rendertest locks the canvas to a deterministic size — listening
+  // for viewport resizes would re-trigger framing math on every
+  // browser drag, defeating the determinism.
+  if (!URL_OVERRIDES.rendertest) {
+    window.addEventListener('resize', resize);
+  }
   sim.resetSim();
+  // Apply URL overrides after the reset so the requested specimen
+  // isn't wiped by resetSim's default spawn. When `?cellType=` is
+  // set we drop the default cell first so only the override remains
+  // — rendertest mode in particular needs a single subject in frame.
+  if (URL_OVERRIDES.cellType) {
+    sim.cells.length = 0;
+    sim.cellId = 0;
+    applyOverridesToSim(sim);
+  }
+  if (URL_OVERRIDES.rendertest) {
+    applyRendertestCamera(sim, sim.W, sim.H);
+  }
   requestAnimationFrame(frame);
 })();
