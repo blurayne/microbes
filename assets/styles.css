@@ -1341,8 +1341,8 @@ body.adding #stage    { cursor: crosshair; }
 }
 .nav-arrow {
   position: absolute;
-  filter: drop-shadow(0 1px 2px #0008);
-  transition: width 120ms ease, height 120ms ease;
+  transition: width 180ms cubic-bezier(.4,0,.2,1),
+              height 180ms cubic-bezier(.4,0,.2,1);
 }
 .nav-arrow.hidden { display: none; }
 .nav-arrow-top    { top: 8px;    left: 50%; transform: translateX(-50%); }
@@ -1361,33 +1361,34 @@ body.adding #stage    { cursor: crosshair; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  transition: left 120ms linear, top 120ms linear,
-              transform 120ms linear;
+  /* Slide + rotate smoothly while the cluster moves. Slightly
+     longer + softer easing than the legacy 120ms-linear so fast
+     camera pans don't make the arrows snap-jitter. */
+  transition: left 220ms cubic-bezier(.4,0,.2,1),
+              top  220ms cubic-bezier(.4,0,.2,1),
+              transform 220ms cubic-bezier(.4,0,.2,1);
 }
 .nav-arrow-anchor.hidden { display: none; }
 .nav-arrow-anchored {
   width:  var(--nav-arrow-thickness, 14px);
   height: var(--nav-arrow-length,    18px);
-  filter: drop-shadow(0 1px 2px #0008);
-  transition: width 120ms ease, height 120ms ease;
+  transition: width 180ms cubic-bezier(.4,0,.2,1),
+              height 180ms cubic-bezier(.4,0,.2,1);
 }
 /* Count badge sits above the arrow tip (anchor's local +Y axis is
    along the arrow length, pre-rotation), so the badge always reads
-   upright relative to the arrow even after the wrapper rotates. */
+   upright relative to the arrow even after the wrapper rotates.
+   No background pill — the digits read on top of whatever the scene
+   already shows, with a text-shadow for legibility on bright themes
+   (microscope cyan, kurzgesagt mustard). */
 .nav-arrow-badge {
   margin-top: 2px;
-  padding: 1px 6px;
+  padding: 0;
   font: 600 11px/1.2 system-ui, -apple-system, sans-serif;
   color: #fff;
-  background: rgba(0, 0, 0, 0.65);
-  border-radius: 999px;
+  text-shadow: 0 0 3px #000, 0 1px 2px #000a;
+  background: transparent;
   white-space: nowrap;
-  /* Counter-rotate the badge so the digits stay upright regardless
-     of which edge the cluster sits on (parent .nav-arrow-anchor
-     applies a 0/90/180/-90° rotation; this cancels it for the
-     simple-axis cases). The text reads upright on top + bottom
-     edges naturally; for left + right we accept slightly rotated
-     digits to keep the rule simple — the count is still legible. */
 }
 
 /* ---- Clean-pose mode (URL ?pose=1) ----
