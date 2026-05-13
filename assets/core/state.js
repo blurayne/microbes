@@ -59,6 +59,13 @@ export const DEFAULTS = {
   // webgpu cell shaders; canvas2d shows the flash only.
   bumpFeedback: true,
   bumpFeedbackIntensity: 1.0,
+  // Bump envelope shape (seconds). bumpAttack is the smoothstep
+  // ramp-up — higher = squash eases in slower. bumpDuration is
+  // the total visible time (attack + linear fade). Defaults give
+  // a noticeably slower, rounder squash than the original 150 ms
+  // exponential decay.
+  bumpAttack: 0.20,
+  bumpDuration: 1.5,
   // Caustics tint — modulates the green/teal cast added on top of
   // the rendered scene. Defaults reproduce the historical (0, 1.35,
   // 0.5) bias; lower values toward 0 fade toward neutral white.
@@ -500,6 +507,14 @@ export function loadSettings() {
     }
     parsed.bumpFeedbackIntensity = Math.max(0, Math.min(3, parsed.bumpFeedbackIntensity));
     parsed.bumpFeedback = parsed.bumpFeedback !== false;
+    if (typeof parsed.bumpAttack !== 'number' || !Number.isFinite(parsed.bumpAttack)) {
+      parsed.bumpAttack = DEFAULTS.bumpAttack;
+    }
+    parsed.bumpAttack = Math.max(0.001, Math.min(1.0, parsed.bumpAttack));
+    if (typeof parsed.bumpDuration !== 'number' || !Number.isFinite(parsed.bumpDuration)) {
+      parsed.bumpDuration = DEFAULTS.bumpDuration;
+    }
+    parsed.bumpDuration = Math.max(0.1, Math.min(5.0, parsed.bumpDuration));
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Rheinhessisch was renamed to Mainzerisch (Mainz city dialect).
@@ -689,6 +704,8 @@ export const LOCALES = {
     glass_chroma:            'Chromatic split',
     bump_feedback:           'Bump feedback',
     bump_feedback_intensity: 'Bump intensity',
+    bump_attack:             'Bump attack',
+    bump_duration:           'Bump duration',
     fx_kind_noise: 'Static noise',
     fx_kind_vignette: 'Vignette',
     fx_kind_crosshair: 'Crosshair',
@@ -902,6 +919,8 @@ export const LOCALES = {
     glass_chroma:            'Farbsaum',
     bump_feedback:           'Stoss-Effekt',
     bump_feedback_intensity: 'Stoss-Stärke',
+    bump_attack:             'Stoss-Anstieg',
+    bump_duration:           'Stoss-Dauer',
     fx_kind_noise: 'Rauschen',
     fx_kind_vignette: 'Vignette',
     fx_kind_crosshair: 'Fadenkreuz',
