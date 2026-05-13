@@ -1043,7 +1043,18 @@ body.adding #stage    { cursor: crosshair; }
 .dialog.hidden .dialog-panel { transform: translateX(100%); }
 .dialog-panel header {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px;
+  /* Sticky-pinned to the top of the scrollable panel so the title +
+     close button + (in the Add dialog) view-toggle stay reachable
+     while the body scrolls. Mirrors `.settings-panel header` — same
+     negative-margin / padding trick to span edge-to-edge, same
+     z-index, same solid bg, same bottom rule. */
+  position: sticky;
+  top: -16px;
+  z-index: 2;
+  margin: -16px -20px 12px;
+  padding: 16px 20px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
 }
 .dialog-panel h2 { margin: 0; font-size: 18px; letter-spacing: 0.02em; }
 .dialog-panel .close {
