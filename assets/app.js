@@ -1000,6 +1000,8 @@ bindRange('friction', 'friction', 'frictionVal', v => v.toFixed(2));
 bindRange('bounce', 'bounce', 'bounceVal', v => v.toFixed(2));
 bindRange('throwStrength', 'throwStrength', 'throwVal', v => v.toFixed(2) + '×');
 bindRange('wobbleAmp', 'wobbleAmp', 'wobbleVal', v => v.toFixed(2));
+bindCheckbox('bumpFeedback', 'bumpFeedback');
+bindRange('bumpFeedbackIntensity', 'bumpFeedbackIntensity', 'bumpFeedbackIntensityVal', v => v.toFixed(1) + '×');
 
 const useHl = document.getElementById('useHighlight');
 if (useHl) {

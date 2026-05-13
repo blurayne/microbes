@@ -48,7 +48,9 @@ const RT_CLEAR_A = RT_TRANSLUCENT ? 0.0 : 1.0;
 //  11..13  cytoBot  (rgb)
 //  14..16  nucleus  (rgb)
 //  17..20  outline  (rgba; .a = c.flash)
-const INSTANCE_FLOATS = 22;
+//  21      diskAlpha (SPLITTING crossfade)
+//  22..23  bump     (vec2: impact-normal x intensity, bump-feedback)
+const INSTANCE_FLOATS = 24;
 const INSTANCE_STRIDE = INSTANCE_FLOATS * 4;
 
 const BODY_KIND_FLOAT = {
@@ -96,6 +98,7 @@ struct VsIn {
   @location(5) nucleus: vec3<f32>,
   @location(6) outline: vec4<f32>,
   @location(7) diskAlpha: f32,    // SPLITTING crossfade: 0..1 over p ∈ [0.5, 1.0]
+  @location(8) bump: vec2<f32>,    // bump-feedback squash axis (impact-normal x intensity, 0..1)
 };
 
 struct VsOut {
@@ -108,6 +111,7 @@ struct VsOut {
   @location(5) nucleus: vec3<f32>,
   @location(6) outline: vec4<f32>,
   @location(7) diskAlpha: f32,
+  @location(8) bump: vec2<f32>,
 };
 
 @vertex
@@ -144,6 +148,7 @@ fn vs_main(in: VsIn) -> VsOut {
   out.nucleus = in.nucleus;
   out.outline = in.outline;
   out.diskAlpha = in.diskAlpha;
+  out.bump = in.bump;
   return out;
 }
 
@@ -304,6 +309,15 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     );
     wob = wob * max(0.001, wobbleAmp * in.phase.w);
     bodyR = testShape(in.uv, in.kind, tt) + wob;
+  }
+  // Bump-feedback squash: compress the silhouette on the impact
+  // side and bulge it on the far side. in.bump carries the impact
+  // normal x intensity (0..1). When magnitude is ~0 this is a no-op.
+  let bumpMag = length(in.bump);
+  if (bumpMag > 0.001) {
+    let bumpDir = in.bump / bumpMag;
+    let along = dot(in.uv / max(1e-4, d), bumpDir);
+    bodyR = bodyR * (1.0 - 0.30 * bumpMag * along);
   }
   let sdf = d - bodyR;
   let sel = isSelected(in.kind);
@@ -3441,6 +3455,7 @@ export class WebGPURenderer extends RendererBase {
               { shaderLocation: 5, offset: 56, format: 'float32x3' }, // a_nucleus
               { shaderLocation: 6, offset: 68, format: 'float32x4' }, // a_outline
               { shaderLocation: 7, offset: 84, format: 'float32'   }, // a_diskAlpha (split-end crossfade)
+              { shaderLocation: 8, offset: 88, format: 'float32x2' }, // a_bump (bump-feedback squash axis)
             ],
           },
         ],
@@ -3984,6 +3999,8 @@ export class WebGPURenderer extends RendererBase {
         data[j + 17] = outlineRgb[0]; data[j + 18] = outlineRgb[1]; data[j + 19] = outlineRgb[2];
         data[j + 20] = c.flash || 0;
         data[j + 21] = (s.diskAlpha !== undefined) ? s.diskAlpha : 1;
+        data[j + 22] = c.bumpX || 0;
+        data[j + 23] = c.bumpY || 0;
       }
       device.queue.writeBuffer(
         this._instanceBuffer, 0,
