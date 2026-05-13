@@ -627,12 +627,15 @@ function setPaused(p) {
 // Focus / visibility-driven pause. Skips every user-pause side
 // effect (overlay, aria-pressed, body class) so the moment the
 // window regains focus the sim resumes without an explicit user
-// gesture. Music mutes / restores in lockstep.
+// gesture. Music fades in/out over 200 ms so a quick alt-tab
+// doesn't pop the audio — the user explicitly asked for a soft
+// dip rather than an abrupt cut.
+const AUTO_PAUSE_FADE_MS = 200;
 function setAutoPaused(p) {
   const next = !!p;
   if (next === _autoPaused) return;
   _autoPaused = next;
-  if (_musicPlayer) _musicPlayer.setEnabled(_musicShouldPlay());
+  if (_musicPlayer) _musicPlayer.fadeEnabled(_musicShouldPlay(), AUTO_PAUSE_FADE_MS);
 }
 // `?pose=1` URL override → freeze the sim AND mark the document with
 // `body.is-pose-clean` so every chrome layer (pause overlay, FABs,
