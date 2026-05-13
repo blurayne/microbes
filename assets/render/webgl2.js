@@ -3477,10 +3477,12 @@ export class WebGL2Renderer extends RendererBase {
       if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
       const blink = ((c.nextBlink - now) < 120 && (c.nextBlink - now) > 0) ? 1 : 0;
 
-      // Mouth fill colour follows the cell's nucleus colour (matches the
-      // Canvas2D pass) so it reads as part of the body.
-      const mc = (CELL_TYPES[c.type] || CELL_TYPES.neutrophil).colors;
-      const mcRgb = hexToVec3(mc.nucleus);
+      // Mouth fill colour: hard-coded black so it reads high-contrast
+      // on every theme + at every zoom level. (Used to follow the
+      // cell's nucleus colour, which made mouths invisible against
+      // dark interiors.) Keeps parity with the canvas2d + webgpu
+      // paths.
+      const mcRgb = [0, 0, 0];
 
       // Face follows each shape entry. During SPLITTING getShapes
       // emits two entries with correct half centres + radius

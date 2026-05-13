@@ -20,7 +20,7 @@ export const DEFAULTS = {
   bgFlowSpeed: 0.55,
   bgScale: 1.0,             // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0..4×.
   outlinePx: 5,
-  faceScale: 1.0,           // multiplier on cartoon face size — scales eye radius, pupil radius, eye horizontal spread, and mouth width uniformly across all renderers. 1.0 keeps the previous look; 0 hides faces; up to 3 makes them fill the cell. Clamped 0..3 in loadSettings.
+  faceScale: 0.7,           // multiplier on cartoon face size — scales eye radius, pupil radius, eye horizontal spread, and mouth width uniformly across all renderers. 0.7 is the new default (was 1.0); clamped 0.2..2.2 in loadSettings.
   showDebugField: false,
   // Visual style for the cell rendering itself. Was the lone "theme"
   // setting until late 2026; renamed when the colour palette below was
@@ -454,7 +454,7 @@ export function loadSettings() {
     if (typeof parsed.faceScale !== 'number' || !Number.isFinite(parsed.faceScale)) {
       parsed.faceScale = DEFAULTS.faceScale;
     }
-    parsed.faceScale = Math.max(0, Math.min(3.0, parsed.faceScale));
+    parsed.faceScale = Math.max(0.2, Math.min(2.2, parsed.faceScale));
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Rheinhessisch was renamed to Mainzerisch (Mainz city dialect).

@@ -4175,8 +4175,10 @@ export class WebGPURenderer extends RendererBase {
       const lookX = c.lookX / lm, lookY = c.lookY / lm;
       if (now > c.nextBlink) c.nextBlink = now + 120 + 3000 + Math.random() * 3500;
       const blink = ((c.nextBlink - now) < 120 && (c.nextBlink - now) > 0) ? 1 : 0;
-      const mc = (CELL_TYPES[c.type] || CELL_TYPES.neutrophil).colors;
-      const mcRgb = hexToRgb(mc.nucleus);
+      // Mouth fill colour: hard-coded black so it reads high-contrast
+      // on every theme + at every zoom level. Matches canvas2d +
+      // webgl2 paths.
+      const mcRgb = [0, 0, 0];
       // Face follows each shape entry. During SPLITTING getShapes
       // emits two entries with correct half centres + radius
       // (shape.js:96-97); for NORMAL cells s.{x,y,r} === c.{x,y,r}.
