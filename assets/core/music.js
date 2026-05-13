@@ -79,16 +79,85 @@ export class MusicPlayer {
   }
 
   setEnabled(on) {
+    // Any in-flight fade is incompatible with an instant toggle —
+    // cancel and snap to the requested state.
+    this._cancelFade();
     const wasEnabled = this._enabled;
     this._enabled = !!on;
     if (this._enabled) {
       this._ensureAudio();
+      if (this._audio) this._audio.volume = this._volume;
       this._attemptPlay();
       if (!wasEnabled) this._emitTrackChange();
     } else if (this._audio) {
       this._audio.pause();
       this._pendingPlay = false;
+      // Restore the audio element's volume to the slider value so
+      // the next setEnabled(true) starts at the user's chosen level
+      // (and not at whatever a prior fade left it at).
+      this._audio.volume = this._volume;
     }
+  }
+
+  // Smooth enable/disable. On disable, ramps `audio.volume` down to
+  // 0 over `ms` (default 200) before calling pause(). On enable,
+  // starts the audio silent then ramps up to the slider's level.
+  // Used by the auto-pause path so a window-blur doesn't cut the
+  // music abruptly. Falls through to instant setEnabled when there
+  // is no audio element yet (first call before any user gesture).
+  fadeEnabled(on, ms) {
+    const dur = (typeof ms === 'number' && ms > 0) ? ms : 200;
+    if (!this._audio) {
+      this.setEnabled(on);
+      return;
+    }
+    const wasEnabled = this._enabled;
+    this._enabled = !!on;
+    this._cancelFade();
+    const audio = this._audio;
+    if (this._enabled) {
+      // Fade in: start silent, kick off playback, ramp to slider level.
+      this._ensureAudio();
+      audio.volume = 0;
+      this._attemptPlay();
+      if (!wasEnabled) this._emitTrackChange();
+      this._fadeVolume(this._volume, dur);
+    } else {
+      // Fade out: ramp to 0, then pause. After pause, restore the
+      // element's volume to the slider level so a later setEnabled
+      // doesn't pop in silent.
+      this._fadeVolume(0, dur, () => {
+        if (!this._audio) return;
+        this._audio.pause();
+        this._pendingPlay = false;
+        this._audio.volume = this._volume;
+      });
+    }
+  }
+
+  _cancelFade() {
+    if (this._fadeRaf) {
+      cancelAnimationFrame(this._fadeRaf);
+      this._fadeRaf = null;
+    }
+  }
+
+  _fadeVolume(target, ms, done) {
+    const audio = this._audio;
+    if (!audio) { if (done) done(); return; }
+    const startV = audio.volume;
+    const t0 = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / ms);
+      audio.volume = Math.max(0, Math.min(1, startV + (target - startV) * k));
+      if (k < 1) {
+        this._fadeRaf = requestAnimationFrame(step);
+      } else {
+        this._fadeRaf = null;
+        if (done) done();
+      }
+    };
+    this._fadeRaf = requestAnimationFrame(step);
   }
 
   // Volume = 0 silently stops playback (user spec: muting via the
