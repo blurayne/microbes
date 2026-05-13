@@ -1216,6 +1216,57 @@ void main() {
 // is distorted, so the pass is cheap (one fullscreen quad with an
 // inner loop bounded by the cap).
 const RIPPLE_MAX = 24;
+const GLASS_MAX = 24;
+// Glass-membrane lensing overlay. Parity port of GLASS_BG_WGSL in
+// webgpu.js — same band geometry (0.85*r..1.15*r), same half-sine
+// lens peak, optional chromatic-split via u_glassParams.y.
+const FRAG_GLASS_BG = `#version 300 es
+precision highp float;
+in vec2 v_uv;
+uniform sampler2D u_bg;
+uniform float u_time;
+uniform vec2 u_resolution;
+uniform int u_cellCount;
+uniform vec3 u_cells[${GLASS_MAX}];      // (uvX, uvY, uvR_minAxis)
+uniform vec2 u_glassParams;              // (strength, chroma)
+out vec4 outColor;
+
+void main() {
+  vec2 uv = v_uv;
+  vec2 disp = vec2(0.0);
+  float minAx = min(u_resolution.x, u_resolution.y);
+  float strength = u_glassParams.x;
+  float chroma   = u_glassParams.y;
+  for (int i = 0; i < ${GLASS_MAX}; i++) {
+    if (i >= u_cellCount) break;
+    vec3 c = u_cells[i];
+    vec2 dvUv = uv - c.xy;
+    vec2 dvPx = dvUv * u_resolution;
+    float dPx  = length(dvPx);
+    float rPx  = max(c.z * minAx, 4.0);
+    float lo   = rPx * 0.85;
+    float hi   = rPx * 1.15;
+    if (dPx < lo || dPx > hi) continue;
+    float t = (dPx - lo) / max(1e-4, hi - lo);
+    float lens = sin(t * 3.14159);
+    vec2 normal = dvUv / max(1e-4, length(dvUv));
+    disp += normal * lens;
+  }
+  vec2 baseDisp = disp * (8.0 / minAx) * strength;
+  if (chroma > 0.5) {
+    vec2 uvR = clamp(uv + baseDisp * 0.85, 0.0, 1.0);
+    vec2 uvG = clamp(uv + baseDisp * 1.00, 0.0, 1.0);
+    vec2 uvB = clamp(uv + baseDisp * 1.15, 0.0, 1.0);
+    float r = texture(u_bg, uvR).r;
+    float g = texture(u_bg, uvG).g;
+    float b = texture(u_bg, uvB).b;
+    outColor = vec4(r, g, b, 1.0);
+  } else {
+    vec3 rgb = texture(u_bg, clamp(uv + baseDisp, 0.0, 1.0)).rgb;
+    outColor = vec4(rgb, 1.0);
+  }
+}
+`;
 const FRAG_RIPPLE_BG = `#version 300 es
 precision highp float;
 in vec2 v_uv;
@@ -2546,6 +2597,8 @@ export class WebGL2Renderer extends RendererBase {
           this._postChain.push('ripples');
         } else if (kind === 'caustics' && S.causticsOverlay) {
           this._postChain.push('caustics');
+        } else if (kind === 'glass' && S.glassMembrane) {
+          this._postChain.push('glass');
         } else if ((kind === 'microscope' || kind === 'duotone')
                    && (S.microscopeBlur || S.makeItReal)) {
           if (!this._postChain.includes('sceneFx')) this._postChain.push('sceneFx');
@@ -2565,6 +2618,7 @@ export class WebGL2Renderer extends RendererBase {
       for (const kind of this._postChain) {
         if (kind === 'ripples')  this._rippleEnsureProg();
         if (kind === 'caustics') this._causticEnsureProg();
+        if (kind === 'glass')    this._glassEnsureProg();
         if (kind === 'sceneFx')  this._sceneFxEnsureProg();
       }
       this._postSource = this._postRtA;
@@ -2948,6 +3002,49 @@ export class WebGL2Renderer extends RendererBase {
       this._rippleProg = null;
       this._rippleU = null;
     }
+  }
+  // ── Glass-membrane overlay (WebGL2 parity of glass on webgpu.js) ──
+  _glassEnsureProg() {
+    if (this._glassProg) return;
+    const gl = this.gl;
+    const prog = link(gl, VERT_FULLSCREEN, FRAG_GLASS_BG);
+    this._glassProg = prog;
+    this._glassU = {
+      bg:        gl.getUniformLocation(prog, 'u_bg'),
+      time:      gl.getUniformLocation(prog, 'u_time'),
+      res:       gl.getUniformLocation(prog, 'u_resolution'),
+      cellCount: gl.getUniformLocation(prog, 'u_cellCount'),
+      cells:     gl.getUniformLocation(prog, 'u_cells'),
+      params:    gl.getUniformLocation(prog, 'u_glassParams'),
+    };
+    this._glassCellsBuf = new Float32Array(GLASS_MAX * 3);
+  }
+  _glassDestroy() {
+    const gl = this.gl;
+    if (this._glassProg) {
+      gl.deleteProgram(this._glassProg);
+      this._glassProg = null;
+      this._glassU = null;
+    }
+  }
+  _glassCollectCells() {
+    const buf = this._glassCellsBuf;
+    const cells = (this.sim && this.sim.cells) || [];
+    const W = this.W, H = this.H;
+    const minAx = Math.max(1, Math.min(W, H));
+    let n = 0;
+    for (let i = 0; i < cells.length && n < GLASS_MAX; i++) {
+      const c = cells[i];
+      const s = this.sim.worldToScreen(c.x, c.y);
+      const m = c.r * 1.5;
+      if (s.x < -m || s.y < -m || s.x > W + m || s.y > H + m) continue;
+      buf[n * 3 + 0] = s.x / W;
+      buf[n * 3 + 1] = s.y / H;
+      buf[n * 3 + 2] = (c.r * this.camera.scale) / minAx;
+      n++;
+    }
+    for (let i = n * 3; i < GLASS_MAX * 3; i++) buf[i] = 0;
+    return n;
   }
   // Pack at most RIPPLE_MAX on-screen cells into _rippleCellsBuf as
   // (uvX, uvY, uvR_minAxis) triplets. Returns the count actually used.
@@ -4102,6 +4199,20 @@ export class WebGL2Renderer extends RendererBase {
                    S.rippleDensity ?? 1.5,
                    S.rippleReach ?? 0.7,
                    S.rippleStrength ?? 1.0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    } else if (kind === 'glass' && this._glassProg) {
+      const cellCount = this._glassCollectCells();
+      gl.useProgram(this._glassProg);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, srcTex);
+      gl.uniform1i(this._glassU.bg, 0);
+      gl.uniform1f(this._glassU.time, t);
+      gl.uniform2f(this._glassU.res, this.canvas.width, this.canvas.height);
+      gl.uniform1i(this._glassU.cellCount, cellCount);
+      gl.uniform3fv(this._glassU.cells, this._glassCellsBuf);
+      gl.uniform2f(this._glassU.params,
+                   S.glassStrength ?? 1.0,
+                   S.glassChroma ? 1.0 : 0.0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     } else if (kind === 'caustics' && this._causticProg) {
       gl.useProgram(this._causticProg);
