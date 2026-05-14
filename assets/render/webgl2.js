@@ -4371,6 +4371,19 @@ export class WebGL2Renderer extends RendererBase {
       }
       gl.enable(gl.BLEND);
       gl.bindVertexArray(null);
+      // Unbind the post-chain source texture from TEXTURE0 + TEXTURE1.
+      // _runPostPass bound _postSource.tex (= _postRtA.tex) to one of
+      // these units for sampling. If left bound, the NEXT frame's bg
+      // pass tries to render into _postRtA.fbo (whose color attachment
+      // IS that texture) while it's still bound for reading — a WebGL2
+      // feedback loop, GL_INVALID_OPERATION on the draw, and the bg
+      // silently fails (cells render on top of the defensive-clear
+      // black). Diagnostic confirmed glErr=1282 starting on frame 2
+      // with the bg center pixel at (0,0,0).
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, null);
       this._postChain = [];
       this._postSource = null;
       this._sceneFbo = null;
