@@ -1739,6 +1739,471 @@ export const LOCALES = {
     cell_toxin_label: 'Toxinum',
     cell_toxin_desc: 'Crystallum venenosum dentatum; fluctuat et tactus urit.',
   },
+  // Quenya (Tolkien's High-Elven). Section headings, buttons, and
+  // common slider labels use attested stems (lambë, sanwë, tyalië,
+  // hroa, ohtar, lirië, hauta-, anta-, cenwë). Technical UI strings
+  // that have no Quenya analogue (renderer, fps, JSON, GPU) are
+  // coined transparently from the closest attested roots; the rest
+  // falls through to English.
+  qya: {
+    settings_title: 'I·Lairyar', settings_accordion: 'Tatanir',
+    language: 'Lambë', theme: 'Sanwë', interface_color: 'Quilëa Lúnë',
+    background: 'Apa-Norë', gameplay: 'Tyalië',
+    splitting: 'Cilmë', population: 'Lië',
+    physics: 'Ermandë', look: 'Cenwë',
+    performance: 'Carmë', audio: 'Lammar',
+    debug: 'Tirië', overlays_section: 'Hostar',
+    about: 'Pa', links: 'Lender', github: 'GitHub',
+    clear: 'Avahta', copy: 'Anya', cancel: 'Áva',
+    paused: 'Hauta!', paused_hint: 'Tap-pa Spacë ar nu-tula',
+    pause: 'Hauta',
+    show_fps: 'Tana FPS + Tantanir', show_build_info: 'Tana Carastië',
+    show_cell_total: 'Tana Quenta Ohtarion',
+    show_renderer: 'Tana Tantanë',
+    cartoon_mode: 'Antalassë (anwa + anto)',
+    nav_arrows: 'Pilindi pen-cenwë',
+    music_enabled: 'Lirië · á carë',
+    cell_border: 'Lúna ohtaro (GPU)',
+    reset_sim: 'Nan-panya i tyalië',
+    adding: 'Panya: {name}',
+    help_group_good: 'I·varnar — Hroa ar varnessë',
+    // Mode chips
+    mode_target: 'Estanië-tië',
+    mode_target_tip: 'Tap-pa cilië · á menta',
+    mode_split: 'Cilmë-tië',
+    mode_split_tip: 'Tap-pa ohtaro · cilmen',
+    mode_kill: 'Qualmë-tië',
+    mode_kill_tip: 'Tap-pa ohtaro · qualmen',
+    // Game mode
+    game_mode: 'Tyalië-tië', mode_free: 'Léra Tyalië',
+    mode_campaign_soon: 'Ohtanórë (rato)', mode_survival_soon: 'Cuilë (rato)',
+    composition_hud: 'Hostarion-HUD',
+    allow_pathogens: 'Lava engwar',
+    pinch_rotation: 'Atta-lepta quernië',
+    fullscreen: 'Quanta-cenwë',
+    // Physics / look
+    friction: 'Norta', bounce: 'Tincë',
+    throw_strength: 'Hahta-poldorë',
+    wobble: 'Quallë',
+    bg_flow: 'Apanorë · siri', bg_scale: 'Apanorë · vehtë',
+    outline_px: 'Pelta (px)', face_size: 'Anwa-vehtë',
+    membrane: 'Renda', cell_size: 'Ohtaro-vehtë',
+    use_highlight: 'Á yúya quilëa cálo',
+    line_thickness: 'Lúnë-tiuca',
+    max_cells: 'Anta ohtarion',
+    // Add dialog
+    add_cell: 'Anta ohtaro', add_pathogen: 'Anta engwa',
+    add_title: 'Anta', add_tab_cells: 'Ohtari',
+    add_tab_pathogens: 'Engwar', add_tab_theme: 'Sanwë',
+    view_grid: 'Lattë-cenwë', view_list: 'Tehta-cenwë',
+    // Spawn banners
+    spawn_banner_friends: 'Meldor', spawn_banner_prey: 'Aratar',
+    spawn_banner_foes: 'Cottor', spawn_banner_close: 'Mára',
+    // Audio
+    music_volume: 'Lirië-tárë', sfx_volume: 'Tárë-lammar',
+    now_playing: 'Si lirantë:', next_track: 'I·hilya',
+    // Renderer
+    renderer_engine: 'Carma', renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2', renderer_webgpu: 'WebGPU',
+    // Navigation / help
+    help_title: 'Ohtari i·varnessëo',
+    nav_settings: 'Lairyar', nav_help: 'Resta',
+    nav_add_cell: 'Anta ohtaro', nav_add_pathogen: 'Anta engwa',
+    nav_reload: 'Nan-quanta',
+    fps_line: '{fps} fps · ohtari {n}',
+    // Pathogen groups
+    pgroup_virus: 'Yamar', pgroup_bacteria: 'Engwar',
+    pgroup_parasite: 'Lirar', pgroup_fungus: 'Hwesta', pgroup_toxin: 'Saewë',
+    // Palette hints
+    palette_to_help: 'Pala — ya carë ilya ohtar →',
+    palette_bad_to_help: 'Pala — ya carë ilya engwa →',
+    // About
+    about_credits: 'Antaron', about_licences: 'Hilyo lavi',
+    about_desc: 'Atta-lepta tyalië ohtarion ar engwar.',
+    about_project_licence: 'Nyarna lava',
+    about_soundtracks: 'Lirenwar',
+    // Toasts
+    toast_settings_copied: 'Lairyar antainë vi nungwar',
+    toast_settings_saved: 'Lairyar haryainë ve parma',
+    toast_settings_applied: 'Lairyar tulna — nan-quanta',
+  },
+  // Sindarin (Tolkien's Grey-Elven). Section headings + buttons use
+  // attested stems (lam, naer, cened, daro!, echad-, linnod, rhaw,
+  // mellon, jagh). Modern technical terms are coined transparently
+  // from the closest roots; unmatched keys fall through to English.
+  sjn: {
+    settings_title: 'In Aenig', settings_accordion: 'Tegil',
+    language: 'Lam', theme: 'Naer', interface_color: 'Liss e Aenig',
+    background: 'Nan Dôr', gameplay: 'Teilien',
+    splitting: 'Gwedh', population: 'Lin',
+    physics: 'Ngalad', look: 'Cened',
+    performance: 'Curu', audio: 'Lamath',
+    debug: 'Tiren', overlays_section: 'Edledhron',
+    about: 'Pen', links: 'Lend', github: 'GitHub',
+    clear: 'Avo', copy: 'Tegil-rim', cancel: 'Pe-no',
+    paused: 'Daro!', paused_hint: 'Tegil thar dadwen',
+    pause: 'Daro',
+    show_fps: 'Tîr FPS + Tegil', show_build_info: 'Tîr Carastir',
+    show_cell_total: 'Tîr Ohtarion',
+    show_renderer: 'Tîr Tegil',
+    cartoon_mode: 'Naergon · hin (hen + nîr)',
+    nav_arrows: 'Cuig-bain',
+    music_enabled: 'Linnod · cair',
+    reset_sim: 'Echad an-uir teilien',
+    adding: 'Echad: {name}',
+    help_group_good: 'I·varia — Rhaw a varnad',
+    // Mode chips
+    mode_target: 'Cened-naer', mode_target_tip: 'Tegil — dîn / mentho',
+    mode_split: 'Gwedh-naer', mode_split_tip: 'Tegil ohtar — gwedhad',
+    mode_kill: 'Goe-naer', mode_kill_tip: 'Tegil ohtar — gwann',
+    // Game mode
+    game_mode: 'Teilien-naer', mode_free: 'Teilien Lain',
+    mode_campaign_soon: 'Maeth (rim)', mode_survival_soon: 'Cuil (rim)',
+    composition_hud: 'Emyn-HUD',
+    allow_pathogens: 'Lave megerin',
+    pinch_rotation: 'Cared-cein peding',
+    fullscreen: 'Pan-cened',
+    // Physics / look
+    friction: 'Glamren', bounce: 'Cab',
+    throw_strength: 'Hâl-belin',
+    wobble: 'Glaeren',
+    bg_flow: 'Nan dôr · siria', bg_scale: 'Nan dôr · daer',
+    outline_px: 'Cuig (px)', face_size: 'Hen-daer',
+    membrane: 'Hith', cell_size: 'Ohtar-daer',
+    use_highlight: 'Iuith liss-galad',
+    line_thickness: 'Cuig-tîth',
+    max_cells: 'Ohtarion meth',
+    // Add dialog
+    add_cell: 'Echad ohtar', add_pathogen: 'Echad meger',
+    add_title: 'Echad', add_tab_cells: 'Ohtarin',
+    add_tab_pathogens: 'Megerin', add_tab_theme: 'Naer',
+    view_grid: 'Cened-bartho', view_list: 'Cened-tehta',
+    // Spawn banners
+    spawn_banner_friends: 'Mellyn', spawn_banner_prey: 'Aphadon',
+    spawn_banner_foes: 'Cotho', spawn_banner_close: 'Im iston',
+    // Audio
+    music_volume: 'Linnod-bell', sfx_volume: 'Bell-lamath',
+    now_playing: 'Si linnod:', next_track: 'I·aphadol',
+    // Renderer
+    renderer_engine: 'Curu', renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2', renderer_webgpu: 'WebGPU',
+    // Navigation / help
+    help_title: 'Ohtarin in·varnen',
+    nav_settings: 'Aenig', nav_help: 'Estel',
+    nav_add_cell: 'Echad ohtar', nav_add_pathogen: 'Echad meger',
+    nav_reload: 'Pe-no echad',
+    fps_line: '{fps} fps · ohtarin {n}',
+    // Pathogen groups
+    pgroup_virus: 'Cuithir', pgroup_bacteria: 'Megerin',
+    pgroup_parasite: 'Garwath', pgroup_fungus: 'Faw', pgroup_toxin: 'Saew',
+    // Palette hints
+    palette_to_help: 'Iston — man car pôd ohtar →',
+    palette_bad_to_help: 'Iston — man car pôd meger →',
+    // About
+    about_credits: 'Tegil-edain', about_licences: 'Lavath',
+    about_desc: 'Cair-cein teilien ohtarion a megerin.',
+    about_project_licence: 'Pen-lavath',
+    about_soundtracks: 'Linnedh',
+    // Toasts
+    toast_settings_copied: 'Aenig tegil-rim',
+    toast_settings_saved: 'Aenig haud na-parf',
+    toast_settings_applied: 'Aenig pen — pe-no echad',
+  },
+  // Black Speech of Mordor — extremely limited canonical
+  // vocabulary (the Ring inscription + a handful of names + Orc
+  // curses). Most UI strings deliberately fall through to English:
+  // there's no attested word for "Settings", and inventing fake
+  // ones isn't honest. The handful of canonical roots (nazg, krimp,
+  // durb, gimb, thrak, búrz, sharkû, uruk-hai, snaga, glob, ash,
+  // ronk, tark, gûl, lat) are slotted into the keys where they fit
+  // naturally; everything else stays English.
+  mor: {
+    settings_title: 'Sharkû-Lat',
+    language: 'Glob-zat', theme: 'Búrz-tark',
+    background: 'Lugbúrz-shu',
+    gameplay: 'Ash · matum',
+    splitting: 'Krimp', population: 'Uruk-hai',
+    physics: 'Thrak', look: 'Gimb',
+    performance: 'Durb',
+    about: 'Nazg-pa', links: 'Krimpatul', github: 'GitHub',
+    clear: 'Búrz', copy: 'Gimbatul',
+    paused: 'Krimp!', paused_hint: 'Lat-tap Spacë',
+    pause: 'Krimp',
+    cartoon_mode: 'Vrasubatlat (faces)',
+    nav_arrows: 'Snaga-pin',
+    music_enabled: 'Ghâsh-zat',
+    reset_sim: 'Krimpatul fund!',
+    adding: 'Thrak: {name}',
+    help_group_good: 'Uruk-hai · ronk',
+    // Mode chips
+    mode_target: 'Gimbatul', mode_target_tip: 'Lat-tap · lat-thrak',
+    mode_split: 'Krimpatul', mode_split_tip: 'Lat-tap · krimp ronk',
+    mode_kill: 'Durbatulûk', mode_kill_tip: 'Lat-tap · ronk gûl',
+    // Add dialog
+    add_cell: 'Thrak ronk', add_pathogen: 'Thrak glob',
+    add_title: 'Thrak', add_tab_cells: 'Uruk-hai', add_tab_pathogens: 'Glob',
+    // Spawn banners
+    spawn_banner_friends: 'Hai', spawn_banner_prey: 'Lat-thrak',
+    spawn_banner_foes: 'Tark', spawn_banner_close: 'Ash!',
+    // Renderer
+    renderer_engine: 'Durb-zat',
+    // Navigation
+    nav_settings: 'Sharkû', nav_help: 'Ash',
+    nav_add_cell: 'Thrak ronk', nav_add_pathogen: 'Thrak glob',
+    nav_reload: 'Krimp-fund',
+    // Pathogen groups
+    pgroup_virus: 'Glob-vrasub', pgroup_bacteria: 'Glob-snaga',
+    pgroup_parasite: 'Lat-thrak', pgroup_fungus: 'Búrz-faug', pgroup_toxin: 'Gûl',
+  },
+  // Klingon (Star Trek, tlhIngan Hol) — uses canonical Klingon
+  // vocabulary from Marc Okrand's dictionaries (TKD + KGT).
+  // Capitalised letters (D, H, I, Q, S) and apostrophes are
+  // distinct phonemes per the orthography, not stylistic. Verbs
+  // are bare stems for labels; imperative prefixes (yI-/pe-) are
+  // used in tips that address the player.
+  tlh: {
+    settings_title: 'choH', settings_accordion: 'roj',
+    language: 'Hol', theme: 'mIw', interface_color: 'rItlh mIw',
+    background: 'Daq', gameplay: 'Qoj',
+    splitting: 'pe\'', population: 'ghom',
+    physics: 'qa\'', look: 'leghbogh',
+    performance: 'tetlh', audio: 'wab',
+    debug: 'Doch yIDel', overlays_section: 'cha\'logh',
+    about: 'Dotlh', links: 'rar', github: 'GitHub',
+    clear: 'Qaw\'', copy: 'velqa\'', cancel: 'Hutlh',
+    paused: 'mev!', paused_hint: 'Spacë yIQoy mevmoHmeH',
+    pause: 'mev',
+    show_fps: 'FPS + jonta\' tu\'lu\'', show_build_info: 'cher tu\'lu\'',
+    show_cell_total: 'ngogh mI\' tu\'lu\'',
+    show_renderer: 'jonta\' tu\'lu\'',
+    cartoon_mode: 'qech qab (mIn + nujDu\')',
+    nav_arrows: 'Hol-mIw naQ',
+    music_enabled: 'QoQ · DamI\'',
+    reset_sim: 'choH chu\'!',
+    adding: 'chenmoH: {name}',
+    help_group_good: 'Hung Hap je porgh',
+    // Mode chips
+    mode_target: 'wIv mIw', mode_target_tip: 'yIHot · yIngeH',
+    mode_split: 'pe\' mIw', mode_split_tip: 'ngogh yIHot · yIpe\'',
+    mode_kill: 'HoH mIw', mode_kill_tip: 'ngogh yIHot · yIHoH',
+    // Game mode
+    game_mode: 'Qoj mIw', mode_free: 'Qoj tlhab',
+    mode_campaign_soon: 'may\' (tugh)', mode_survival_soon: 'taH (tugh)',
+    composition_hud: 'chenmoH HUD',
+    allow_pathogens: 'roplI\' chaw\'',
+    pinch_rotation: 'cha\' nItlh chen',
+    fullscreen: 'naQ-leghbogh',
+    // Physics / look
+    friction: 'Sun', bounce: 'jub',
+    throw_strength: 'baH HoS',
+    wobble: 'wegh',
+    bg_flow: 'Daq qet', bg_scale: 'Daq tIn',
+    outline_px: 'tlhegh (px)', face_size: 'qab tIn',
+    membrane: 'yub', cell_size: 'ngogh tIn',
+    use_highlight: 'wovbogh rItlh lo\'',
+    line_thickness: 'tlhegh tIq',
+    max_cells: 'ngogh mI\' veb',
+    // Add dialog
+    add_cell: 'ngogh chel', add_pathogen: 'roplI\' chel',
+    add_title: 'chel', add_tab_cells: 'ngoghmey',
+    add_tab_pathogens: 'roplI\'mey', add_tab_theme: 'mIw',
+    view_grid: 'tIH leghbogh', view_list: 'tetlh leghbogh',
+    // Spawn banners
+    spawn_banner_friends: 'jupwI\'', spawn_banner_prey: 'pa\'logh',
+    spawn_banner_foes: 'jagh', spawn_banner_close: 'yajchu\'',
+    // Audio
+    music_volume: 'QoQ wab', sfx_volume: 'wab Hoch',
+    now_playing: 'DaH DamI\':', next_track: 'QoQ veb',
+    // Renderer
+    renderer_engine: 'jonta\'', renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2', renderer_webgpu: 'WebGPU',
+    // Navigation / help
+    help_title: 'porgh ngoghmey',
+    nav_settings: 'choH', nav_help: 'QaH',
+    nav_add_cell: 'ngogh chel', nav_add_pathogen: 'roplI\' chel',
+    nav_reload: 'choH chu\'',
+    fps_line: '{fps} fps · ngogh {n}',
+    // Pathogen groups
+    pgroup_virus: 'roplI\'', pgroup_bacteria: 'mIn-yoq',
+    pgroup_parasite: 'ghom-Qob', pgroup_fungus: 'naH-Qob', pgroup_toxin: 'tar',
+    // Palette hints
+    palette_to_help: 'ngogh Hoch Doch yajmeH →',
+    palette_bad_to_help: 'roplI\' Hoch Doch yajmeH →',
+    // About
+    about_credits: 'chenmoHwI\'', about_licences: 'chaw\' latlh',
+    about_desc: 'porgh ngoghmey rurchuq — Hung je roplI\'.',
+    about_project_licence: 'chaw\' nugh',
+    about_soundtracks: 'QoQ-vetlh',
+    // Toasts
+    toast_settings_copied: 'choH velqa\'lu\'pu\'',
+    toast_settings_saved: 'choH polpu\'',
+    toast_settings_applied: 'choH lu\'pu\' — chol\'eghpu\'',
+  },
+  // Proto-Indo-European (German "indogermanisch"). Asterisks mark
+  // reconstructed forms per the linguistic convention. Roots are
+  // taken from standard handbooks (LIV, Pokorny, Mallory–Adams)
+  // where one exists; ad-hoc compounds glue two roots with a
+  // hyphen. Laryngeals stay as h1/h2/h3 to keep ASCII-friendly;
+  // palato-velars use ḱ. Any key not present falls through to
+  // English — there's no PIE word for "WebGPU".
+  pie: {
+    settings_title: '*kerd-yos', settings_accordion: '*kom-leǵ-',
+    language: '*dnǵʰu', theme: '*deh3-tom', interface_color: '*kolH-',
+    background: '*pedom', gameplay: '*lūdʰ-',
+    splitting: '*sḱey-', population: '*tewteh',
+    physics: '*bʰuH-', look: '*derḱ-',
+    performance: '*ḱer-', audio: '*ḱlewos',
+    debug: '*sēg-', overlays_section: '*upér-',
+    about: '*peri-', links: '*ǵʰerH-', github: 'GitHub',
+    clear: '*leuk-', copy: '*kʷel-', cancel: '*ne-',
+    paused: '*sed-!', paused_hint: '*tap- · *sed-',
+    pause: '*sed-',
+    show_fps: 'FPS + *ḱer-os', show_build_info: '*werǵ-tom',
+    show_cell_total: '*kel-ǵos',
+    show_renderer: '*ǵerH-tom',
+    cartoon_mode: '*proso · h3ekʷs (eyes + h1ed-)',
+    nav_arrows: '*peys-eh1y-',
+    music_enabled: '*kanH- · *agō-',
+    reset_sim: '*newos · *dʰeh1-',
+    adding: '*deh3-: {name}',
+    help_group_good: '*werH- · *peḱu',
+    // Mode chips
+    mode_target: '*werH-mod', mode_target_tip: '*tap- · *peḱu *sḱey-',
+    mode_split: '*sḱey-mod', mode_split_tip: '*tap- · *sḱey-',
+    mode_kill: '*gʷʰen-mod', mode_kill_tip: '*tap- · *gʷʰen-',
+    // Game mode
+    game_mode: '*lūdʰ-mod', mode_free: '*leudʰ-eros *lūdʰ-',
+    mode_campaign_soon: '*peku-magʰ- (*nu)', mode_survival_soon: '*gʷeyh3- (*nu)',
+    composition_hud: '*kom-pos HUD',
+    allow_pathogens: '*lewbʰ- *peḱu-Qob',
+    pinch_rotation: '*dewh2 *peys- *kʷelh1-',
+    fullscreen: '*pleh1-w *derḱ-',
+    // Physics / look
+    friction: '*trib-', bounce: '*ster-',
+    throw_strength: '*werg- *ḱer-',
+    wobble: '*ḱweh1-',
+    bg_flow: '*pedom *sreu-', bg_scale: '*pedom *meh1-',
+    outline_px: '*ǵerH- (px)', face_size: '*h3ekʷ-os',
+    membrane: '*ten-', cell_size: '*kel-ǵos *meh1-',
+    use_highlight: '*lewk-os *kʷel-',
+    line_thickness: '*ǵerH- *tegu-',
+    max_cells: '*kel-ǵos *mag-',
+    // Add dialog
+    add_cell: '*deh3- *kel-ǵos', add_pathogen: '*deh3- *peḱu-Qob',
+    add_title: '*deh3-', add_tab_cells: '*kel-ǵos-i',
+    add_tab_pathogens: '*peḱu-Qob-i', add_tab_theme: '*deh3-tom',
+    view_grid: '*derḱ- *plek-', view_list: '*derḱ- *ḱer-os',
+    // Spawn banners
+    spawn_banner_friends: '*priH-os', spawn_banner_prey: '*peḱu',
+    spawn_banner_foes: '*dus-mon-', spawn_banner_close: '*weyd-h2e',
+    // Audio
+    music_volume: '*kanH- *werg-', sfx_volume: '*ḱlewos *werg-',
+    now_playing: '*nu *kanH-:', next_track: '*ant-eros',
+    // Renderer
+    renderer_engine: '*ǵerH-', renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2', renderer_webgpu: 'WebGPU',
+    // Navigation / help
+    help_title: '*peḱu *kel-ǵos *werH-',
+    nav_settings: '*kerd-yos', nav_help: '*septm-',
+    nav_add_cell: '*deh3- *kel-ǵos', nav_add_pathogen: '*deh3- *peḱu-Qob',
+    nav_reload: '*nu *werǵ-',
+    fps_line: '{fps} fps · *kel-ǵos {n}',
+    // Pathogen groups
+    pgroup_virus: '*weys-', pgroup_bacteria: '*peḱu-mor',
+    pgroup_parasite: '*sed-mor', pgroup_fungus: '*bʰewh2-', pgroup_toxin: '*deh3-mor',
+    // About
+    about_credits: '*deh3-tor-', about_licences: '*lewbʰ-mor',
+    about_desc: '*peḱu *kel-ǵos *lūdʰ- — *dewh2 *peys- *lūdʰ-.',
+    about_project_licence: '*werǵ- *lewbʰ-',
+    about_soundtracks: '*kanH- *deh3-',
+    // Toasts
+    toast_settings_copied: '*kerd-yos *kʷel-os',
+    toast_settings_saved: '*kerd-yos *sed-os',
+    toast_settings_applied: '*kerd-yos *bʰuH- — *nu *werǵ-',
+  },
+  // Mittelhochdeutsch (Middle High German, c. 1050–1350). Uses
+  // circumflex â/î/ô/û + diphthong ie/iu where modern High German
+  // simplified them. Lexicon stays in MHG range (Lexer / BMZ);
+  // truly modern terms (renderer engine names, FPS) keep their
+  // English form. Anything not present here falls through to en.
+  gmh: {
+    settings_title: 'Anordnunge', settings_accordion: 'Falt',
+    language: 'Sprâche', theme: 'Wîse', interface_color: 'Zwischensprâch-varwe',
+    background: 'Hindergrunt', gameplay: 'Spil',
+    splitting: 'Scheiden', population: 'Diet',
+    physics: 'Natiur', look: 'Ansehen',
+    performance: 'Krefte', audio: 'Klanc',
+    debug: 'Verprüeven', overlays_section: 'Uoberlegungen',
+    about: 'Umbe', links: 'Geleinden', github: 'GitHub',
+    clear: 'Leren', copy: 'Abe-schrîben', cancel: 'Lâzen',
+    paused: 'Rast!', paused_hint: 'Drücket Spacë oder ein zeichen, daz iuwer spil iuch erniuwe',
+    pause: 'Rast',
+    show_fps: 'FPS + Werker zeigen', show_build_info: 'Werkes mâl zeigen',
+    show_cell_total: 'Zal der zellen zeigen',
+    show_renderer: 'Werker zeigen',
+    cartoon_mode: 'Antlitze (ougen unde munt)',
+    nav_arrows: 'Geleitære-pfîle',
+    music_enabled: 'Sanc · loufet',
+    reset_sim: 'Niuwe heben',
+    adding: 'Zuosetzen: {name}',
+    help_group_good: 'Liphafte werunge unde lîp',
+    // Mode chips
+    mode_target: 'Zilen-art', mode_target_tip: 'Drücket zuo wælen / senden',
+    mode_split: 'Scheiden-art', mode_split_tip: 'Drücket ein zelle, daz si geteilt werde',
+    mode_kill: 'Tœten-art', mode_kill_tip: 'Drücket ein zelle, daz si zerspringe',
+    // Game mode
+    game_mode: 'Spil-art', mode_free: 'Vrî spil',
+    mode_campaign_soon: 'Vart (kurzlich)', mode_survival_soon: 'Bestân (kurzlich)',
+    composition_hud: 'Schowe-zeichen der gesellunge',
+    allow_pathogens: 'Sêr-zellen erlouben',
+    pinch_rotation: 'Zwô-vinger drêhen',
+    fullscreen: 'Alschirm',
+    // Physics / look
+    friction: 'Rîben', bounce: 'Springen',
+    throw_strength: 'Wurfes krefte',
+    wobble: 'Wanken',
+    bg_flow: 'Hindergrunt-vluz', bg_scale: 'Hindergrunt-mâze',
+    outline_px: 'Umberîz (px)', face_size: 'Antlitz-mâze',
+    membrane: 'Hût', cell_size: 'Zelle-mâze',
+    use_highlight: 'Niuze liehte varwe',
+    line_thickness: 'Strich-dicke',
+    max_cells: 'Hœchstzal der zellen',
+    // Add dialog
+    add_cell: 'Setze ein zelle zuo', add_pathogen: 'Setze ein sêr-zellen zuo',
+    add_title: 'Zuosetzen', add_tab_cells: 'Zellen',
+    add_tab_pathogens: 'Sêr-zellen', add_tab_theme: 'Wîse',
+    view_grid: 'Gater-schouwunge', view_list: 'Liste-schouwunge',
+    // Spawn banners
+    spawn_banner_friends: 'Friunde', spawn_banner_prey: 'Vâhe',
+    spawn_banner_foes: 'Vîende', spawn_banner_close: 'Ich vernime',
+    // Audio
+    music_volume: 'Sanc-stærke', sfx_volume: 'Schalle-stærke',
+    now_playing: 'Nu klinget:', next_track: 'Daz næste liet',
+    // Renderer
+    renderer_engine: 'Werker', renderer_canvas: 'Canvas2D',
+    renderer_webgl: 'WebGL2', renderer_webgpu: 'WebGPU',
+    // Navigation / help
+    help_title: 'Zellen des lîb-schirmes',
+    nav_settings: 'Anordnunge', nav_help: 'Helfe',
+    nav_add_cell: 'Zelle zuosetzen', nav_add_pathogen: 'Sêr-zellen zuosetzen',
+    nav_reload: 'Niuwe-laden',
+    fps_line: '{fps} fps · zellen {n}',
+    // Pathogen groups
+    pgroup_virus: 'Wuocher', pgroup_bacteria: 'Würmlîn',
+    pgroup_parasite: 'Mîter', pgroup_fungus: 'Swam', pgroup_toxin: 'Vergift',
+    // Palette hints
+    palette_to_help: 'Lernet, waz iegelich zelle tuot →',
+    palette_bad_to_help: 'Lernet, waz iegelich sêr-zelle tuot →',
+    // About
+    about_credits: 'Werkmeister', about_licences: 'Vremede erloubunge',
+    about_desc: 'Ein zwô-mâzic schouwespil von zellen — abe-frezzære, weht-zellen, unde die sêr-zellen, die si verfolgen.',
+    about_project_licence: 'Werkes erloubunge',
+    about_soundtracks: 'Liederbuoch',
+    // Toasts
+    toast_settings_copied: 'Anordnunge abe-geschriben',
+    toast_settings_saved: 'Anordnunge in einer schrift behalten',
+    toast_settings_applied: 'Anordnunge gevolget — daz spil wirt erniuwet',
+  },
 };
 
 export function T(key, vars) {
