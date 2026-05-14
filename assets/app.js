@@ -4,7 +4,8 @@
 
 import {
   S, SETTINGS_KEY, DEFAULTS, saveSettings, applyI18n,
-  THEMES, BACKGROUNDS, CELL_TYPES, PATHOGEN_GROUPS, LOCALES,
+  THEMES, BACKGROUNDS, CELL_TYPES, PATHOGEN_GROUPS,
+  KNOWN_LOCALE_CODES, ensureLocale, localeReady,
   INTERFACE_ACCENTS,
   T, cellLabel, cellDesc,
   currentTheme, currentBackground, currentInterfaceColor, colorNameFor,
@@ -2238,38 +2239,51 @@ if (langSelect) {
     opt.textContent = label;
     langSelect.appendChild(opt);
   }
-  langSelect.value = (LOCALES[S.lang] ? S.lang : 'en');
+  langSelect.value = (KNOWN_LOCALE_CODES.has(S.lang) ? S.lang : 'en');
   langSelect.addEventListener('change', () => {
-    S.lang = LOCALES[langSelect.value] ? langSelect.value : 'en';
-    saveSettings();
-    applyI18n();
-    renderHelpList();
-    renderPaletteGrid();
-    renderPaletteBadGrid();
-    // Re-localise the BG and interface-color dropdown options. The
-    // <select> values stay valid across locales (we key by const
-    // background-id / accent-id), only the visible textContent changes.
-    if (interfaceColorSelect) {
-      const cur = interfaceColorSelect.value;
-      interfaceColorSelect.innerHTML = '';
-      for (const [key, a] of Object.entries(INTERFACE_ACCENTS)) {
-        const opt = document.createElement('option');
-        opt.value = key;
-        opt.textContent = T('ic_' + key) || a.label;
-        interfaceColorSelect.appendChild(opt);
-      }
-      interfaceColorSelect.value = cur;
-    }
-    for (const sel of [bgSelect, bgSelectInline]) {
-      if (!sel) continue;
-      const cur = sel.value;
-      sel.innerHTML = '';
-      populateBgSelect(sel);
-      sel.value = cur;
-    }
+    const next = KNOWN_LOCALE_CODES.has(langSelect.value) ? langSelect.value : 'en';
+    ensureLocale(next).then(() => {
+      S.lang = next;
+      saveSettings();
+      refreshLocalizedUI();
+    });
   });
 }
+
+// Re-runs every UI render that bakes a locale string into DOM. Used
+// after the language picker changes AND after the initial localeReady
+// fetch resolves (so a non-`en` user goes from English first-paint to
+// localized text without reloading).
+function refreshLocalizedUI() {
+  applyI18n();
+  renderHelpList();
+  renderPaletteGrid();
+  renderPaletteBadGrid();
+  if (interfaceColorSelect) {
+    const cur = interfaceColorSelect.value;
+    interfaceColorSelect.innerHTML = '';
+    for (const [key, a] of Object.entries(INTERFACE_ACCENTS)) {
+      const opt = document.createElement('option');
+      opt.value = key;
+      opt.textContent = T('ic_' + key) || a.label;
+      interfaceColorSelect.appendChild(opt);
+    }
+    interfaceColorSelect.value = cur;
+  }
+  for (const sel of [bgSelect, bgSelectInline]) {
+    if (!sel) continue;
+    const cur = sel.value;
+    sel.innerHTML = '';
+    populateBgSelect(sel);
+    sel.value = cur;
+  }
+}
+
 applyI18n();
+// Non-`en` locales are async. If the user's stored lang is something
+// other than English, the inline `en` fallback paints first, then we
+// re-render the localized UI once the fetch resolves.
+if (S.lang && S.lang !== 'en') localeReady.then(refreshLocalizedUI);
 
 // Seed the "Now playing" label synchronously — the async music init
 // below replaces this with a live-updating subscription, but if that
