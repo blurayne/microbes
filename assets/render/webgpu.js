@@ -1092,25 +1092,32 @@ fn hsv2rgb(c: vec3<f32>) -> vec3<f32> {
     let blurAmt = pow(beyond, curve);
     let minDim  = min(dim.x, dim.y);
     let blurRadius = blurStrength * 0.12 * minDim * blurAmt;
+    // textureSampleLevel (explicit LOD) instead of textureSample
+    // (implicit derivative-based LOD): _postRtA has no mipmaps,
+    // so LOD=0 is correct, AND textureSampleLevel can be called
+    // from non-uniform control flow. textureSample's uniform-
+    // control-flow requirement was the WGSL parser error that
+    // rejected this pipeline on the user's WebGPU device — see
+    // build #361 / cerise-lipid console log.
     if (blurRadius < 0.5) {
-      col = textureSample(sceneTex, sceneSamp, uv).rgb;
+      col = textureSampleLevel(sceneTex, sceneSamp, uv, 0.0).rgb;
     } else {
       let px = vec2<f32>(blurRadius) / dim;
       var sum = vec3<f32>(0.0);
       for (var i: i32 = 0; i < 16; i = i + 1) {
-        sum = sum + textureSample(sceneTex, sceneSamp, uv + poisson[i] * px).rgb;
+        sum = sum + textureSampleLevel(sceneTex, sceneSamp, uv + poisson[i] * px, 0.0).rgb;
       }
       col = sum / 16.0;
     }
   } else {
-    col = textureSample(sceneTex, sceneSamp, uv).rgb;
+    col = textureSampleLevel(sceneTex, sceneSamp, uv, 0.0).rgb;
   }
 
   if (gradeOn > 0.5) {
     let toCtr = uv - vec2<f32>(0.5);
     let caAmt = 0.006 * dot(toCtr, toCtr) * 4.0;
-    let Rc = textureSample(sceneTex, sceneSamp, uv - toCtr * caAmt).r;
-    let Bc = textureSample(sceneTex, sceneSamp, uv + toCtr * caAmt).b;
+    let Rc = textureSampleLevel(sceneTex, sceneSamp, uv - toCtr * caAmt, 0.0).r;
+    let Bc = textureSampleLevel(sceneTex, sceneSamp, uv + toCtr * caAmt, 0.0).b;
     let src = vec3<f32>(Rc, col.g, Bc);
     let shadowAnchor    = hsv2rgb(vec3<f32>(hue1, saturation, 0.18));
     let highlightAnchor = hsv2rgb(vec3<f32>(hue2, saturation, 0.92));
