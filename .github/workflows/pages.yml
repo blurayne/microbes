@@ -69,6 +69,29 @@ jobs:
             dateUtc: '${DATE_UTC}'
           };
           EOF
+          # Cache-bust the build.js script tag so the user's browser
+          # always fetches the freshly-stamped file instead of the
+          # placeholder it may have cached from a previous deploy.
+          # The run number changes every build and is unique per
+          # workflow run, so the URL is guaranteed to be new.
+          sed -i "s|src=\"assets/build.js\"|src=\"assets/build.js?v=${{ github.run_number }}\"|" index.html
+          # Echo the result into the workflow log so the next time
+          # a "build info says dev" report comes in we can confirm
+          # at a glance whether the stamp ran. If this prints the
+          # placeholder, the stamp step has a real problem; if it
+          # prints the real values, the issue is downstream
+          # (artifact upload, deploy, or browser cache).
+          echo "--- assets/build.js after stamp ---"
+          cat assets/build.js
+          echo "--- index.html build.js script tag ---"
+          grep 'assets/build\.js' index.html || true
+          # Fail loudly if the stamp didn't actually replace the
+          # placeholder. Catches workflow regressions before the
+          # broken artifact ships to Pages.
+          if grep -q "sha: 'dev'" assets/build.js; then
+            echo "::error::Stamp step failed - assets/build.js still contains the 'dev' placeholder"
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
