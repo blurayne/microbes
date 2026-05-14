@@ -3741,6 +3741,15 @@ export class WebGL2Renderer extends RendererBase {
   _drawDecorations(shapes, time) {
     this._decorLines.length = 0;
     this._decorTris.length = 0;
+    // Half-width for thick decoration lines, in world units. Each
+    // unit of S.lineThickness ≈ 1 CSS pixel at the current zoom.
+    // GPU line-list primitives can't be widened (gl.lineWidth is a
+    // no-op on most drivers, WebGPU has no API at all), so
+    // _pushLine emits a screen-space-thick quad into _decorTris
+    // instead — the slider now visibly thickens cell + pathogen
+    // decorations (spikes, tendrils, flagella, cilia, drips, …).
+    const lt = (typeof S.lineThickness === 'number') ? S.lineThickness : 1.0;
+    this._decorHalfW = (lt * 0.5) / Math.max(0.001, this.camera.scale);
     const theme = currentTheme();
     for (const s of shapes) {
       const c = s.cell;
@@ -3823,8 +3832,34 @@ export class WebGL2Renderer extends RendererBase {
   }
 
   _pushLine(x1, y1, x2, y2, r, g, b, a) {
-    const arr = this._decorLines;
-    arr.push(x1, y1, r, g, b, a, x2, y2, r, g, b, a);
+    // Expand the segment into a screen-space-thick quad (6 verts
+    // / 2 triangles) and write it into _decorTris. The legacy
+    // gl.LINES draw path can't honour the lineThickness slider —
+    // line-list topology is 1-px on every WebGL2 + WebGPU driver
+    // — so all decoration lines go through the triangle pipeline.
+    // Endpoints are also extended by halfW along the segment
+    // direction so chained segments (flagella waves, tendril
+    // curves) overlap at joints instead of showing a notch.
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6) return;
+    const hw = this._decorHalfW || 0.5;
+    const tx = dx / len, ty = dy / len;          // unit tangent
+    const nx = -ty * hw,  ny =  tx * hw;         // half-width normal
+    const ex =  tx * hw,  ey =  ty * hw;         // cap extension
+    const ax1 = x1 - ex + nx, ay1 = y1 - ey + ny;
+    const ax2 = x1 - ex - nx, ay2 = y1 - ey - ny;
+    const bx1 = x2 + ex + nx, by1 = y2 + ey + ny;
+    const bx2 = x2 + ex - nx, by2 = y2 + ey - ny;
+    const arr = this._decorTris;
+    arr.push(
+      ax1, ay1, r, g, b, a,
+      ax2, ay2, r, g, b, a,
+      bx1, by1, r, g, b, a,
+      ax2, ay2, r, g, b, a,
+      bx2, by2, r, g, b, a,
+      bx1, by1, r, g, b, a,
+    );
   }
   _pushTri(p0, p1, p2, r, g, b, a) {
     const arr = this._decorTris;
