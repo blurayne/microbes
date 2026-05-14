@@ -28,6 +28,20 @@ export const DEFAULTS = {
   maxCells: 1024,           // population cap. UI number input in Settings → Population; clamps to [32, 4096], invalid input resets to maxCells default. Reached cap = spawnAtWorld/beginSplit recycle the oldest cell (#136); see TODO.md for future ideas.
   bgFlowSpeed: 0.45,
   bgScale: 1.75,            // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0.05..20× (the floor matches the shader's `max(u_bgScale, 0.05)` clamp; the 20× ceiling gives enough headroom to shrink features below the obvious-default size).
+  // Per-source resolution multiplier for tissue (image-tiled) bgs
+  // in Canvas2D. The browser's hardware-accelerated path keeps the
+  // decoded image as a GPU-backed CanvasPattern; downsampling to
+  // scale * (width × height) before createPattern gives the GPU
+  // less work per frame at the cost of softer tile edges. 1.0
+  // keeps the original look; 0.5 / 0.25 progressively faster.
+  // WebGL2 / WebGPU paths sample mipmapped textures directly and
+  // ignore this slider — the visible label says "(Canvas2D)" so
+  // the user knows it's renderer-specific.
+  tissueScale: 1.0,
+  // Visible tile width in world units for the tissue bg pattern
+  // (the existing constant from canvas2d.js, surfaced here so
+  // tissueScale's docs make sense). Not user-tunable; just
+  // referenced in the doc.
   outlinePx: 7,
   lineThickness: 0.9,        // global multiplier on antibody stroke width (canvas2d) + every cell outline / decoration / nucleus / face line in canvas2d + cell-border shader uniform (webgl2 / webgpu) + GPU decoration thickness (spikes / tendrils / flagella / cilia / drips / legs / fuzz / Y-receptors emit screen-space-thick quads via _pushLine). 1.0 keeps the previous look. Clamped 0.3..10.0 in loadSettings. GPU antibody Y's stay at 1 device-px because the antibody pipeline still uses line-list topology — that's a separate pipeline from decorations.
   faceScale: 0.6,           // multiplier on cartoon face size — scales eye radius, pupil radius, eye horizontal spread, and mouth width uniformly across all renderers. Clamped 0.2..2.2 in loadSettings.
@@ -520,6 +534,10 @@ export function loadSettings() {
       parsed.bgScale = DEFAULTS.bgScale;
     }
     parsed.bgScale = Math.max(0.05, Math.min(20, parsed.bgScale));
+    if (typeof parsed.tissueScale !== 'number' || !Number.isFinite(parsed.tissueScale)) {
+      parsed.tissueScale = DEFAULTS.tissueScale;
+    }
+    parsed.tissueScale = Math.max(0.1, Math.min(1.0, parsed.tissueScale));
     if (typeof parsed.faceScale !== 'number' || !Number.isFinite(parsed.faceScale)) {
       parsed.faceScale = DEFAULTS.faceScale;
     }
@@ -764,7 +782,7 @@ export const LOCALES = {
     meta_outline_hint_polygon: ' — polygon-union rim, sharp / no blur.',
     auto_split: 'Auto-split (s)',
     friction: 'Friction', bounce: 'Bounce', throw_strength: 'Throw strength',
-    wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background scaling', outline_px: 'Outline px', face_size: 'Face size',
+    wobble: 'Wobble', bg_flow: 'Background flow', bg_scale: 'Background scaling', tissue_scale: 'Tissue quality (Canvas2D)', outline_px: 'Outline px', face_size: 'Face size',
     membrane: 'Membrane', cell_size: 'Cell size', use_highlight: 'Use highlight colour',
     line_thickness: 'Line thickness',
     mode_target: 'Target mode', mode_target_tip: 'Tap to select / send selected cells',
@@ -981,7 +999,7 @@ export const LOCALES = {
     random_split: 'Zufällige Teilung', meta_split: 'Metaball-Teilung',
     auto_split: 'Auto-Teilung (s)',
     friction: 'Reibung', bounce: 'Sprungkraft', throw_strength: 'Wurfkraft',
-    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundskalierung', outline_px: 'Umrandung px', face_size: 'Gesichtsgröße',
+    wobble: 'Wackeln', bg_flow: 'Hintergrundfluss', bg_scale: 'Hintergrundskalierung', tissue_scale: 'Gewebeauflösung (Canvas2D)', outline_px: 'Umrandung px', face_size: 'Gesichtsgröße',
     membrane: 'Membran', cell_size: 'Zellgröße', use_highlight: 'Akzentfarbe verwenden',
     line_thickness: 'Linienstärke',
     mode_target: 'Zielmodus', mode_target_tip: 'Antippen: auswählen / Ziel setzen',

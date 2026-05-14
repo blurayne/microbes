@@ -104,53 +104,81 @@ export class Canvas2DRenderer extends RendererBase {
   // Cached CanvasPattern lookup for the tissue bg (and any future
   // image-tiled bgs). Lazy: kicks off the async fetch on first
   // call, returns null until decode completes. The result is a
-  // repeat-pattern bound to this renderer's 2D context.
+  // repeat-pattern bound to this renderer's 2D context. Cache
+  // key is `${url}@${scale}` so changing S.tissueScale invalidates
+  // the cached pattern; the next frame rebuilds at the new
+  // resolution.
   _tissuePatternFor(url) {
     if (!this._tissuePatternCache) this._tissuePatternCache = new Map();
     const cache = this._tissuePatternCache;
-    if (cache.has(url)) {
-      const v = cache.get(url);
+    const scale = (typeof S.tissueScale === 'number') ? S.tissueScale : 1;
+    const clampedScale = Math.max(0.1, Math.min(1.0, scale));
+    const key = `${url}@${clampedScale}`;
+    if (cache.has(key)) {
+      const v = cache.get(key);
       if (v === 'pending' || v === 'failed') return null;
       return v.pat || null;             // unwrap { pat, img }
     }
-    cache.set(url, 'pending');
+    cache.set(key, 'pending');
     loadTexture(url).then((img) => {
       try {
-        const pat = this.ctx.createPattern(img, 'repeat');
-        // Stash the image alongside the pattern so eviction can
+        let src = img;
+        // Downsample the source image when scale < 1. The fillRect
+        // covers the same world rect, so the visible tile is
+        // unchanged in screen space; only the per-pixel sampling
+        // cost drops because the GPU/CPU is reading from a smaller
+        // texture. 0.1 floor matches the slider clamp; below that
+        // the tile reads as a uniform blur.
+        if (clampedScale < 1 && typeof document !== 'undefined') {
+          const w = Math.max(1, Math.floor(img.naturalWidth  * clampedScale));
+          const h = Math.max(1, Math.floor(img.naturalHeight * clampedScale));
+          const off = document.createElement('canvas');
+          off.width = w;
+          off.height = h;
+          const oc = off.getContext('2d');
+          if (oc) {
+            oc.drawImage(img, 0, 0, w, h);
+            src = off;
+          }
+        }
+        const pat = this.ctx.createPattern(src, 'repeat');
+        // Stash the source alongside the pattern so eviction can
         // null the .src + release any GPU-backed allocation. Some
         // browsers retain a hardware-accelerated CanvasPattern for
         // the lifetime of the source image even when nothing else
         // references the pattern; explicitly clearing the source
         // forces the compositor to drop it on the next frame.
-        cache.set(url, pat ? { pat, img } : 'failed');
+        cache.set(key, pat ? { pat, img: src } : 'failed');
       } catch (_) {
-        cache.set(url, 'failed');
+        cache.set(key, 'failed');
       }
-    }).catch(() => { cache.set(url, 'failed'); });
+    }).catch(() => { cache.set(key, 'failed'); });
     return null;
   }
 
   // Walk the cache and drop entries whose URL isn't referenced by
   // any layer in `liveUrls`. Called from drawBackground each frame
   // to release the GPU-backed CanvasPattern when the user switches
-  // away from a tissue bg. Without this, the browser kept the
-  // tile decoded + uploaded indefinitely; subsequent procedural
-  // bgs slowed to a crawl on devices where the compositor was
-  // memory-bound.
+  // away from a tissue bg. Cache keys are `${url}@${scale}`, so the
+  // match splits on the '@' separator. Without this, the browser
+  // kept the tile decoded + uploaded indefinitely; subsequent
+  // procedural bgs slowed to a crawl on devices where the
+  // compositor was memory-bound.
   _evictUnusedTissuePatterns(liveUrls) {
     const cache = this._tissuePatternCache;
     if (!cache || cache.size === 0) return;
-    for (const url of cache.keys()) {
+    for (const key of cache.keys()) {
+      const url = key.slice(0, key.lastIndexOf('@'));
       if (liveUrls.has(url)) continue;
-      const v = cache.get(url);
-      if (v && typeof v === 'object' && v.img) {
+      const v = cache.get(key);
+      if (v && typeof v === 'object' && v.img && typeof v.img.src !== 'undefined') {
         // Best-effort release. Browsers vary on whether nulling
         // .src actually frees the decoded buffer; the cache drop
-        // is what really matters.
+        // is what really matters. Offscreen canvases don't have
+        // .src — skipping the assignment for them is fine.
         try { v.img.src = ''; } catch (_) { /* ignore */ }
       }
-      cache.delete(url);
+      cache.delete(key);
     }
   }
 

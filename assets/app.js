@@ -1127,6 +1127,18 @@ if (maxCellsEl) {
 }
 bindRange('bgFlowSpeed', 'bgFlowSpeed', 'bgVal', v => v.toFixed(2) + '×');
 bindRange('bgScale', 'bgScale', 'bgScaleVal', v => v.toFixed(2) + '×');
+// Tissue source-image scale. Canvas2D-only effect: the renderer
+// pre-downsamples the decoded image to `tissueScale × naturalSize`
+// before createPattern, reducing per-frame GPU/CPU sampling cost
+// at the cost of softer tile edges. Slider is hidden on
+// webgl2 / webgpu via body[data-renderer] CSS (the bg pass on
+// those samples the original mipmapped texture directly). Switching
+// the slider invalidates the renderer's tissue cache by URL key, so
+// the next frame triggers a fresh load + downsample at the new
+// scale; see canvas2d.js _tissuePatternFor.
+bindRange('tissueScale', 'tissueScale', 'tissueScaleVal',
+          v => Math.round(v * 100) + '%',
+          () => { if (renderer && renderer._tissuePatternCache) renderer._tissuePatternCache.clear(); });
 bindRange('outlinePx', 'outlinePx', 'outVal', v => v.toFixed(0) + 'px');
 bindRange('membraneIntensity', 'membraneIntensity', 'membraneVal', v => v.toFixed(2));
 bindRange('cellBorderThickness', 'cellBorderThickness', 'cellBorderVal', v => v.toFixed(1) + '×');
@@ -2016,6 +2028,13 @@ if (rendererSel) {
     if (opt) { opt.disabled = true; opt.textContent += ' (unsupported)'; }
   }
   rendererSel.value = S.renderer;
+  // body[data-renderer] gates renderer-conditional UI (Overlays
+  // fieldset is GPU-only; Tissue quality slider is Canvas2D-only).
+  // Renderer switches reload, so this is set once at init and
+  // doesn't need a live updater.
+  if (typeof document !== 'undefined' && document.body) {
+    document.body.setAttribute('data-renderer', S.renderer);
+  }
   rendererSel.addEventListener('change', () => {
     let kind = rendererSel.value;
     const valid = ['canvas2d', 'webgl2', 'webgpu'];
