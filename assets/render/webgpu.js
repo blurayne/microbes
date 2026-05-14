@@ -2278,11 +2278,31 @@ export class WebGPURenderer extends RendererBase {
     this.context = context;
     this.format = format;
 
+    // Catch any validation error that escapes our per-frame scope.
+    // User-reported [webgpu-diag] log on build #347 showed a flood
+    // of "Invalid RenderPipeline (unlabeled) ... GetBindGroupLayout
+    // (0) on [Invalid RenderPipeline]" — meaning some pipeline was
+    // rejected at creation time but the error was swallowed. This
+    // handler surfaces the root creation error.
+    device.onuncapturederror = (event) => {
+      // eslint-disable-next-line no-console
+      console.warn('[webgpu] uncaptured error:', event.error && event.error.message);
+    };
+    // Wrap pipeline construction in a validation scope so we can
+    // pinpoint which pipeline is invalid (the labels added below
+    // appear in the error message).
+    device.pushErrorScope('validation');
     this._buildDiskPipeline();
     this._growInstanceBuffer(64);
     this._buildMetaPipelines();
     this._buildOverlayPipelines();
     this._buildReactorEager();
+    device.popErrorScope().then((err) => {
+      if (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[webgpu init] pipeline validation error:', err.message);
+      }
+    });
   }
 
   // Dashed-line target lines, pulsing-circle marker, particles, and
@@ -2369,8 +2389,21 @@ export class WebGPURenderer extends RendererBase {
     //   [16..35]  base, top, bot, ringColor, gridColor (5 × vec4)
     //   [36..67]  spots[8] vec4 (cx, cy, r, _) screen 0..1
     //   [68..99]  spotCols[8] vec4 (r, g, b, _) pre-multiplied
-    const bgModule = device.createShaderModule({ code: BG_WGSL });
+    const bgModule = device.createShaderModule({ code: BG_WGSL, label: 'bg' });
+    // Surface any WGSL warnings / errors for the bg shader. The
+    // user's WebGPU build #347 logged a flood of "Invalid
+    // RenderPipeline" — if the bg pipeline is the failing one,
+    // compilationInfo() will name the line + message.
+    if (bgModule.getCompilationInfo) {
+      bgModule.getCompilationInfo().then((info) => {
+        for (const m of info.messages) {
+          // eslint-disable-next-line no-console
+          console.warn(`[webgpu bg-shader] ${m.type} at ${m.lineNum}:${m.linePos}: ${m.message}`);
+        }
+      });
+    }
     this._bgPipeline = device.createRenderPipeline({
+      label: 'bg-base',
       layout: 'auto',
       vertex: { module: bgModule, entryPoint: 'vs_main' },
       fragment: {
@@ -3155,6 +3188,7 @@ export class WebGPURenderer extends RendererBase {
     const device = this.device;
     const mod = device.createShaderModule({ code: SCENE_FX_WGSL });
     this._sceneFxPipeline = device.createRenderPipeline({
+      label: 'sceneFx',
       layout: 'auto',
       vertex:   { module: mod, entryPoint: 'vs_main' },
       fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format }] },
