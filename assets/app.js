@@ -64,8 +64,21 @@ function _formatArg(a) {
   console[level] = (...args) => {
     orig(...args);
     try {
-      _debugLog.push({ t: Date.now(), level, msg: args.map(_formatArg).join(' ') });
-      if (_debugLog.length > _DEBUG_LOG_MAX) _debugLog.shift();
+      const msg = args.map(_formatArg).join(' ');
+      // Dedupe consecutive identical messages with a count.
+      // Some flows (e.g. the WebGPU duotone validation error)
+      // fire the same warning every frame at ~60 Hz; without
+      // dedupe the 200-entry buffer evicts every other message
+      // within ~3 s. Collapsing here keeps one-shot init logs
+      // visible alongside the spammy repeats.
+      const last = _debugLog[_debugLog.length - 1];
+      if (last && last.level === level && last.msg === msg) {
+        last.count = (last.count || 1) + 1;
+        last.t = Date.now();
+      } else {
+        _debugLog.push({ t: Date.now(), level, msg, count: 1 });
+        if (_debugLog.length > _DEBUG_LOG_MAX) _debugLog.shift();
+      }
       _refreshDebugLog();
     } catch { /* never let logging break the app */ }
   };
@@ -119,7 +132,8 @@ function _refreshDebugLog() {
     const ss = String(t.getSeconds()).padStart(2, '0');
     const ms = String(t.getMilliseconds()).padStart(3, '0');
     const cls = (e.level === 'warn' || e.level === 'error' || e.level === 'info') ? ` class="lvl-${e.level}"` : '';
-    return `<span${cls}>[${hh}:${mm}:${ss}.${ms}] ${e.level.toUpperCase().padEnd(5)} ${esc(e.msg)}</span>`;
+    const xN = (e.count && e.count > 1) ? ` (×${e.count})` : '';
+    return `<span${cls}>[${hh}:${mm}:${ss}.${ms}] ${e.level.toUpperCase().padEnd(5)} ${esc(e.msg)}${xN}</span>`;
   });
   el.innerHTML = lines.join('\n');
   el.scrollTop = el.scrollHeight;
@@ -144,7 +158,8 @@ function _hookDebugLogButtons() {
         : '(dev)';
       const body = _debugLog.map((e) => {
         const t = new Date(e.t).toISOString().slice(11, 23);
-        return `[${t}] ${e.level.toUpperCase().padEnd(5)} ${e.msg}`;
+        const xN = (e.count && e.count > 1) ? ` (×${e.count})` : '';
+        return `[${t}] ${e.level.toUpperCase().padEnd(5)} ${e.msg}${xN}`;
       }).join('\n');
       const txt = `build: ${header}\n${body}`;
       try {
