@@ -1336,7 +1336,8 @@ body.adding #stage    { cursor: crosshair; }
   margin-top: 8px;
 }
 .debug-log-actions button,
-.debug-actions button {
+.debug-actions button,
+.apply-settings-actions button {
   flex: 0 0 auto;
   padding: 6px 12px;
   background: #00000044;
@@ -1348,9 +1349,46 @@ body.adding #stage    { cursor: crosshair; }
   cursor: pointer;
 }
 .debug-log-actions button:hover,
-.debug-actions button:hover {
+.debug-actions button:hover,
+.apply-settings-actions button:hover {
   background: var(--accent);
   color: var(--accent-ink);
+}
+/* Apply-settings paste dialog. Textarea matches the debug-log
+   pill styling (mono font, dark background) so the JSON reads as
+   the same kind of "system surface" the rest of Debug uses, and
+   stretches the full panel width. Footer buttons reuse the
+   .debug-actions style above. */
+.apply-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px 14px;
+}
+.apply-settings-hint {
+  margin: 0;
+  font-size: 12px;
+  opacity: 0.75;
+}
+.apply-settings-text {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 240px;
+  resize: vertical;
+  padding: 8px 10px;
+  background: #00000080;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre;
+  word-break: normal;
+  overflow-x: auto;
+}
+.apply-settings-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 /* Severity tints — applied to lines via class-stamped <span>s. */
 .debug-log .lvl-warn  { color: #ffd479; }

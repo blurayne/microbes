@@ -3,7 +3,7 @@
 // WebGL2 will plug in here in a later phase).
 
 import {
-  S, SETTINGS_KEY, saveSettings, applyI18n,
+  S, SETTINGS_KEY, DEFAULTS, saveSettings, applyI18n,
   THEMES, BACKGROUNDS, CELL_TYPES, PATHOGEN_GROUPS, LOCALES,
   INTERFACE_ACCENTS,
   T, cellLabel, cellDesc,
@@ -748,15 +748,13 @@ const screenshotBtn = document.getElementById('screenshotBtn');
 if (screenshotBtn) screenshotBtn.addEventListener('click', _screenshotNow);
 if (typeof window !== 'undefined') window.__SCREENSHOT__ = _screenshotNow;
 
-// Read the currently-persisted settings blob from localStorage —
-// exactly what saveSettings() last wrote (every value in S,
-// JSON-stringified). Returned pretty-printed.
+// Snapshot the live settings object S — which loadSettings()
+// already merged with DEFAULTS, so every known setting is
+// present. Reading raw localStorage here would miss any DEFAULTS
+// keys added after the user last touched a slider, because
+// saveSettings() only writes when a setting changes.
 function _currentSettingsJson() {
-  const raw = (typeof localStorage !== 'undefined')
-    ? localStorage.getItem(SETTINGS_KEY)
-    : null;
-  const parsed = raw ? JSON.parse(raw) : null;
-  return parsed ? JSON.stringify(parsed, null, 2) : '{}';
+  return JSON.stringify(S, null, 2);
 }
 
 // Copy: write the JSON to console + clipboard. Cheap roundtrip
@@ -828,8 +826,26 @@ function _applyPastedSettings() {
     showToast(T('toast_settings_apply_failed') || 'Apply failed — paste was not valid JSON');
     return;
   }
+  // Filter incoming keys to ones we recognise from DEFAULTS. An
+  // older export blob might carry settings we've since renamed
+  // (e.g. showObjectCount → showCellTotal); a newer one might
+  // carry fields this build doesn't yet know about. Skip both
+  // rather than corrupt S with surprises. loadSettings() will
+  // then merge the filtered blob over DEFAULTS on reload, so
+  // any setting we didn't include falls back to its default.
+  const known = new Set(Object.keys(DEFAULTS));
+  const filtered = {};
+  const skipped = [];
+  for (const k of Object.keys(parsed)) {
+    if (known.has(k)) filtered[k] = parsed[k];
+    else skipped.push(k);
+  }
+  if (skipped.length) {
+    // eslint-disable-next-line no-console
+    console.warn('[settings] apply: skipped unknown keys:', skipped);
+  }
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed));
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(filtered));
   } catch (err) {
     // eslint-disable-next-line no-console
     console.warn('[settings] apply persist failed:', err);
