@@ -1291,6 +1291,16 @@ body.adding #stage    { cursor: crosshair; }
   margin-top: -2px;
 }
 
+/* Renderer-conditional UI gating. `body[data-renderer]` is set
+   from S.renderer ('canvas2d' | 'webgl2' | 'webgpu'). Elements
+   tagged with .renderer-only-* are visible only when their
+   matching renderer is active. Used by the Overlays section
+   (GPU-only post-pin chain + FX shaders) + the Tissue quality
+   slider (Canvas2D downsample path). */
+body[data-renderer="canvas2d"] .renderer-only-gpu { display: none; }
+body[data-renderer="webgl2"]   .renderer-only-canvas2d { display: none; }
+body[data-renderer="webgpu"]   .renderer-only-canvas2d { display: none; }
+
 /* Debug log viewer in settings — captures console.log/info/warn/error
    so mobile users (no DevTools) can read runtime logs in-app. The
    log + its Clear/Copy buttons are hidden by default and only shown

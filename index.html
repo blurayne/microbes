@@ -59,6 +59,14 @@
         <label><span data-i18n="bg_scale">Background scaling</span> <span id="bgScaleVal" class="val"></span>
           <input type="range" id="bgScale" min="0.05" max="20" step="0.1" />
         </label>
+        <!-- Canvas2D-only: downscale the source image before
+             createPattern to reduce per-frame GPU/CPU sampling
+             cost. Hidden in webgl2 / webgpu modes via
+             body[data-renderer] CSS. -->
+        <label id="tissueScaleLabel" class="renderer-only-canvas2d">
+          <span data-i18n="tissue_scale">Tissue quality (Canvas2D)</span> <span id="tissueScaleVal" class="val"></span>
+          <input type="range" id="tissueScale" min="0.1" max="1.0" step="0.05" />
+        </label>
         <div id="bgConfig" class="bg-config-rows"></div>
       </details>
 
@@ -77,7 +85,11 @@
         <label><input type="checkbox" id="fullscreenToggle" /> <span data-i18n="fullscreen">Fullscreen</span></label>
       </details>
 
-      <details class="settings-section">
+      <!-- Overlays fieldset is GPU-only: every post-pin chain step
+           + most FX overlays live in webgl2 / webgpu shaders and
+           do nothing in canvas2d. Hidden via body[data-renderer]
+           CSS when the active renderer is canvas2d. -->
+      <details class="settings-section renderer-only-gpu">
         <summary data-i18n="overlays_section">Overlays</summary>
         <div class="overlay-order-block">
           <div class="overlay-order-title" data-i18n="overlay_order_title">Stack (top runs last)</div>
