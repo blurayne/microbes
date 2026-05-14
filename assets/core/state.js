@@ -74,8 +74,8 @@ export const DEFAULTS = {
   liquidRipples: false,     // bg post-process: each on-screen cell radiates concentric ripples that distort the background — reads as cells moving through liquid. WebGL2 + WebGPU only; Canvas2D is a no-op.
   glassMembrane: true,      // overlay post-process: lensing refraction in a thin band just outside each cell, making the membrane read as glass that bends the scene behind it. WebGL2 + WebGPU only; Canvas2D is a no-op.
   glassStrength: 3.0,       // multiplier on the glass-membrane refraction strength. Slider in Settings → Overlays, range 0.1..3.0.
-  glassSize: 1.4,           // multiplier on the lens-band half-width. Shader uses half = 0.15 * glassSize, so size=1.0 → band 0.85..1.15·r (original look), size=2.0 → 0.70..1.30·r, size=0.5 → 0.925..1.075·r. Range 0.2..3.0.
-  glassInset: 0.08,         // fraction of the silhouette radius the lens band sits inward from the cell edge — 0 = flush with the silhouette, 0.5 = halfway to the centre. Range 0..0.5. Lets the membrane band feel "inside" the cell instead of straddling the rim.
+  glassSize: 0.4,           // multiplier on the lens-band half-width. Shader uses half = 0.15 * glassSize, so size=0.5 → band 0.925..1.075·r (the new max), size=0.4 (default) → 0.94..1.06·r — a tight rim that reads as glass without smearing into the cell. Range 0..0.5.
+  glassInset: 0.03,         // fraction of the silhouette radius the lens band sits inward from the cell edge — 0 = flush with the silhouette, 0.05 = 5 % inward (the new max). Keeps the band visibly "inside" the rim without smearing toward the centre. Range 0..0.05.
   glassChroma: true,        // optional chromatic-split toggle on top of the always-on lensing — when true, the three RGB channels sample the scene at slightly different displacements so the rim shows a prism-edge colour fringe.
   // Bump-feedback: when two cells collide, both flash and squash
   // briefly along the impact normal. Visual only — the elastic
@@ -550,11 +550,11 @@ export function loadSettings() {
     if (typeof parsed.glassSize !== 'number' || !Number.isFinite(parsed.glassSize)) {
       parsed.glassSize = DEFAULTS.glassSize;
     }
-    parsed.glassSize = Math.max(0.2, Math.min(3.0, parsed.glassSize));
+    parsed.glassSize = Math.max(0.0, Math.min(0.5, parsed.glassSize));
     if (typeof parsed.glassInset !== 'number' || !Number.isFinite(parsed.glassInset)) {
       parsed.glassInset = DEFAULTS.glassInset;
     }
-    parsed.glassInset = Math.max(0.0, Math.min(0.5, parsed.glassInset));
+    parsed.glassInset = Math.max(0.0, Math.min(0.05, parsed.glassInset));
     parsed.glassMembrane = !!parsed.glassMembrane;
     parsed.glassChroma = !!parsed.glassChroma;
     if (typeof parsed.bumpFeedbackIntensity !== 'number' || !Number.isFinite(parsed.bumpFeedbackIntensity)) {
