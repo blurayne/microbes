@@ -3353,8 +3353,30 @@ export class WebGPURenderer extends RendererBase {
     if (!this._frameEncoder || !this._frameView) return;
     this._fxOverlayEnsurePipelines();
     const device = this.device;
+    // Per-pass slot in the shared FX UBO. queue.writeBuffer is
+    // queue-ordered with submit, NOT interleaved with the encoder's
+    // render passes. So if every pass wrote to offset 0, by the time
+    // the GPU executed pass A the buffer would already hold pass C's
+    // bytes — only the LAST effect would render. User-visible
+    // symptom: enabling crosshair + vignette together showed only
+    // one. Fix: give each pass its own 256-byte-aligned slot in the
+    // shared UBO + its own bind group that points at that slot via
+    // { offset, size } in the entry. WebGPU's required UNIFORM
+    // alignment is 256 bytes on every device per minUniformBuffer-
+    // OffsetAlignment; the UBO is sized to FX_OVERLAY_MAX × 256 so
+    // up to that many distinct passes can coexist in one frame.
+    const FX_OVERLAY_MAX = 8;
+    const FX_OVERLAY_SLOT = 256;
+    if (!this._fxOverlayMultiUbo) {
+      this._fxOverlayMultiUbo = device.createBuffer({
+        size: FX_OVERLAY_MAX * FX_OVERLAY_SLOT,
+        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+      });
+    }
     const u = this._fxOverlayUboData;
+    let slot = 0;
     const drawOne = (effect, mode, intensity) => {
+      if (slot >= FX_OVERLAY_MAX) return;             // hard cap (shouldn't happen with 3 effects)
       u[0] = this.canvas.width;
       u[1] = this.canvas.height;
       u[2] = t;
@@ -3363,7 +3385,8 @@ export class WebGPURenderer extends RendererBase {
       u[5] = mode;
       u[6] = 0;
       u[7] = 0;
-      device.queue.writeBuffer(this._fxOverlayUbo, 0,
+      const offset = slot * FX_OVERLAY_SLOT;
+      device.queue.writeBuffer(this._fxOverlayMultiUbo, offset,
                                u.buffer, u.byteOffset, u.byteLength);
       const blendKey = (mode === 2) ? 'multiply'
                     : (mode === 3) ? 'additive'
@@ -3371,7 +3394,10 @@ export class WebGPURenderer extends RendererBase {
       const pipeline = this._fxOverlayPipelines[blendKey];
       const bg = device.createBindGroup({
         layout: pipeline.getBindGroupLayout(0),
-        entries: [{ binding: 0, resource: { buffer: this._fxOverlayUbo } }],
+        entries: [{
+          binding: 0,
+          resource: { buffer: this._fxOverlayMultiUbo, offset, size: 32 },
+        }],
       });
       const pass = this._frameEncoder.beginRenderPass({
         colorAttachments: [{
@@ -3384,6 +3410,7 @@ export class WebGPURenderer extends RendererBase {
       pass.setBindGroup(0, bg);
       pass.draw(3, 1, 0, 0);
       pass.end();
+      slot++;
     };
     const MODES = { normal: 1, multiply: 2, additive: 3 };
     for (const k of order) {
