@@ -3255,6 +3255,15 @@ export class WebGL2Renderer extends RendererBase {
       for (let li = 0; li < layers.length; li++) {
         const bg = layers[li];
         this._setBgLayerUniforms(bg, t);
+        // Layer 0 is the bg "base" — it must fully cover the FB so
+        // the post-pin chain RT (cleared to black at the start of
+        // every frame) doesn't show through. Override u_opacity to
+        // 1.0 here regardless of the layer's saved opacity slider:
+        // partial-opacity bases don't have a useful meaning anyway
+        // (there's nothing behind layer 0 to blend with), and
+        // skipping this override was the reason microscope /
+        // duotone showed a black backdrop in PR-after-#238.
+        if (li === 0) gl.uniform1f(this._bgU.opacity, 1.0);
         this._applyBgLayerBlend(li, bg);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       }
