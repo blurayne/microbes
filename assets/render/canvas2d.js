@@ -110,18 +110,48 @@ export class Canvas2DRenderer extends RendererBase {
     const cache = this._tissuePatternCache;
     if (cache.has(url)) {
       const v = cache.get(url);
-      return (v === 'pending' || v === 'failed') ? null : v;
+      if (v === 'pending' || v === 'failed') return null;
+      return v.pat || null;             // unwrap { pat, img }
     }
     cache.set(url, 'pending');
     loadTexture(url).then((img) => {
       try {
         const pat = this.ctx.createPattern(img, 'repeat');
-        cache.set(url, pat || 'failed');
+        // Stash the image alongside the pattern so eviction can
+        // null the .src + release any GPU-backed allocation. Some
+        // browsers retain a hardware-accelerated CanvasPattern for
+        // the lifetime of the source image even when nothing else
+        // references the pattern; explicitly clearing the source
+        // forces the compositor to drop it on the next frame.
+        cache.set(url, pat ? { pat, img } : 'failed');
       } catch (_) {
         cache.set(url, 'failed');
       }
     }).catch(() => { cache.set(url, 'failed'); });
     return null;
+  }
+
+  // Walk the cache and drop entries whose URL isn't referenced by
+  // any layer in `liveUrls`. Called from drawBackground each frame
+  // to release the GPU-backed CanvasPattern when the user switches
+  // away from a tissue bg. Without this, the browser kept the
+  // tile decoded + uploaded indefinitely; subsequent procedural
+  // bgs slowed to a crawl on devices where the compositor was
+  // memory-bound.
+  _evictUnusedTissuePatterns(liveUrls) {
+    const cache = this._tissuePatternCache;
+    if (!cache || cache.size === 0) return;
+    for (const url of cache.keys()) {
+      if (liveUrls.has(url)) continue;
+      const v = cache.get(url);
+      if (v && typeof v === 'object' && v.img) {
+        // Best-effort release. Browsers vary on whether nulling
+        // .src actually frees the decoded buffer; the cache drop
+        // is what really matters.
+        try { v.img.src = ''; } catch (_) { /* ignore */ }
+      }
+      cache.delete(url);
+    }
   }
 
   /** Short identifier for the FPS overlay's renderer suffix. */
@@ -138,6 +168,18 @@ export class Canvas2DRenderer extends RendererBase {
       return;
     }
     const layers = currentBgLayers();
+    // Drop tissue cache entries whose URL is no longer referenced
+    // by any active layer — switching away from a tissue bg used
+    // to leave the decoded image + GPU-backed CanvasPattern alive,
+    // which made subsequent procedural bgs crawl on memory-bound
+    // devices.
+    const liveTissueUrls = new Set();
+    for (const l of layers) {
+      if (l && l.kind === 'tissue' && l.textureUrl) {
+        liveTissueUrls.add(l.textureUrl);
+      }
+    }
+    this._evictUnusedTissuePatterns(liveTissueUrls);
     if (layers.length === 0) {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, W, H);
