@@ -2684,6 +2684,22 @@ export class WebGL2Renderer extends RendererBase {
       this._rippleBgDestroy();
     }
     gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
+    // Defensive clear of the scene post-RT every frame. Without
+    // this, the cell-trail smearing the user reported on
+    // microscope-blur activation (PR after #237) can leak through
+    // when the bg pass either runs `discard` paths or doesn't
+    // fully cover (e.g. layer with opacity < 1, sub-pixel
+    // viewport edge, tile-cache load on mobile drivers). The bg
+    // layer-0 already disables BLEND to overwrite, so this clear
+    // is a no-op for well-behaved themes — cheap insurance for
+    // edge cases. Note: the canvas (no _sceneFbo) is cleared by
+    // the bg pass itself, so this only fires when the post-pin
+    // chain is active.
+    if (this._sceneFbo) {
+      gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+      gl.clearColor(0, 0, 0, RT_CLEAR_A);
+      gl.clear(gl.COLOR_BUFFER_BIT);
+    }
   }
 
   // ---- Reactor (Gray-Scott) helpers --------------------------------
