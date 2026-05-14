@@ -135,10 +135,18 @@ function _hookDebugLogButtons() {
   }
   if (copyBtn) {
     copyBtn.addEventListener('click', async () => {
-      const txt = _debugLog.map((e) => {
+      // Prepend the build stamp so anything pasted into a bug
+      // report carries the exact sha / run / codename / date the
+      // user was looking at. Falls back to '(dev)' for local
+      // serves where build.js wasn't stamped.
+      const header = (typeof _currentBuildLabel === 'string' && _currentBuildLabel)
+        ? _currentBuildLabel
+        : '(dev)';
+      const body = _debugLog.map((e) => {
         const t = new Date(e.t).toISOString().slice(11, 23);
         return `[${t}] ${e.level.toUpperCase().padEnd(5)} ${e.msg}`;
       }).join('\n');
+      const txt = `build: ${header}\n${body}`;
       try {
         await navigator.clipboard.writeText(txt);
         copyBtn.textContent = '✓';

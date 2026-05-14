@@ -3186,13 +3186,35 @@ export class WebGPURenderer extends RendererBase {
   _sceneFxEnsurePipeline() {
     if (this._sceneFxPipeline) return;
     const device = this.device;
-    const mod = device.createShaderModule({ code: SCENE_FX_WGSL });
+    // User log on build #351 narrowed the failure to "[Invalid
+    // RenderPipeline 'sceneFx']" but pop's per-frame scope only
+    // returned the derivative GetBindGroupLayout error, not the
+    // root validation message from createRenderPipeline itself.
+    // Wrap the lazy creation in its own scope + dump
+    // getCompilationInfo() on the shader module so we see exactly
+    // why this specific pipeline is rejected on the user's device.
+    device.pushErrorScope('validation');
+    const mod = device.createShaderModule({ code: SCENE_FX_WGSL, label: 'sceneFx' });
+    if (mod.getCompilationInfo) {
+      mod.getCompilationInfo().then((info) => {
+        for (const m of info.messages) {
+          // eslint-disable-next-line no-console
+          console.warn(`[webgpu sceneFx-shader] ${m.type} at ${m.lineNum}:${m.linePos}: ${m.message}`);
+        }
+      });
+    }
     this._sceneFxPipeline = device.createRenderPipeline({
       label: 'sceneFx',
       layout: 'auto',
       vertex:   { module: mod, entryPoint: 'vs_main' },
       fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format }] },
       primitive: { topology: 'triangle-list' },
+    });
+    device.popErrorScope().then((err) => {
+      if (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[webgpu sceneFx-create] validation error:', err.message);
+      }
     });
     this._sceneFxSampler = device.createSampler({
       magFilter: 'linear', minFilter: 'linear',
