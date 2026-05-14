@@ -3770,7 +3770,15 @@ export class WebGPURenderer extends RendererBase {
     } else {
       for (let li = 0; li < layers.length; li++) {
         const bg = layers[li];
-        this._writeBgLayerUniforms(bg, t);
+        // Layer 0 is the bg "base" — it must fully cover the FB so
+        // the post-pin chain RT doesn't show through as black under
+        // the microscope / duotone post-pass. Force u_opacity to
+        // 1.0 here regardless of the layer's saved opacity slider:
+        // partial-opacity bases don't have a useful meaning (there's
+        // nothing behind layer 0 to blend with), and skipping this
+        // override was the WebGPU "completely black background"
+        // report.
+        this._writeBgLayerUniforms(bg, t, /* forceFullOpacity */ li === 0);
 
         // Pick the texture view BG_WGSL's binding 2 sees for this
         // layer: the active reactor RT (front side, post-step) for
@@ -3858,7 +3866,7 @@ export class WebGPURenderer extends RendererBase {
     this._lastFrameSec = t;            // endFrame's post-pass reads this
   }
 
-  _writeBgLayerUniforms(bg, t) {
+  _writeBgLayerUniforms(bg, t, forceFullOpacity = false) {
     let kind = 0; // flat
     if (bg.kind === 'gradient') kind = 1;
     else if (bg.kind === 'agar') kind = 2;
@@ -3892,7 +3900,7 @@ export class WebGPURenderer extends RendererBase {
     data[10] = count;
     data[11] = bg.rbcSilhouettes ? 1 : 0;
     // extra (opacity, bgScale, _, _)
-    data[12] = (typeof bg.opacity === 'number') ? bg.opacity : 1;
+    data[12] = forceFullOpacity ? 1 : ((typeof bg.opacity === 'number') ? bg.opacity : 1);
     data[13] = S.bgScale != null ? S.bgScale : 1;
     data[14] = 0;
     data[15] = 0;
