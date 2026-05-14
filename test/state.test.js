@@ -1,14 +1,31 @@
 // Pure-logic tests for the i18n + cell-type registry in core/state.js.
 import { test } from 'node:test';
 import { strict as assert } from 'node:assert';
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import {
-  T, S, LOCALES, CELL_TYPES, BACKGROUNDS, THEMES, PATHOGEN_GROUPS,
+  T, S, LOCALES, KNOWN_LOCALE_CODES, CELL_TYPES, BACKGROUNDS, THEMES, PATHOGEN_GROUPS,
   cellLabel, cellDesc,
   OVERLAY_KIND_LIST, OVERLAY_FX_LIST, OVERLAY_SCENE_KEY,
   _normaliseOverlayOrder,
   overlayFxOrder, setOverlayFxOrder,
   overlayKindRunsAfterScene, setOverlayKindSide,
 } from '../assets/core/state.js';
+
+// Non-`en` locales now live in assets/i18n/*.json and are fetched on
+// demand at runtime. Node has no `fetch`-against-file-url path that
+// works the same as a browser, so the test preloads each JSON from
+// disk into LOCALES before assertions run. Mirrors what
+// ensureLocale() does in a real browser session.
+const I18N_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'assets', 'i18n');
+const I18N_FILES = readdirSync(I18N_DIR).filter(f => f.endsWith('.json'));
+for (const f of I18N_FILES) {
+  const code = f.slice(0, -5);
+  const dict = JSON.parse(readFileSync(join(I18N_DIR, f), 'utf8'));
+  delete dict['//'];
+  LOCALES[code] = dict;
+}
 
 test('T() returns the English value for a known key', () => {
   S.lang = 'en';
@@ -42,6 +59,18 @@ test('every locale defines at least the core UI keys', () => {
     for (const k of required) {
       assert.ok(LOCALES[lang][k], `missing ${lang}.${k}`);
     }
+  }
+});
+
+test('every JSON locale on disk corresponds to a KNOWN_LOCALE_CODES entry', () => {
+  for (const f of I18N_FILES) {
+    const code = f.slice(0, -5);
+    assert.ok(KNOWN_LOCALE_CODES.has(code), `${code}.json has no KNOWN_LOCALE_CODES entry`);
+  }
+  // And every non-`en` code in the set must have a JSON file.
+  for (const code of KNOWN_LOCALE_CODES) {
+    if (code === 'en') continue;
+    assert.ok(I18N_FILES.includes(code + '.json'), `KNOWN_LOCALE_CODES has ${code} but no ${code}.json on disk`);
   }
 });
 
