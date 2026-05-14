@@ -313,7 +313,9 @@
           <button type="button" id="debugLogCopy" data-i18n="copy">Copy</button>
           <button type="button" id="copyBuildBtn" data-i18n="copy_build">Copy build SHA</button>
           <button type="button" id="screenshotBtn" data-i18n="screenshot_btn">Screenshot</button>
-          <button type="button" id="dumpSettingsBtn" data-i18n="dump_settings">Dump settings</button>
+          <button type="button" id="copySettingsBtn"  data-i18n="copy_settings">Copy settings</button>
+          <button type="button" id="saveSettingsBtn"  data-i18n="save_settings">Save settings</button>
+          <button type="button" id="applySettingsBtn" data-i18n="apply_settings">Apply settings</button>
         </div>
       </details>
 
@@ -373,6 +375,31 @@
   <!-- About dialog: project credits + licence flags. The CC BY-NC-SA
        block is the project's standing audit reminder — three assets
        on main are non-permissive (Shadertoy default licence). -->
+  <!-- Apply-settings paste dialog. Opens from Settings → Debug
+       → "Apply settings". User pastes a JSON blob (produced by
+       Copy/Save settings), clicks Apply; the JSON is validated,
+       written to localStorage, and the page reloads to pick up
+       the new state without bespoke per-setting hot-reload code. -->
+  <div id="applySettingsDialog" class="dialog hidden" role="dialog" aria-label="Apply settings">
+    <div class="dialog-backdrop" data-close></div>
+    <aside class="dialog-panel">
+      <header>
+        <h2 data-i18n="apply_settings_title">Apply settings</h2>
+        <button type="button" class="close" data-close aria-label="Close">&times;</button>
+      </header>
+      <div class="apply-settings-body">
+        <p class="apply-settings-hint" data-i18n="apply_settings_hint">
+          Paste the JSON from Copy/Save settings and click Apply. The page reloads to pick up the new state.
+        </p>
+        <textarea id="applySettingsText" class="apply-settings-text" rows="14" spellcheck="false" autocomplete="off"></textarea>
+        <div class="apply-settings-actions">
+          <button type="button" id="applySettingsConfirmBtn" data-i18n="apply_settings_confirm">Apply</button>
+          <button type="button" class="close" data-close data-i18n="cancel">Cancel</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+
   <div id="aboutDialog" class="dialog hidden" role="dialog" aria-label="About">
     <div class="dialog-backdrop" data-close></div>
     <aside class="dialog-panel">

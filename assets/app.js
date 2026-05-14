@@ -718,7 +718,8 @@ window.addEventListener('keydown', (e) => {
 });
 // helpDialog now aliases addDialog (the unified dialog); the Set
 // dedupes that so closeAll() doesn't iterate the same element twice.
-const allDialogs = [...new Set([settingsEl, helpDialog, addDialog, aboutDialog].filter(Boolean))];
+const allDialogs = [...new Set([settingsEl, helpDialog, addDialog, aboutDialog,
+  document.getElementById('applySettingsDialog')].filter(Boolean))];
 const aboutBtn = document.getElementById('aboutBtn');
 if (aboutBtn) aboutBtn.addEventListener('click', () => openOnly(aboutDialog));
 const copyBuildBtn = document.getElementById('copyBuildBtn');
@@ -739,33 +740,106 @@ const screenshotBtn = document.getElementById('screenshotBtn');
 if (screenshotBtn) screenshotBtn.addEventListener('click', _screenshotNow);
 if (typeof window !== 'undefined') window.__SCREENSHOT__ = _screenshotNow;
 
-// Debug helper: dump the currently-persisted settings blob from
-// localStorage (= exactly what saveSettings() last wrote, i.e. the
-// settings the user actually changed). Logs to console and copies
-// to clipboard so the user can paste it into a bug report.
-async function _dumpSettings() {
+// Read the currently-persisted settings blob from localStorage —
+// exactly what saveSettings() last wrote (every value in S,
+// JSON-stringified). Returned pretty-printed.
+function _currentSettingsJson() {
+  const raw = (typeof localStorage !== 'undefined')
+    ? localStorage.getItem(SETTINGS_KEY)
+    : null;
+  const parsed = raw ? JSON.parse(raw) : null;
+  return parsed ? JSON.stringify(parsed, null, 2) : '{}';
+}
+
+// Copy: write the JSON to console + clipboard. Cheap roundtrip
+// for sharing the active config in a bug report.
+async function _copySettings() {
   try {
-    const raw = (typeof localStorage !== 'undefined')
-      ? localStorage.getItem(SETTINGS_KEY)
-      : null;
-    const parsed = raw ? JSON.parse(raw) : null;
-    const pretty = parsed
-      ? JSON.stringify(parsed, null, 2)
-      : '(no settings saved yet)';
+    const json = _currentSettingsJson();
     // eslint-disable-next-line no-console
-    console.log('[settings-dump] %s\n%s', SETTINGS_KEY, pretty);
-    const ok = await copyToClipboard(pretty);
+    console.log('[settings] %s\n%s', SETTINGS_KEY, json);
+    const ok = await copyToClipboard(json);
     showToast(ok
-      ? (T('toast_settings_dumped') || 'Settings dumped to console + clipboard')
-      : (T('toast_settings_dump_failed') || 'Settings dump failed'));
+      ? (T('toast_settings_copied') || 'Settings copied to clipboard')
+      : (T('toast_settings_dump_failed') || 'Copy failed'));
   } catch (err) {
     // eslint-disable-next-line no-console
-    console.warn('[settings-dump] failed:', err);
-    showToast(T('toast_settings_dump_failed') || 'Settings dump failed');
+    console.warn('[settings] copy failed:', err);
+    showToast(T('toast_settings_dump_failed') || 'Copy failed');
   }
 }
-const dumpSettingsBtn = document.getElementById('dumpSettingsBtn');
-if (dumpSettingsBtn) dumpSettingsBtn.addEventListener('click', _dumpSettings);
+
+// Save: download the same JSON as a .json file. Filename includes
+// the short build SHA + a timestamp so multiple dumps don't collide.
+function _saveSettings() {
+  try {
+    const json = _currentSettingsJson();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const sha = (_currentBuildSha || 'dev').slice(0, 7);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `microbes-settings-${sha}-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    showToast(T('toast_settings_saved') || 'Settings saved to file');
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[settings] save failed:', err);
+    showToast(T('toast_settings_dump_failed') || 'Save failed');
+  }
+}
+
+// Apply: open the paste dialog so the user can paste a previously-
+// saved JSON blob and load it back into the app.
+const applySettingsDialog = document.getElementById('applySettingsDialog');
+const applySettingsText   = document.getElementById('applySettingsText');
+function _openApplySettingsDialog() {
+  if (!applySettingsDialog || !applySettingsText) return;
+  applySettingsText.value = '';
+  openOnly(applySettingsDialog);
+  setTimeout(() => applySettingsText.focus(), 0);
+}
+
+// Parse + persist the pasted JSON, then reload. The cleanest way
+// to apply arbitrary settings to every UI binding is to write +
+// reload — beats wiring per-setting hot-reload for the rare import
+// path.
+function _applyPastedSettings() {
+  if (!applySettingsText) return;
+  let parsed;
+  try {
+    parsed = JSON.parse(applySettingsText.value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('not an object');
+    }
+  } catch {
+    showToast(T('toast_settings_apply_failed') || 'Apply failed — paste was not valid JSON');
+    return;
+  }
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed));
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[settings] apply persist failed:', err);
+    showToast(T('toast_settings_apply_failed') || 'Apply failed');
+    return;
+  }
+  showToast(T('toast_settings_applied') || 'Settings applied — reloading');
+  setTimeout(() => location.reload(), 400);
+}
+
+const copySettingsBtn         = document.getElementById('copySettingsBtn');
+const saveSettingsBtn         = document.getElementById('saveSettingsBtn');
+const applySettingsBtn        = document.getElementById('applySettingsBtn');
+const applySettingsConfirmBtn = document.getElementById('applySettingsConfirmBtn');
+if (copySettingsBtn)         copySettingsBtn.addEventListener('click', _copySettings);
+if (saveSettingsBtn)         saveSettingsBtn.addEventListener('click', _saveSettings);
+if (applySettingsBtn)        applySettingsBtn.addEventListener('click', _openApplySettingsDialog);
+if (applySettingsConfirmBtn) applySettingsConfirmBtn.addEventListener('click', _applyPastedSettings);
 
 _hookDebugLogButtons();
 
