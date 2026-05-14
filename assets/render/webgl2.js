@@ -27,6 +27,12 @@ import { loadTexture } from '../core/texture-loader.js';
 // backdrop. Default is opaque (existing behaviour). Read once at
 // module load — `URL_OVERRIDES` is frozen.
 const RT_TRANSLUCENT = !!URL_OVERRIDES.translucent;
+// Diagnostic infrastructure (readPixels + gl.getError() + verbose
+// state log every second) is gated behind ?diagnose=webgl (or
+// ?diagnose=webgl2) in the URL. Off by default so production
+// traffic doesn't pay the 1-frame readback. See
+// .claude/skills/webgl-debugger/SKILL.md.
+const DIAG_WEBGL = !!(URL_OVERRIDES.diagnose && URL_OVERRIDES.diagnose.has('webgl'));
 const RT_CLEAR_A = RT_TRANSLUCENT ? 0.0 : 1.0;
 
 // Each cell is one instanced quad. The fragment shader computes the
@@ -3333,11 +3339,11 @@ export class WebGL2Renderer extends RendererBase {
     // Decor (lobules, villi, neurons, …) intentionally not ported —
     // background flair only visible in a handful of themes.
 
-    // ── Diagnostic v2: bg pass works on frame 1 (orange) but
-    // goes black on frame 2+. Capture richer state on each tick
-    // so we can identify what changes between frames. Throttled
-    // to once per second.
-    if (this._sceneFbo && (S.microscopeBlur || S.makeItReal)) {
+    // DIAG_WEBGL: readPixels + gl.getError() + verbose state log
+    // once per second, only when ?diagnose=webgl is set in the URL.
+    // Captures richer state on each tick so we can identify what
+    // changes between frames (frame-1-works / frame-2-breaks bugs).
+    if (DIAG_WEBGL && this._sceneFbo && (S.microscopeBlur || S.makeItReal)) {
       const now = performance.now();
       if (!this._bgDiagLastMs || now - this._bgDiagLastMs > 1000) {
         this._bgDiagLastMs = now;

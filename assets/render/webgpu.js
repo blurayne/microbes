@@ -34,6 +34,14 @@ import { loadTexture } from '../core/texture-loader.js';
 // backdrop. Default is opaque (existing behaviour). Read once at
 // module load — `URL_OVERRIDES` is frozen.
 const RT_TRANSLUCENT = !!URL_OVERRIDES.translucent;
+// Diagnostic infrastructure is gated behind ?diagnose=webgpu in
+// the URL. Off by default so production traffic doesn't pay the
+// per-frame validation-scope push/pop, the 1Hz readback's
+// copyTextureToBuffer, the sceneFx-async pipeline duplicate, the
+// onuncapturederror handler, or the verbose console output. See
+// .claude/skills/webgpu-debugger/SKILL.md for what each piece
+// catches and when to enable it.
+const DIAG_WEBGPU = !!(URL_OVERRIDES.diagnose && URL_OVERRIDES.diagnose.has('webgpu'));
 const RT_ALPHA_MODE = RT_TRANSLUCENT ? 'premultiplied' : 'opaque';
 const RT_CLEAR_A = RT_TRANSLUCENT ? 0.0 : 1.0;
 
@@ -2285,31 +2293,31 @@ export class WebGPURenderer extends RendererBase {
     this.context = context;
     this.format = format;
 
-    // Catch any validation error that escapes our per-frame scope.
-    // User-reported [webgpu-diag] log on build #347 showed a flood
-    // of "Invalid RenderPipeline (unlabeled) ... GetBindGroupLayout
-    // (0) on [Invalid RenderPipeline]" — meaning some pipeline was
-    // rejected at creation time but the error was swallowed. This
-    // handler surfaces the root creation error.
-    device.onuncapturederror = (event) => {
-      // eslint-disable-next-line no-console
-      console.warn('[webgpu] uncaptured error:', event.error && event.error.message);
-    };
-    // Wrap pipeline construction in a validation scope so we can
-    // pinpoint which pipeline is invalid (the labels added below
-    // appear in the error message).
-    device.pushErrorScope('validation');
+    // DIAG_WEBGPU (?diagnose=webgpu): wire the uncaptured-error
+    // handler + pipeline-construction validation scope so future
+    // bug hunts have ground-truth from the moment they enable the
+    // flag. Off by default — see DIAG_WEBGPU declaration at the
+    // top of this file.
+    if (DIAG_WEBGPU) {
+      device.onuncapturederror = (event) => {
+        // eslint-disable-next-line no-console
+        console.warn('[webgpu] uncaptured error:', event.error && event.error.message);
+      };
+      device.pushErrorScope('validation');
+    }
     this._buildDiskPipeline();
     this._growInstanceBuffer(64);
     this._buildMetaPipelines();
     this._buildOverlayPipelines();
     this._buildReactorEager();
-    device.popErrorScope().then((err) => {
-      if (err) {
-        // eslint-disable-next-line no-console
-        console.warn('[webgpu init] pipeline validation error:', err.message);
-      }
-    });
+    if (DIAG_WEBGPU) {
+      device.popErrorScope().then((err) => {
+        if (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[webgpu init] pipeline validation error:', err.message);
+        }
+      });
+    }
   }
 
   // Dashed-line target lines, pulsing-circle marker, particles, and
@@ -3193,27 +3201,14 @@ export class WebGPURenderer extends RendererBase {
   _sceneFxEnsurePipeline() {
     if (this._sceneFxPipeline) return;
     const device = this.device;
-    // Speculative fix + diagnostic combined. Previous rounds of
-    // logging on builds #347/#351/#353 narrowed the failure to
-    // "[Invalid RenderPipeline 'sceneFx']" but the create-time
-    // scope kept returning null because `layout: 'auto'` defers
-    // its validation lazily until the first getBindGroupLayout(0)
-    // call. By then we're inside the frame, so the only error our
-    // scope sees is the derivative.
-    //
-    // Two changes:
-    //   1. Use an explicit GPUPipelineLayout with a hand-rolled
-    //      GPUBindGroupLayout matching SCENE_FX_WGSL's @binding
-    //      declarations. Removes auto-inference as a variable —
-    //      if the issue is the auto path tripping on something
-    //      device-specific (Safari WebGPU notoriously stricter
-    //      than Chrome on layout entry types), this fixes it.
-    //   2. Force the deferred validation to fire INSIDE the
-    //      scope by calling getBindGroupLayout(0) right after
-    //      creation. Pop then returns the actual error message.
-    device.pushErrorScope('validation');
+    // Explicit GPUPipelineLayout + GPUBindGroupLayout matching
+    // SCENE_FX_WGSL's @binding declarations. PR #253 found that
+    // `layout: 'auto'` deferred validation past the per-frame
+    // error scope on some devices — the explicit layout removes
+    // that variable.
+    if (DIAG_WEBGPU) device.pushErrorScope('validation');
     const mod = device.createShaderModule({ code: SCENE_FX_WGSL, label: 'sceneFx' });
-    if (mod.getCompilationInfo) {
+    if (DIAG_WEBGPU && mod.getCompilationInfo) {
       mod.getCompilationInfo().then((info) => {
         for (const m of info.messages) {
           // eslint-disable-next-line no-console
@@ -3233,15 +3228,6 @@ export class WebGPURenderer extends RendererBase {
       label: 'sceneFx-pipeline-layout',
       bindGroupLayouts: [this._sceneFxBgLayout],
     });
-    // Use createRenderPipelineAsync so the validation message
-    // surfaces as a Promise rejection. The sync createRenderPipeline
-    // returns an invalid-marked object without throwing; its
-    // validation completes asynchronously, AFTER our scope pops,
-    // which is why the previous rounds always returned null and
-    // we only saw the SetPipeline / GetBindGroupLayout derivatives
-    // at frame time. The async API waits until validation is done
-    // before resolving / rejecting, so the catch finally tells us
-    // WHY the pipeline is invalid on the user's device.
     const pipelineDesc = {
       label: 'sceneFx',
       layout: sceneFxPipelineLayout,
@@ -3249,23 +3235,26 @@ export class WebGPURenderer extends RendererBase {
       fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format }] },
       primitive: { topology: 'triangle-list' },
     };
-    // Synchronous version is still used so frame code has the
-    // pipeline reference immediately; the async call is purely
-    // diagnostic and runs in parallel.
     this._sceneFxPipeline = device.createRenderPipeline(pipelineDesc);
-    device.popErrorScope().then((err) => {
-      if (err) {
+    if (DIAG_WEBGPU) {
+      device.popErrorScope().then((err) => {
+        if (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[webgpu sceneFx-create] sync validation error:', err.message);
+        }
+      });
+      // createRenderPipelineAsync runs alongside the sync version
+      // so its catch surfaces the actual driver rejection — useful
+      // for the next time a sceneFx variant fails on a specific
+      // device. See .claude/skills/webgpu-debugger/SKILL.md.
+      device.createRenderPipelineAsync(pipelineDesc).then(() => {
         // eslint-disable-next-line no-console
-        console.warn('[webgpu sceneFx-create] sync validation error:', err.message);
-      }
-    });
-    device.createRenderPipelineAsync(pipelineDesc).then(() => {
-      // eslint-disable-next-line no-console
-      console.log('[webgpu sceneFx-async] pipeline validated OK');
-    }).catch((err) => {
-      // eslint-disable-next-line no-console
-      console.warn('[webgpu sceneFx-async] validation rejection:', err && err.message);
-    });
+        console.log('[webgpu sceneFx-async] pipeline validated OK');
+      }).catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn('[webgpu sceneFx-async] validation rejection:', err && err.message);
+      });
+    }
     this._sceneFxSampler = device.createSampler({
       magFilter: 'linear', minFilter: 'linear',
       addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
@@ -3779,12 +3768,11 @@ export class WebGPURenderer extends RendererBase {
 
   beginFrame(/* timeMs, dt */) {
     if (!this.device || !this.context) return;
-    // Diagnostic: wrap the frame in a validation error scope so we
-    // can see whether WebGPU is silently rejecting any of our
-    // passes. Popped in endFrame. Only armed when duotone /
-    // microscope-blur is on so non-duotone sessions don't pay the
-    // mapAsync cost.
-    if (S.microscopeBlur || S.makeItReal) {
+    // DIAG_WEBGPU: per-frame validation scope + a 1Hz readback
+    // pixel are armed only when ?diagnose=webgpu is set in the
+    // URL. In production the diag pieces are skipped entirely so
+    // the frame pays nothing for the infrastructure.
+    if (DIAG_WEBGPU && (S.microscopeBlur || S.makeItReal)) {
       this.device.pushErrorScope('validation');
       this._diagScopeArmed = true;
     } else {
