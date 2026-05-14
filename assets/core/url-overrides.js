@@ -117,6 +117,25 @@ function parseOverrides() {
   if (w != null) out.w = w;
   if (h != null) out.h = h;
 
+  // ?diagnose=webgpu,webgl turns on the renderer-specific
+  // diagnostic infrastructure (validation scopes, per-frame
+  // readbacks, pipeline-creation logging). Off by default so
+  // production traffic doesn't pay the readback / log cost.
+  // Value is a comma-separated list; accepts 'webgpu' and / or
+  // 'webgl' / 'webgl2'. See:
+  //   .claude/skills/webgpu-debugger/SKILL.md
+  //   .claude/skills/webgl-debugger/SKILL.md
+  //   .claude/skills/Mobile-Debüt/SKILL.md
+  const diagnoseRaw = p.get('diagnose');
+  const diagnose = new Set();
+  if (diagnoseRaw) {
+    for (const token of diagnoseRaw.split(',').map(s => s.trim().toLowerCase())) {
+      if (token === 'webgpu') diagnose.add('webgpu');
+      if (token === 'webgl' || token === 'webgl2') diagnose.add('webgl');
+    }
+  }
+  out.diagnose = Object.freeze(diagnose);
+
   return Object.freeze(out);
 }
 

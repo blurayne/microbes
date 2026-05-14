@@ -30,6 +30,13 @@ or:
 
 ## 2. Diagnostic plumbing
 
+**Gate all of this behind `?diagnose=webgpu` in the URL** so production traffic doesn't pay the readback / scope / async-pipeline cost. The flag is parsed in `assets/core/url-overrides.js` and exposed as `URL_OVERRIDES.diagnose` (a `Set` of `'webgpu'` / `'webgl'` tokens). `webgpu.js` reads it at the top of the module as a `DIAG_WEBGPU` constant.
+
+```
+https://example.com/microbes/?diagnose=webgpu       (just WebGPU)
+https://example.com/microbes/?diagnose=webgpu,webgl (both renderers)
+```
+
 Wire the renderer for diagnosis BEFORE you start guessing fixes. Six pieces, in order of usefulness:
 
 ### a. Global uncaptured-error handler

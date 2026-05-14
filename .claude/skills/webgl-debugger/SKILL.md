@@ -15,6 +15,13 @@ The diagnostic + fix below targets case (1) + (2), which are the most common sil
 
 ## 1. Drop in a per-frame diagnostic
 
+**Gate this behind `?diagnose=webgl` (or `?diagnose=webgl2`)** in the URL so production doesn't pay the readback every second. The flag is parsed in `assets/core/url-overrides.js` and exposed as `URL_OVERRIDES.diagnose` (a `Set`). `webgl2.js` reads it at the top of the module as a `DIAG_WEBGL` constant; the diag block is `if (DIAG_WEBGL && ...) { ... }`.
+
+```
+https://example.com/microbes/?diagnose=webgl       (just WebGL2)
+https://example.com/microbes/?diagnose=webgpu,webgl (both renderers)
+```
+
 Add a throttled `readPixels` + `gl.getError()` block immediately after the failing pass. Log enough state to tell what's changing between the first (working) frame and subsequent (broken) frames.
 
 ```js

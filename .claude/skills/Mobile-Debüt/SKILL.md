@@ -71,6 +71,20 @@ These show on every device:
 | **Save settings** | Same payload, downloaded as `microbes-settings-<short-sha>-<timestamp>.json`. Useful when the user can't paste into the receiving app but can attach a file. |
 | **Apply settings** | Opens a paste dialog. Pasted JSON is parsed, filtered against `Object.keys(DEFAULTS)` (unknown keys are dropped with a `console.warn`), written to localStorage, then the page reloads to pick up the new state. The filter prevents an older export's renamed keys (`showObjectCount` → `showCellTotal`) or a stray field from corrupting `S`. |
 
+## 1b. Enabling the renderer-specific diagnostics
+
+For renderer-rejection bugs the in-app log alone may not surface the root cause. Add `?diagnose=webgpu` or `?diagnose=webgl` (or both, comma-separated: `?diagnose=webgpu,webgl`) to the URL **before reproducing**. The renderer-side diagnostic code (validation scopes, pipeline-creation async pipelines, `readPixels` / `copyTextureToBuffer`) is gated on these flags and stays off in production for performance.
+
+Once enabled, the captured log will include lines like:
+
+```
+[webgpu sceneFx-async] validation rejection: ...
+[webgpu sceneFx-shader] error at L:C: ...
+[duotone-diag2] px=rgba(R,G,B,A) glErr=... kind=... base=...
+```
+
+Tell the user to **add the param + hard-refresh** before the repro session, then copy the log as usual.
+
 ## 2. Capturing a clean bug report from a phone
 
 Workflow that produces the highest-fidelity reproducer:
