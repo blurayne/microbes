@@ -130,8 +130,17 @@ export class Canvas2DRenderer extends RendererBase {
         // texture. 0.1 floor matches the slider clamp; below that
         // the tile reads as a uniform blur.
         if (clampedScale < 1 && typeof document !== 'undefined') {
-          const w = Math.max(1, Math.floor(img.naturalWidth  * clampedScale));
-          const h = Math.max(1, Math.floor(img.naturalHeight * clampedScale));
+          // loadTexture prefers createImageBitmap which exposes
+          // .width / .height; HTMLImageElement fallback has
+          // .naturalWidth / .naturalHeight. Take whichever is
+          // defined so the dimensions don't read as NaN (which
+          // would give the offscreen canvas width: 0 and result
+          // in createPattern returning null — the disappearing
+          // bg bug PR-after-#263 fixed).
+          const srcW = img.naturalWidth  || img.width  || 0;
+          const srcH = img.naturalHeight || img.height || 0;
+          const w = Math.max(1, Math.floor(srcW * clampedScale));
+          const h = Math.max(1, Math.floor(srcH * clampedScale));
           const off = document.createElement('canvas');
           off.width = w;
           off.height = h;
