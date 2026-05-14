@@ -1937,7 +1937,14 @@ void main() {
         a = max(a, wA);
       } else {
         float ed = length(d) / eyeR;
-        if (ed < 1.05) {
+        // Guard widens with the SPLITTING blur amount (v_face3.z,
+        // body-radius units) so the eye whites blur outward
+        // during a split instead of being hard-clipped at the
+        // original ed < 1.05 disc. blur=0 → guard = 1.05 (legacy
+        // perf-friendly look); blur=0.10 → guard ≈ 1.05 + 0.56
+        // in eye-radius units, which lines up with the widened
+        // smoothstep transition.
+        if (ed < 1.05 + v_face3.z / max(eyeR, 0.001)) {
           float white = 1.0 - sstep(0.92, 1.0, ed);
           col = mix(col, vec3(1.0), white);
           a = max(a, white);

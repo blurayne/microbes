@@ -1949,7 +1949,14 @@ fn arcA(uv: vec2<f32>, c: vec2<f32>, r: f32, hw: f32, a0: f32, a1: f32, blur: f3
         a = max(a, wA);
       } else {
         let ed = length(d) / max(eyeR, 0.001);
-        if (ed < 1.05) {
+        // Guard widens with the SPLITTING blur amount (blur,
+        // body-radius units) so the eye whites blur outward
+        // during a split instead of being hard-clipped at the
+        // original ed < 1.05 disc. blur=0 → guard = 1.05 (legacy
+        // perf-friendly look); blur=0.10 → guard ≈ 1.05 + 0.56
+        // in eye-radius units, which lines up with the widened
+        // smoothstep transition.
+        if (ed < 1.05 + blur / max(eyeR, 0.001)) {
           let white = 1.0 - sstep(0.92, 1.0, ed, blur);
           col = mix(col, vec3<f32>(1.0), white);
           a = max(a, white);
