@@ -61,6 +61,9 @@ jobs:
       - name: Stamp build info
         run: |
           DATE_UTC=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          # Write build.js as a fallback (kept for local serving and
+          # for the script tag that still references it if the inline
+          # injection below ever fails to match).
           cat > assets/build.js <<EOF
           window.__BUILD__ = {
             sha: '${{ github.sha }}',
@@ -69,27 +72,41 @@ jobs:
             dateUtc: '${DATE_UTC}'
           };
           EOF
-          # Cache-bust the build.js script tag so the user's browser
-          # always fetches the freshly-stamped file instead of the
-          # placeholder it may have cached from a previous deploy.
-          # The run number changes every build and is unique per
-          # workflow run, so the URL is guaranteed to be new.
-          sed -i "s|src=\"assets/build.js\"|src=\"assets/build.js?v=${{ github.run_number }}\"|" index.html
+          # Inline the build info directly into index.html, replacing
+          # the <script src="assets/build.js"></script> tag. Prior
+          # PRs tried a separate build.js + cache-buster URL but the
+          # user's browser still served a stale 'dev' placeholder
+          # across multiple deploys. Inlining puts the build info in
+          # the same response as the HTML, so the short Pages cache
+          # on HTML controls both, and there's nothing to cache
+          # separately.
+          INLINE="<script>window.__BUILD__ = { sha: '${{ github.sha }}', run: ${{ github.run_number }}, branch: '${{ github.ref_name }}', dateUtc: '${DATE_UTC}' };</script>"
+          # Use awk for the substitution so we don't fight sed's
+          # delimiter / escaping rules around the quotes + braces.
+          INLINE="$INLINE" awk '
+            /<script src="assets\/build\.js"><\/script>/ {
+              print ENVIRON["INLINE"];
+              next;
+            }
+            { print }
+          ' index.html > /tmp/index.html.stamped
+          mv /tmp/index.html.stamped index.html
           # Echo the result into the workflow log so the next time
           # a "build info says dev" report comes in we can confirm
-          # at a glance whether the stamp ran. If this prints the
-          # placeholder, the stamp step has a real problem; if it
-          # prints the real values, the issue is downstream
-          # (artifact upload, deploy, or browser cache).
+          # at a glance whether the stamp ran.
           echo "--- assets/build.js after stamp ---"
           cat assets/build.js
-          echo "--- index.html build.js script tag ---"
-          grep 'assets/build\.js' index.html || true
-          # Fail loudly if the stamp didn't actually replace the
-          # placeholder. Catches workflow regressions before the
-          # broken artifact ships to Pages.
+          echo "--- index.html inline build tag ---"
+          grep -F 'window.__BUILD__' index.html || true
+          # Fail loudly if the inline injection didn't happen or
+          # the placeholder still appears in build.js. Catches
+          # workflow regressions before they ship.
           if grep -q "sha: 'dev'" assets/build.js; then
             echo "::error::Stamp step failed - assets/build.js still contains the 'dev' placeholder"
+            exit 1
+          fi
+          if ! grep -qF 'window.__BUILD__' index.html; then
+            echo "::error::Inline stamp failed - index.html does not contain window.__BUILD__"
             exit 1
           fi
 
