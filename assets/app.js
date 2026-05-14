@@ -3,7 +3,7 @@
 // WebGL2 will plug in here in a later phase).
 
 import {
-  S, saveSettings, applyI18n,
+  S, SETTINGS_KEY, saveSettings, applyI18n,
   THEMES, BACKGROUNDS, CELL_TYPES, PATHOGEN_GROUPS, LOCALES,
   INTERFACE_ACCENTS,
   T, cellLabel, cellDesc,
@@ -738,6 +738,35 @@ async function _screenshotNow() {
 const screenshotBtn = document.getElementById('screenshotBtn');
 if (screenshotBtn) screenshotBtn.addEventListener('click', _screenshotNow);
 if (typeof window !== 'undefined') window.__SCREENSHOT__ = _screenshotNow;
+
+// Debug helper: dump the currently-persisted settings blob from
+// localStorage (= exactly what saveSettings() last wrote, i.e. the
+// settings the user actually changed). Logs to console and copies
+// to clipboard so the user can paste it into a bug report.
+async function _dumpSettings() {
+  try {
+    const raw = (typeof localStorage !== 'undefined')
+      ? localStorage.getItem(SETTINGS_KEY)
+      : null;
+    const parsed = raw ? JSON.parse(raw) : null;
+    const pretty = parsed
+      ? JSON.stringify(parsed, null, 2)
+      : '(no settings saved yet)';
+    // eslint-disable-next-line no-console
+    console.log('[settings-dump] %s\n%s', SETTINGS_KEY, pretty);
+    const ok = await copyToClipboard(pretty);
+    showToast(ok
+      ? (T('toast_settings_dumped') || 'Settings dumped to console + clipboard')
+      : (T('toast_settings_dump_failed') || 'Settings dump failed'));
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn('[settings-dump] failed:', err);
+    showToast(T('toast_settings_dump_failed') || 'Settings dump failed');
+  }
+}
+const dumpSettingsBtn = document.getElementById('dumpSettingsBtn');
+if (dumpSettingsBtn) dumpSettingsBtn.addEventListener('click', _dumpSettings);
+
 _hookDebugLogButtons();
 
 function openOnly(target) {
