@@ -19,9 +19,11 @@ file in sync.
 - [ ] **Bump-feedback envelope (smoother + slower)** — [`.claude/plan/18-bump-envelope.md`](./.claude/plan/18-bump-envelope.md) — smoothstep attack + linear decay envelope; new Bump attack + Bump duration sliders.
 - [ ] **Thick decoration lines on GPU** — [`.claude/plan/19-thick-decor-lines.md`](./.claude/plan/19-thick-decor-lines.md) — `_pushLine` emits screen-space-thick quads into `_decorTris` so the Line thickness slider actually thickens spikes / tendrils / flagella on WebGL2 + WebGPU.
 - [ ] **Bump-feedback envelope (smoother + slower)** — [`.claude/plan/18-bump-envelope.md`](./.claude/plan/18-bump-envelope.md) — smoothstep attack + linear decay envelope replaces the exp decay; new Bump attack + Bump duration sliders.
-- [ ] **Externalize non-`en` locales to `assets/i18n/*.json`** — [`.claude/plan/21-externalize-locales.md`](./.claude/plan/21-externalize-locales.md) — `en` stays inline as the synchronous fallback; every other locale becomes a JSON file fetched on demand when the user picks it.
+- [ ] **Glass-membrane silhouette + inset slider** — [`.claude/plan/22-glass-silhouette.md`](./.claude/plan/22-glass-silhouette.md) — lens band traces each cell's bodyScale() silhouette (lobed / rippled / pseudopod / star); new `glassInset` slider moves the band 0..50% inward from the rim.
 
 ## Done
+
+- [x] **Externalize non-`en` locales to `assets/i18n/*.json`** — [`.claude/plan/21-externalize-locales.md`](./.claude/plan/21-externalize-locales.md) (#266)
 
 - [x] **Locales: Quenya · Sindarin · Black Speech · Klingon · Proto-Indo-European · Mittelhochdeutsch** — [`.claude/plan/20-locales-tolkien-and-more.md`](./.claude/plan/20-locales-tolkien-and-more.md) (#265)
 

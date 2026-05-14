@@ -101,6 +101,7 @@
   "overlay_kind_glass": "Glasmembran",
   "glass_strength": "Brechungsstärke",
   "glass_size": "Linsenbreite",
+  "glass_inset": "Linsenversatz",
   "glass_chroma": "Farbsaum",
   "bump_feedback": "Stoss-Effekt",
   "bump_feedback_intensity": "Stoss-Stärke",

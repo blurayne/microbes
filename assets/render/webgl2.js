@@ -1250,10 +1250,17 @@ void main() {
 const RIPPLE_MAX = 24;
 const GLASS_MAX = 24;
 // Glass-membrane lensing overlay. Parity port of GLASS_BG_WGSL in
-// webgpu.js — band geometry now driven by u_glassParams.z (size):
+// webgpu.js — band geometry driven by u_glassParams.z (size):
 // half-width = 0.15 * size, so size=1.0 reproduces the original
 // 0.85..1.15 band. Half-sine lens peak; optional chromatic-split
 // via u_glassParams.y.
+//
+// Per-cell silhouette: bodyScale() — copied verbatim from the disk
+// shader above — gives a (live-wobbling) radial scale for each of
+// the five body kinds (lobed/rippled/pseudopod/star/round+oblong).
+// The band tracks `silhouette * (1 - inset) ± half_*silhouette`,
+// so the lens follows the actual cell shape (not a circle) and
+// sits inset inward from the edge. u_glassParams.w carries inset.
 //
 // WebGL2 Y-inversion fix: VERT_FULLSCREEN's v_uv uses canvas
 // convention (y=0 top) but the scene FBO this pass samples has
@@ -1266,16 +1273,57 @@ precision highp float;
 in vec2 v_uv;
 uniform sampler2D u_bg;
 uniform float u_time;
+uniform float u_wobbleAmp;
 uniform vec2 u_resolution;
 uniform int u_cellCount;
-uniform vec3 u_cells[${GLASS_MAX}];      // (uvX, uvY, uvR_minAxis)
-uniform vec3 u_glassParams;              // (strength, chroma, size)
+uniform vec4 u_cellsA[${GLASS_MAX}];     // (uvX, uvY, uvR_minAxis, kindFloat)
+uniform vec4 u_cellsB[${GLASS_MAX}];     // (phi, seed, freq, wobMul)
+uniform vec4 u_glassParams;              // (strength, chroma, size, inset)
 out vec4 outColor;
 
 vec4 sampleBg(vec2 canvasUv) {
   // Canvas-uv (y=0 top) → texture-uv (y=0 bottom).
   vec2 texUv = vec2(canvasUv.x, 1.0 - canvasUv.y);
   return texture(u_bg, clamp(texUv, 0.0, 1.0));
+}
+
+// Same dispatch + wobble math as the disk shader's bodyScale(), but
+// takes everything by parameter so the post-process can call it
+// without per-cell varyings.
+float glassBodyScale(vec2 uv, float kindF, vec4 ph) {
+  int kind = int(mod(kindF + 0.5, 16.0));
+  float ang = atan(uv.y, uv.x);
+  float phi = ph.x;
+  float seed = ph.y;
+  float freq = ph.z;
+  float wobMul = ph.w;
+  float t = u_time;
+
+  float scale = 1.0;
+  bool addWob = true;
+  float wobShareForLobed = 0.4;
+
+  if (kind == 1) {
+    scale = 1.0 + 0.16 * sin(3.0*ang + phi) + 0.08 * sin(5.0*ang + phi*1.7);
+  } else if (kind == 2) {
+    scale = 1.0 + 0.04 * sin(24.0*ang + phi) + 0.015 * sin(8.0*ang + phi*0.7);
+  } else if (kind == 4) {
+    scale = 1.0
+          + 0.20 * sin(3.0*ang + 0.8*t*freq + phi)
+          + 0.06 * sin(5.0*ang - 0.5*t*freq + seed);
+    addWob = false;
+  } else if (kind == 5) {
+    scale = 0.85 + 0.45 * abs(sin(5.0*ang + phi));
+    addWob = false;
+  }
+  if (addWob) {
+    float w1 = sin(t * 0.55 * freq + ang*3.0 + seed);
+    float w2 = sin(t * 0.85 * freq + ang*5.0 + seed*1.31 + phi);
+    float wob = u_wobbleAmp * wobMul * (w1 * 0.65 + w2 * 0.45);
+    if (kind == 1) scale += wob * wobShareForLobed;
+    else scale += wob;
+  }
+  return scale;
 }
 
 void main() {
@@ -1285,16 +1333,23 @@ void main() {
   float strength = u_glassParams.x;
   float chroma   = u_glassParams.y;
   float size     = max(u_glassParams.z, 0.01);
+  float inset    = clamp(u_glassParams.w, 0.0, 0.5);
   float half_    = 0.15 * size;
   for (int i = 0; i < ${GLASS_MAX}; i++) {
     if (i >= u_cellCount) break;
-    vec3 c = u_cells[i];
-    vec2 dvUv = uv - c.xy;
+    vec4 a = u_cellsA[i];
+    vec4 b = u_cellsB[i];
+    vec2 dvUv = uv - a.xy;
     vec2 dvPx = dvUv * u_resolution;
     float dPx  = length(dvPx);
-    float rPx  = max(c.z * minAx, 4.0);
-    float lo   = rPx * (1.0 - half_);
-    float hi   = rPx * (1.0 + half_);
+    float rPx  = max(a.z * minAx, 4.0);
+    // Cell-local UV: divide by uvR so glassBodyScale() sees the
+    // same length(uv) ≈ 1.0 contract as the disk shader.
+    float silR = glassBodyScale(dvUv / max(1e-4, a.z), a.w, b);
+    float silPx = rPx * silR;
+    float midR = silPx * (1.0 - inset);
+    float lo   = midR - silPx * half_;
+    float hi   = midR + silPx * half_;
     if (dPx < lo || dPx > hi) continue;
     float t = (dPx - lo) / max(1e-4, hi - lo);
     float lens = sin(t * 3.14159);
@@ -3142,14 +3197,17 @@ export class WebGL2Renderer extends RendererBase {
     const prog = link(gl, VERT_FULLSCREEN, FRAG_GLASS_BG);
     this._glassProg = prog;
     this._glassU = {
-      bg:        gl.getUniformLocation(prog, 'u_bg'),
-      time:      gl.getUniformLocation(prog, 'u_time'),
-      res:       gl.getUniformLocation(prog, 'u_resolution'),
-      cellCount: gl.getUniformLocation(prog, 'u_cellCount'),
-      cells:     gl.getUniformLocation(prog, 'u_cells'),
-      params:    gl.getUniformLocation(prog, 'u_glassParams'),
+      bg:         gl.getUniformLocation(prog, 'u_bg'),
+      time:       gl.getUniformLocation(prog, 'u_time'),
+      wobbleAmp:  gl.getUniformLocation(prog, 'u_wobbleAmp'),
+      res:        gl.getUniformLocation(prog, 'u_resolution'),
+      cellCount:  gl.getUniformLocation(prog, 'u_cellCount'),
+      cellsA:     gl.getUniformLocation(prog, 'u_cellsA'),
+      cellsB:     gl.getUniformLocation(prog, 'u_cellsB'),
+      params:     gl.getUniformLocation(prog, 'u_glassParams'),
     };
-    this._glassCellsBuf = new Float32Array(GLASS_MAX * 3);
+    this._glassCellsBufA = new Float32Array(GLASS_MAX * 4);
+    this._glassCellsBufB = new Float32Array(GLASS_MAX * 4);
   }
   _glassDestroy() {
     const gl = this.gl;
@@ -3160,7 +3218,8 @@ export class WebGL2Renderer extends RendererBase {
     }
   }
   _glassCollectCells() {
-    const buf = this._glassCellsBuf;
+    const a = this._glassCellsBufA;
+    const b = this._glassCellsBufB;
     const cells = (this.sim && this.sim.cells) || [];
     const W = this.W, H = this.H;
     const minAx = Math.max(1, Math.min(W, H));
@@ -3170,12 +3229,21 @@ export class WebGL2Renderer extends RendererBase {
       const s = this.sim.worldToScreen(c.x, c.y);
       const m = c.r * 1.5;
       if (s.x < -m || s.y < -m || s.x > W + m || s.y > H + m) continue;
-      buf[n * 3 + 0] = s.x / W;
-      buf[n * 3 + 1] = s.y / H;
-      buf[n * 3 + 2] = (c.r * this.camera.scale) / minAx;
+      const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+      const bodyK = BODY_KIND_FLOAT[(type.body && type.body.kind) || 'round'] || 0;
+      const wobMul = (type.field && type.field.wobbleMul) || 1.0;
+      const off = n * 4;
+      a[off + 0] = s.x / W;
+      a[off + 1] = s.y / H;
+      a[off + 2] = (c.r * this.camera.scale) / minAx;
+      a[off + 3] = bodyK;
+      b[off + 0] = c.phase || 0;
+      b[off + 1] = c.wobbleSeed || 0;
+      b[off + 2] = c.wobbleFreq || 1;
+      b[off + 3] = wobMul;
       n++;
     }
-    for (let i = n * 3; i < GLASS_MAX * 3; i++) buf[i] = 0;
+    for (let i = n * 4; i < GLASS_MAX * 4; i++) { a[i] = 0; b[i] = 0; }
     return n;
   }
   // Pack at most RIPPLE_MAX on-screen cells into _rippleCellsBuf as
@@ -4456,13 +4524,16 @@ export class WebGL2Renderer extends RendererBase {
       gl.bindTexture(gl.TEXTURE_2D, srcTex);
       gl.uniform1i(this._glassU.bg, 0);
       gl.uniform1f(this._glassU.time, t);
+      gl.uniform1f(this._glassU.wobbleAmp, S.wobbleAmp || 0);
       gl.uniform2f(this._glassU.res, this.canvas.width, this.canvas.height);
       gl.uniform1i(this._glassU.cellCount, cellCount);
-      gl.uniform3fv(this._glassU.cells, this._glassCellsBuf);
-      gl.uniform3f(this._glassU.params,
+      gl.uniform4fv(this._glassU.cellsA, this._glassCellsBufA);
+      gl.uniform4fv(this._glassU.cellsB, this._glassCellsBufB);
+      gl.uniform4f(this._glassU.params,
                    S.glassStrength ?? 1.0,
                    S.glassChroma ? 1.0 : 0.0,
-                   S.glassSize ?? 1.0);
+                   S.glassSize ?? 1.0,
+                   S.glassInset ?? 0.08);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     } else if (kind === 'caustics' && this._causticProg) {
       gl.useProgram(this._causticProg);
