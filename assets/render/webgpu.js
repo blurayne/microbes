@@ -3186,13 +3186,24 @@ export class WebGPURenderer extends RendererBase {
   _sceneFxEnsurePipeline() {
     if (this._sceneFxPipeline) return;
     const device = this.device;
-    // User log on build #351 narrowed the failure to "[Invalid
-    // RenderPipeline 'sceneFx']" but pop's per-frame scope only
-    // returned the derivative GetBindGroupLayout error, not the
-    // root validation message from createRenderPipeline itself.
-    // Wrap the lazy creation in its own scope + dump
-    // getCompilationInfo() on the shader module so we see exactly
-    // why this specific pipeline is rejected on the user's device.
+    // Speculative fix + diagnostic combined. Previous rounds of
+    // logging on builds #347/#351/#353 narrowed the failure to
+    // "[Invalid RenderPipeline 'sceneFx']" but the create-time
+    // scope kept returning null because `layout: 'auto'` defers
+    // its validation lazily until the first getBindGroupLayout(0)
+    // call. By then we're inside the frame, so the only error our
+    // scope sees is the derivative.
+    //
+    // Two changes:
+    //   1. Use an explicit GPUPipelineLayout with a hand-rolled
+    //      GPUBindGroupLayout matching SCENE_FX_WGSL's @binding
+    //      declarations. Removes auto-inference as a variable —
+    //      if the issue is the auto path tripping on something
+    //      device-specific (Safari WebGPU notoriously stricter
+    //      than Chrome on layout entry types), this fixes it.
+    //   2. Force the deferred validation to fire INSIDE the
+    //      scope by calling getBindGroupLayout(0) right after
+    //      creation. Pop then returns the actual error message.
     device.pushErrorScope('validation');
     const mod = device.createShaderModule({ code: SCENE_FX_WGSL, label: 'sceneFx' });
     if (mod.getCompilationInfo) {
@@ -3203,17 +3214,39 @@ export class WebGPURenderer extends RendererBase {
         }
       });
     }
+    this._sceneFxBgLayout = device.createBindGroupLayout({
+      label: 'sceneFx-bg-layout',
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '2d' } },
+      ],
+    });
+    const sceneFxPipelineLayout = device.createPipelineLayout({
+      label: 'sceneFx-pipeline-layout',
+      bindGroupLayouts: [this._sceneFxBgLayout],
+    });
     this._sceneFxPipeline = device.createRenderPipeline({
       label: 'sceneFx',
-      layout: 'auto',
+      layout: sceneFxPipelineLayout,
       vertex:   { module: mod, entryPoint: 'vs_main' },
       fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format }] },
       primitive: { topology: 'triangle-list' },
     });
+    // Force the lazy validation path so any deferred rejection
+    // lands inside our scope. With explicit layout this is also
+    // useful as a sanity check.
+    try { this._sceneFxPipeline.getBindGroupLayout(0); } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[webgpu sceneFx-create] getBindGroupLayout sync error:', e && e.message);
+    }
     device.popErrorScope().then((err) => {
       if (err) {
         // eslint-disable-next-line no-console
         console.warn('[webgpu sceneFx-create] validation error:', err.message);
+      } else {
+        // eslint-disable-next-line no-console
+        console.log('[webgpu sceneFx-create] pipeline OK');
       }
     });
     this._sceneFxSampler = device.createSampler({
@@ -4837,7 +4870,7 @@ export class WebGPURenderer extends RendererBase {
         u.buffer, u.byteOffset, u.byteLength,
       );
       const bg = this.device.createBindGroup({
-        layout: this._sceneFxPipeline.getBindGroupLayout(0),
+        layout: this._sceneFxBgLayout,
         entries: [
           { binding: 0, resource: { buffer: this._sceneFxUbo } },
           { binding: 1, resource: this._sceneFxSampler },
