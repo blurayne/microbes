@@ -1292,7 +1292,13 @@ body.adding #stage    { cursor: crosshair; }
 }
 
 /* Debug log viewer in settings — captures console.log/info/warn/error
-   so mobile users (no DevTools) can read runtime logs in-app. */
+   so mobile users (no DevTools) can read runtime logs in-app. The
+   log + its Clear/Copy buttons are hidden by default and only shown
+   on devices with a coarse pointer + no hover (= touch-only: phones,
+   tablets) where devtools isn't reachable. The other Debug-section
+   utility buttons (Copy build SHA, Screenshot, Copy/Save/Apply
+   settings) live in .debug-actions and stay visible on every
+   device — they're actions, not a console mirror. */
 .debug-log {
   max-height: 240px;
   overflow-y: auto;
@@ -1307,6 +1313,7 @@ body.adding #stage    { cursor: crosshair; }
   word-break: break-word;
   -webkit-user-select: text;
   user-select: text;
+  display: none;
 }
 .debug-log:empty::before {
   content: "(no log yet)";
@@ -1314,10 +1321,22 @@ body.adding #stage    { cursor: crosshair; }
   font-style: italic;
 }
 .debug-log-actions {
+  gap: 8px;
+  flex-wrap: wrap;
+  display: none;
+}
+@media (pointer: coarse) and (hover: none) {
+  .debug-log         { display: block; }
+  .debug-log-actions { display: flex;  }
+}
+.debug-actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
 }
-.debug-log-actions button {
+.debug-log-actions button,
+.debug-actions button {
   flex: 0 0 auto;
   padding: 6px 12px;
   background: #00000044;
@@ -1328,7 +1347,8 @@ body.adding #stage    { cursor: crosshair; }
   font-size: 12px;
   cursor: pointer;
 }
-.debug-log-actions button:hover {
+.debug-log-actions button:hover,
+.debug-actions button:hover {
   background: var(--accent);
   color: var(--accent-ink);
 }

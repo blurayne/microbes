@@ -307,10 +307,20 @@
         <label><input type="checkbox" id="showFPS" /> <span data-i18n="show_fps">Show FPS + renderer</span></label>
         <label><input type="checkbox" id="showBuildInfo" /> <span data-i18n="show_build_info">Show build info</span></label>
         <label><input type="checkbox" id="showCellTotal" /> <span data-i18n="show_cell_total">Show cell total</span></label>
+        <!-- Mobile-only in-app log mirror. Desktop users have
+             devtools; mobile users don't, so we keep the console
+             mirror + its Clear/Copy buttons available there only.
+             The other Debug-section utility buttons (build SHA,
+             screenshot, settings copy/save/apply) stay visible on
+             every device because they're real actions, not just a
+             console mirror. CSS hides .debug-log + .debug-log-actions
+             outside of (pointer: coarse) and (hover: none). -->
         <pre id="debugLogView" class="debug-log" aria-live="polite"></pre>
         <div class="debug-log-actions">
           <button type="button" id="debugLogClear" data-i18n="clear">Clear</button>
           <button type="button" id="debugLogCopy" data-i18n="copy">Copy</button>
+        </div>
+        <div class="debug-actions">
           <button type="button" id="copyBuildBtn" data-i18n="copy_build">Copy build SHA</button>
           <button type="button" id="screenshotBtn" data-i18n="screenshot_btn">Screenshot</button>
           <button type="button" id="copySettingsBtn"  data-i18n="copy_settings">Copy settings</button>
