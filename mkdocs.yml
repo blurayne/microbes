@@ -29,8 +29,30 @@ theme:
 
 nav:
   - Einleitung: index.md
-  - 01 · Helden: ch01-helden.md
-  - 02 · Pathogene: ch02-pathogene.md
+  - 01 · Helden:
+    - Übersicht: ch01-helden.md
+    - Neutrophile: cells/neutrophil.md
+    - Monozyt: cells/monocyte.md
+    - Makrophage: cells/macrophage.md
+    - Dendritische Zelle: cells/dendritic.md
+    - T-Zelle: cells/tcell.md
+    - B-Zelle: cells/bcell.md
+    - NK-Zelle: cells/nk.md
+    - Mastzelle: cells/mast.md
+    - Basophil: cells/basophil.md
+    - Eosinophil: cells/eosinophil.md
+    - Thrombozyt: cells/platelet.md
+    - Red Blood Cell: cells/rbc.md
+  - 02 · Pathogene:
+    - Übersicht: ch02-pathogene.md
+    - Virus: pathogens/virus.md
+    - Keim: pathogens/germ.md
+    - Bakterium: pathogens/bacterium.md
+    - Amöbe: pathogens/amoeba.md
+    - Milbe: pathogens/mite.md
+    - Schleim: pathogens/slime.md
+    - Spore: pathogens/spore.md
+    - Toxin: pathogens/toxin.md
   - 03 · Diagramme & Abläufe: ch03-diagramme.md
   - 04 · Konzept & Tiers: ch04-konzept.md
   - 05 · Adaptiver Codex: ch05-codex.md
