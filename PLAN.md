@@ -19,6 +19,7 @@ file in sync.
 - [ ] **Bump-feedback envelope (smoother + slower)** — [`.claude/plan/18-bump-envelope.md`](./.claude/plan/18-bump-envelope.md) — smoothstep attack + linear decay envelope; new Bump attack + Bump duration sliders.
 - [ ] **Thick decoration lines on GPU** — [`.claude/plan/19-thick-decor-lines.md`](./.claude/plan/19-thick-decor-lines.md) — `_pushLine` emits screen-space-thick quads into `_decorTris` so the Line thickness slider actually thickens spikes / tendrils / flagella on WebGL2 + WebGPU.
 - [ ] **Bump-feedback envelope (smoother + slower)** — [`.claude/plan/18-bump-envelope.md`](./.claude/plan/18-bump-envelope.md) — smoothstep attack + linear decay envelope replaces the exp decay; new Bump attack + Bump duration sliders.
+- [ ] **Locales: Quenya · Sindarin · Black Speech · Klingon · Proto-Indo-European · Mittelhochdeutsch** — [`.claude/plan/20-locales-tolkien-and-more.md`](./.claude/plan/20-locales-tolkien-and-more.md) — six new language codes (qya/sjn/mor/tlh/pie/gmh).
 
 ## Done
 

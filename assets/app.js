@@ -2220,6 +2220,17 @@ if (langSelect) {
     ['en','English'], ['de','Deutsch'], ['es','Español'],
     ['bar','Bayrisch'], ['hes','Hessisch'], ['mainz','Mainzerisch'],
     ['latin','Latina'],
+    // Constructed / historical languages — partial translations
+    // (fall through to English for keys not localised). Order is
+    // chronological-ish: medieval German → ancient → Tolkien →
+    // Star Trek. Native script labels where the language has a
+    // canonical name.
+    ['gmh','Mittelhochdeutsch'],
+    ['pie','Proto-Indogermanisch *'],
+    ['qya','Quenya (Eldarin)'],
+    ['sjn','Sindarin (Eldarin)'],
+    ['mor','Burzum-zat (Mordor)'],
+    ['tlh','tlhIngan Hol'],
   ];
   for (const [k, label] of langs) {
     const opt = document.createElement('option');
