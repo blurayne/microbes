@@ -3092,7 +3092,11 @@ export class WebGPURenderer extends RendererBase {
     const tex = device.createTexture({
       size: [w, h],
       format: this.format,
-      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+      // COPY_SRC so the diagnostic readback in endFrame can
+      // copyTextureToBuffer a 1×1 region to inspect what the bg
+      // pass actually wrote on the GPU. Cheap to leave on; only
+      // exercised when the diag scope is armed.
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
     });
     return { tex, view: tex.createView(), w, h };
   }
@@ -3642,6 +3646,17 @@ export class WebGPURenderer extends RendererBase {
 
   beginFrame(/* timeMs, dt */) {
     if (!this.device || !this.context) return;
+    // Diagnostic: wrap the frame in a validation error scope so we
+    // can see whether WebGPU is silently rejecting any of our
+    // passes. Popped in endFrame. Only armed when duotone /
+    // microscope-blur is on so non-duotone sessions don't pay the
+    // mapAsync cost.
+    if (S.microscopeBlur || S.makeItReal) {
+      this.device.pushErrorScope('validation');
+      this._diagScopeArmed = true;
+    } else {
+      this._diagScopeArmed = false;
+    }
     this._frameEncoder = this.device.createCommandEncoder();
     const tex = this.context.getCurrentTexture();
     this._frameView = tex.createView();
@@ -3669,6 +3684,7 @@ export class WebGPURenderer extends RendererBase {
         }
       }
     }
+    this._diagLastChain = this._postChain.join(',');
     const ripplesBgOnly = !!S.liquidRipples && !overlayKindRunsAfterScene('ripples');
 
     // Default scene target is the canvas. If any post-pin chain step
@@ -4576,10 +4592,71 @@ export class WebGPURenderer extends RendererBase {
       this._postSource = null;
     }
     this._fxOverlayDraw(t);
+    // Diagnostic readback (throttled 1Hz): copy a 1×1 region of
+    // _postRtA to a staging buffer so we can see what the bg /
+    // cells passes actually wrote on the GPU. mapAsync resolves
+    // a frame or two later but that's fine for spot-checking.
+    let diagReadback = null;
+    if (this._diagScopeArmed && this._postRtA) {
+      const now = performance.now();
+      if (!this._diagLastMs || now - this._diagLastMs > 1000) {
+        this._diagLastMs = now;
+        if (!this._diagBuffer) {
+          this._diagBuffer = this.device.createBuffer({
+            size: 256,                            // min copyBuffer alignment
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+          });
+        }
+        const cx = (this.canvas.width / 2) | 0;
+        const cy = (this.canvas.height / 2) | 0;
+        this._frameEncoder.copyTextureToBuffer(
+          { texture: this._postRtA.tex, origin: { x: cx, y: cy } },
+          { buffer: this._diagBuffer, bytesPerRow: 256 },
+          { width: 1, height: 1 },
+        );
+        diagReadback = this._diagBuffer;
+      }
+    }
     this.device.queue.submit([this._frameEncoder.finish()]);
     this._frameEncoder = null;
     this._frameView = null;
     this._sceneView = null;
+    // Pop the validation scope from beginFrame. If anything in
+    // this frame's encoding/submit produced a validation error,
+    // we log it. WebGPU errors normally surface on the console;
+    // catching them at scope-pop confirms whether the duotone
+    // black canvas is from validation rejection vs silent runtime
+    // misbehaviour.
+    if (this._diagScopeArmed) {
+      this._diagScopeArmed = false;
+      this.device.popErrorScope().then((err) => {
+        if (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[webgpu-diag] validation error:', err.message);
+        }
+      });
+    }
+    if (diagReadback) {
+      diagReadback.mapAsync(GPUMapMode.READ).then(() => {
+        const data = new Uint8Array(diagReadback.getMappedRange().slice(0, 4));
+        const layers = currentBgLayers();
+        const bg0 = layers[0] || {};
+        // eslint-disable-next-line no-console
+        console.log('[webgpu-diag]',
+                    `px=rgba(${data[0]},${data[1]},${data[2]},${data[3]})`,
+                    `chain=${this._diagLastChain || ''}`,
+                    `kind=${bg0.kind}`,
+                    `base=${bg0.base}`,
+                    `opacity=${bg0.opacity}`,
+                    `microscopeBlur=${S.microscopeBlur ? 1 : 0}`,
+                    `makeItReal=${S.makeItReal ? 1 : 0}`,
+                    `cs=${this.camera ? this.camera.scale : '?'}`);
+        diagReadback.unmap();
+      }).catch((e) => {
+        // eslint-disable-next-line no-console
+        console.warn('[webgpu-diag] mapAsync failed:', e && e.message);
+      });
+    }
   }
 
   // Run a single post-pin chain step. Reads from `srcView` and
