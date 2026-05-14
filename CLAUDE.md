@@ -51,20 +51,52 @@ When **shipping** the change:
       Stable identifier. NOT the same as the build number.
     - **Build number** — the GitHub Actions Pages-deploy *run*
       number for the merge commit. Different counter than PR #.
-      Only known after the workflow starts; query via
-      `gh api /repos/blurayne/microbes/actions/runs?branch=main&per_page=1`
-      and read the `.workflow_runs[0].run_number`. If unavailable
-      at announce time, say `(build # pending)` and let the user
-      read it from the in-app build stamp on next refresh.
     - **Codename** — derived from the build run via
       `buildCodename(run)` in `assets/core/build-codename.js`.
   Always include the **source branch** of the PR too — the user
   uses it to track which session/feature shipped. Format:
   ```
   PR #98 from claude/pr-b3-vesicles → main
-  build #N · <codename> is deploying (or "build # pending")
+  build #N · <codename> · deployed: https://blurayne.github.io/microbes/
   ```
-  Do this on every merge/push without being asked.
+- **Verify the deploy actually finished before announcing.** If
+  a GitHub token lives at `~/.github-token` (chmod 600, outside
+  the repo, never `git add`-ed), use it via `curl` to poll the
+  workflow run for the merge commit *to completion* and only
+  then report the URL. Poll loop:
+  ```bash
+  TOKEN="$(cat ~/.github-token)"
+  # Find the in-flight run for main
+  RUN_ID=$(curl -sS -H "Authorization: Bearer ${TOKEN}" \
+    "https://api.github.com/repos/blurayne/microbes/actions/runs?per_page=1&branch=main" \
+    | python3 -c "import json,sys; print(json.load(sys.stdin)['workflow_runs'][0]['id'])")
+  while true; do
+    STATE=$(curl -sS -H "Authorization: Bearer ${TOKEN}" \
+      "https://api.github.com/repos/blurayne/microbes/actions/runs/${RUN_ID}" \
+      | python3 -c "import json,sys; d=json.load(sys.stdin); print(d['status'], d['conclusion'])")
+    echo "$STATE"
+    case "$STATE" in completed*) break;; esac
+    sleep 15
+  done
+  ```
+  Run this in the background (Bash `run_in_background: true` or
+  Monitor) so the user can see the poll output stream in. Once
+  the run reports `completed/success`, fetch
+  `/repos/blurayne/microbes/pages` and report the `html_url` as
+  the deployment URL. If the run is `completed/failure`, fetch
+  the failing job's step list + log download so the user sees
+  exactly why before any next push. **Never commit the token.**
+  If no token is available, fall back to "(build # pending — you'll
+  see it on next refresh)".
+- **Pages source must be `build_type: workflow`.** If the API
+  reports `build_type: legacy`, my custom `pages.yml` runs but
+  its artifact is ignored — the deployed site comes from
+  GitHub's built-in Jekyll workflow against the raw `main`
+  branch, so the stamp step never affects what users see. PUT
+  `{"build_type":"workflow"}` to `/repos/blurayne/microbes/pages`
+  needs `pages:write` on the token; if 403, ask the user to flip
+  it in the GitHub UI: **Settings → Pages → Build and deployment
+  → Source: GitHub Actions**.
 - **Pre-commit checks**: `node --test` + render-module imports
   (`for r in canvas2d webgl2 webgpu; do node -e "import('./assets/render/${r}.js').then(()=>console.log(r))"; done`).
 - **Renderer parity**: when a visual change touches one renderer
