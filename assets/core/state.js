@@ -13,15 +13,24 @@ export const ALL_CELL_KEYS = [
   'virus', 'germ', 'bacterium', 'amoebaP', 'slime', 'mite', 'spore', 'toxin',
 ];
 
+// User-curated defaults baked in 2026-05-14 from the shipping
+// session config (see commit message for the source JSON the user
+// pasted). Captures the look + feel the user has settled on:
+// bloodflow bg, glass + microscope + duotone post-pin chain on by
+// default, FPS / build-info / cell-total pills on, cartoon faces,
+// extended cells visible, anchored nav arrows. Migration shim in
+// loadSettings still merges DEFAULTS with whatever's in
+// localStorage — users with persisted prefs keep them; only fresh
+// installs and re-imports of a "blank" blob land on these values.
 export const DEFAULTS = {
-  splitMode: 'bondDrift',
-  autoSplitSeconds: 10,
-  maxCells: 512,            // population cap. UI number input in Settings → Population; clamps to [32, 4096], invalid input resets to 512. Reached cap = spawnAtWorld/beginSplit recycle the oldest cell (#136); see TODO.md for future ideas.
-  bgFlowSpeed: 0.55,
-  bgScale: 1.0,             // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0.05..20× (the floor matches the shader's `max(u_bgScale, 0.05)` clamp; the 20× ceiling gives enough headroom to shrink features below the obvious-default size).
-  outlinePx: 5,
-  lineThickness: 1.0,        // global multiplier on antibody stroke width (canvas2d) + every cell outline / decoration / nucleus / face line in canvas2d + cell-border shader uniform (webgl2 / webgpu) + GPU decoration thickness (spikes / tendrils / flagella / cilia / drips / legs / fuzz / Y-receptors emit screen-space-thick quads via _pushLine). 1.0 keeps the previous look. Clamped 0.3..10.0 in loadSettings. GPU antibody Y's stay at 1 device-px because the antibody pipeline still uses line-list topology — that's a separate pipeline from decorations.
-  faceScale: 0.7,           // multiplier on cartoon face size — scales eye radius, pupil radius, eye horizontal spread, and mouth width uniformly across all renderers. 0.7 is the new default (was 1.0); clamped 0.2..2.2 in loadSettings.
+  splitMode: 'pushApart',
+  autoSplitSeconds: 28,
+  maxCells: 1024,           // population cap. UI number input in Settings → Population; clamps to [32, 4096], invalid input resets to maxCells default. Reached cap = spawnAtWorld/beginSplit recycle the oldest cell (#136); see TODO.md for future ideas.
+  bgFlowSpeed: 0.45,
+  bgScale: 1.75,            // multiplies the world-space size of every background pattern feature (RBC tiles, fbm noise, voronoi cells, rings, grid). Camera zoom is untouched, so cells stay the same size while the bg pattern grows or shrinks. Slider in Settings → Look, range 0.05..20× (the floor matches the shader's `max(u_bgScale, 0.05)` clamp; the 20× ceiling gives enough headroom to shrink features below the obvious-default size).
+  outlinePx: 7,
+  lineThickness: 0.9,        // global multiplier on antibody stroke width (canvas2d) + every cell outline / decoration / nucleus / face line in canvas2d + cell-border shader uniform (webgl2 / webgpu) + GPU decoration thickness (spikes / tendrils / flagella / cilia / drips / legs / fuzz / Y-receptors emit screen-space-thick quads via _pushLine). 1.0 keeps the previous look. Clamped 0.3..10.0 in loadSettings. GPU antibody Y's stay at 1 device-px because the antibody pipeline still uses line-list topology — that's a separate pipeline from decorations.
+  faceScale: 0.6,           // multiplier on cartoon face size — scales eye radius, pupil radius, eye horizontal spread, and mouth width uniformly across all renderers. Clamped 0.2..2.2 in loadSettings.
   showDebugField: false,
   // Visual style for the cell rendering itself. Was the lone "theme"
   // setting until late 2026; renamed when the colour palette below was
@@ -29,7 +38,7 @@ export const DEFAULTS = {
   theme: 'legacy',
   // Colour palette tinting outlines + UI panel accent (was DEFAULTS.theme).
   // Renamed to interfaceColor to free up "theme" for the cell-shader theme.
-  interfaceColor: 'pink',
+  interfaceColor: 'amber',
   activeTypes: ALL_CELL_KEYS.slice(),
   splitOnTap: false,
   addDialogView: 'grid',    // 'grid' | 'list' — initial view when the add/cell-info dialog opens. Toggle button in the header swaps modes; ? FAB forces 'list', + FAB respects this setting.
@@ -49,38 +58,39 @@ export const DEFAULTS = {
   cellTypeOverlay: false,   // eye-toggle: per-cell ring + text label identifying the cell type. HTML overlay above the canvas; renderer-agnostic.
   causticsOverlay: false,   // water-turbulence post-process applied on top of the rendered background. WebGL2 + WebGPU only; Canvas2D is a no-op.
   liquidRipples: false,     // bg post-process: each on-screen cell radiates concentric ripples that distort the background — reads as cells moving through liquid. WebGL2 + WebGPU only; Canvas2D is a no-op.
-  glassMembrane: false,     // overlay post-process: lensing refraction in a thin band just outside each cell, making the membrane read as glass that bends the scene behind it. WebGL2 + WebGPU only; Canvas2D is a no-op.
-  glassStrength: 1.0,       // multiplier on the glass-membrane refraction strength. Slider in Settings → Overlays, range 0.1..3.0. Default 1.0 keeps the previous look.
-  glassSize: 1.0,           // multiplier on the lens-band half-width. Shader uses half = 0.15 * glassSize, so size=1.0 → band 0.85..1.15·r (original look), size=2.0 → 0.70..1.30·r, size=0.5 → 0.925..1.075·r. Range 0.2..3.0.
-  glassChroma: false,       // optional chromatic-split toggle on top of the always-on lensing — when true, the three RGB channels sample the scene at slightly different displacements so the rim shows a prism-edge colour fringe.
+  glassMembrane: true,      // overlay post-process: lensing refraction in a thin band just outside each cell, making the membrane read as glass that bends the scene behind it. WebGL2 + WebGPU only; Canvas2D is a no-op.
+  glassStrength: 3.0,       // multiplier on the glass-membrane refraction strength. Slider in Settings → Overlays, range 0.1..3.0.
+  glassSize: 1.4,           // multiplier on the lens-band half-width. Shader uses half = 0.15 * glassSize, so size=1.0 → band 0.85..1.15·r (original look), size=2.0 → 0.70..1.30·r, size=0.5 → 0.925..1.075·r. Range 0.2..3.0.
+  glassChroma: true,        // optional chromatic-split toggle on top of the always-on lensing — when true, the three RGB channels sample the scene at slightly different displacements so the rim shows a prism-edge colour fringe.
   // Bump-feedback: when two cells collide, both flash and squash
   // briefly along the impact normal. Visual only — the elastic
   // bounce physics runs regardless. Squash is rendered by webgl2 +
   // webgpu cell shaders; canvas2d shows the flash only.
   bumpFeedback: true,
-  bumpFeedbackIntensity: 1.0,
+  bumpFeedbackIntensity: 0.4,
   // Bump envelope shape (seconds). bumpAttack is the smoothstep
   // ramp-up — higher = squash eases in slower. bumpDuration is
-  // the total visible time (attack + linear fade). Defaults give
-  // a noticeably slower, rounder squash than the original 150 ms
-  // exponential decay.
-  bumpAttack: 0.20,
-  bumpDuration: 1.5,
+  // the total visible time (attack + linear fade). User-curated
+  // defaults: quick snap into the squash (30 ms attack) + long
+  // slow fade (4 s) reads more "organic membrane" than the
+  // original 150 ms exponential.
+  bumpAttack: 0.03,
+  bumpDuration: 4.0,
   // Caustics tint — modulates the green/teal cast added on top of
-  // the rendered scene. Defaults reproduce the historical (0, 1.35,
-  // 0.5) bias; lower values toward 0 fade toward neutral white.
-  causticTintR: 0.0,
-  causticTintG: 1.35,
-  causticTintB: 0.5,
+  // the rendered scene. User-curated warm-cast defaults; lower
+  // values toward 0 fade toward neutral white.
+  causticTintR: 1.6,
+  causticTintG: 2.0,
+  causticTintB: 2.0,
   // Fullscreen overlay effects (all post-bg, post-cells). Ported from
   // docs/shader-test.html's microscope chrome — toggleable + tunable.
-  staticNoise: false,            // film-grain per-pixel hash noise
-  staticNoiseIntensity: 0.4,
+  staticNoise: true,             // film-grain per-pixel hash noise
+  staticNoiseIntensity: 0.34,
   staticNoiseBlend: 'additive',  // 'normal' | 'multiply' | 'additive'
-  vignette: false,               // viewport-radial blue tint at corners (microscope)
-  vignetteIntensity: 0.6,
-  vignetteBlend: 'additive',
-  crosshair: false,              // small cyan + at viewport centre
+  vignette: true,                // viewport-radial blue tint at corners (microscope)
+  vignetteIntensity: 0.66,
+  vignetteBlend: 'normal',
+  crosshair: true,               // small cyan + at viewport centre
   // Unified overlay draw order. Every overlay (FX blends + FBO
   // passes + the HTML cell-type overlay) is a single entry in
   // this array. The 'scene' entry is a fixed pin marking where
@@ -92,69 +102,89 @@ export const DEFAULTS = {
   // Renderers read overlayFxOrder() / overlayKindRunsAfterScene()
   // helpers — they don't touch the array directly.
   overlayOrder: [
+    // User-curated overlay stack: glass + ripples + microscope
+    // blur + duotone in the chain above the scene pin; caustics
+    // and the cell-type HTML overlay below the pin (bg-only
+    // scope). Crosshair / vignette / noise are FX blends that
+    // composite after the chain. Order is top-of-list runs LAST
+    // (= visually on top).
+    'crosshair',   // viewport centre crosshair (S.crosshair)
+    'vignette',    // microscope corner-tint (S.vignette)
     'duotone',     // duotone color grade (S.makeItReal)
     'noise',       // film-grain (S.staticNoise)
-    'vignette',    // microscope corner-tint (S.vignette)
-    'crosshair',   // viewport centre crosshair (S.crosshair)
     'microscope',  // variable-radius blur (S.microscopeBlur)
-    'caustics',    // water-turbulence tint (S.causticsOverlay)
-    'celltype',    // HTML cell-type label overlay (S.cellTypeOverlay)
-    'ripples',     // liquid ripples (S.liquidRipples) — above the pin = full-scene scope (matches legacy default)
+    'ripples',     // liquid ripples (S.liquidRipples)
+    'glass',       // glass-membrane lensing (S.glassMembrane)
     'scene',       // ← fixed scene pin (cells render here)
                    //   drag an overlay below this line to make it run BEFORE cells (bg-only)
+    'caustics',    // water-turbulence tint (S.causticsOverlay) — bg-only scope
+    'celltype',    // HTML cell-type label overlay (S.cellTypeOverlay) — bg-only scope
   ],
   // Microscope distortion: scene-wide variable-radius blur. Sharp
   // center (focus zone) with progressively blurrier edges. Knobs:
   // focus = sharp-zone radius as fraction of min(W,H)/2; strength =
   // peak edge blur as fraction of min(W,H); falloff = transition
   // hardness (0 soft, 1 abrupt). WebGL2 + WebGPU only.
-  microscopeBlur: false,
-  microscopeFocus: 0.35,
-  microscopeBlurStrength: 0.04,
-  microscopeFalloff: 0.04,
+  microscopeBlur: true,
+  microscopeFocus: 0.43,
+  microscopeBlurStrength: 0.05,
+  microscopeFalloff: 0.03,
   // "Make it real" microscope-photo color grade: maps scene luminance
   // along a duotone gradient between hue1 (shadows) and hue2 (highlights),
   // with a saturation knob. Hues are 0..1 around the wheel (0 red, 0.33
   // green, 0.5 cyan, 0.67 blue). Defaults dial in the green→cyan look
   // of the reference microbe-microscopy reference. WebGL2 + WebGPU only.
-  makeItReal: false,
-  makeItRealHue1: 0.30,
-  makeItRealHue2: 0.55,
-  makeItRealSaturation: 0.55,
+  makeItReal: true,
+  makeItRealHue1: 0.38,
+  makeItRealHue2: 0.64,
+  makeItRealSaturation: 0.32,
   // Liquid-ripples knobs. All three are visible in the settings panel
   // only while S.liquidRipples is on. They feed straight into the
   // ripple shader's per-cell uniforms (see _rippleCollectCells + UBO).
-  rippleDensity: 1.5,       // how many ripple rings each cell radiates. Higher → tighter wavelength, more visible rings close to the body. Multiplier on the baseline 1 / 0.7.
-  rippleReach: 0.7,         // how far the ripples extend outward. Lower → ripples stay close to the cell (user wants "close to the object" by default). Multiplier on the falloff distance.
-  rippleStrength: 1.0,      // peak UV displacement amplitude. Multiplier on the baseline ~6 px.
+  rippleDensity: 2.7,       // how many ripple rings each cell radiates. Higher → tighter wavelength, more visible rings close to the body. Multiplier on the baseline 1 / 0.7.
+  rippleReach: 0.3,         // how far the ripples extend outward. Lower → ripples stay close to the cell. Multiplier on the falloff distance.
+  rippleStrength: 0.4,      // peak UV displacement amplitude. Multiplier on the baseline ~6 px.
   pinchRotation: false,     // two-finger twist rotates the camera. Off by default — most users find it surprising. When off, sim.camera.rotation stays at 0 and the gesture only pinch-zooms + pans.
-  showFPS: false,
-  showCellTotal: false,     // append live cell count to the FPS line (renamed from showObjectCount in PR-after-#233 — now counts cells only, no particles)
+  showFPS: true,
+  showCellTotal: true,      // append live cell count to the FPS line (renamed from showObjectCount in PR-after-#233 — now counts cells only, no particles)
   settingsAccordion: true,  // when opening a `<details class="settings-section">` in the Settings dialog, automatically collapse the others. Acts like a single-pane accordion. Toggleable via the matching checkbox; on by default per user spec.
-  navMode: 'fixed',         // off-screen-cell arrow layout. 'none' = hidden; 'fixed' = 4 fixed-edge aggregate arrows (the original look); 'anchored' = per-cell arrows sliding along the screen edge, 1D-greedy clustered when crowded; 'circular' = arrows on a ring just outside the microscope focus circle, pointing outward toward each off-screen cell. The standalone `navArrows` bool was retired in favour of `'none'` here (migration shim in loadSettings).
-  extendedCells: false,     // opt-in cells flagged `extended: true` in CELL_TYPES (e.g. eukaryote). Off by default; user must enable in Settings → Display to see them in the Add dialog + help list.
-  showRenderer: false,      // append actual renderer info to the FPS line
-  showBuildInfo: false,     // top-left build stamp (branch · sha · #run · time)
-  friction: 0.80,
-  bounce: 0.6,
-  throwStrength: 0.35,
-  wobbleAmp: 0.13,
+  navMode: 'anchored',      // off-screen-cell arrow layout. 'none' = hidden; 'fixed' = 4 fixed-edge aggregate arrows (the original look); 'anchored' = per-cell arrows sliding along the screen edge, 1D-greedy clustered when crowded; 'circular' = arrows on a ring just outside the microscope focus circle, pointing outward toward each off-screen cell. The standalone `navArrows` bool was retired in favour of `'none'` here (migration shim in loadSettings).
+  extendedCells: true,      // opt-in cells flagged `extended: true` in CELL_TYPES (e.g. eukaryote). User-curated default: visible in Add dialog + help list.
+  showRenderer: true,       // append actual renderer info to the FPS line
+  showBuildInfo: true,      // top-left build stamp (branch · sha · #run · time)
+  friction: 0.65,
+  bounce: 0.23,
+  throwStrength: 2.25,
+  wobbleAmp: 0.08,
   speedMul: 1.0,
-  cartoon: false,
+  cartoon: true,
   lang: 'en',                               // 'en' | 'de' | 'es' | 'bar' | 'latin'
   allowBadGuys: true,
-  cellSizeMul: 1.0,
-  membraneIntensity: 0.9,
-  cellBorderThickness: 2.5,    // multiplier on the disk-shader outline band; webgl2 / webgpu only
-  background: 'solid',
+  cellSizeMul: 1.7,
+  membraneIntensity: 0.7,
+  cellBorderThickness: 3.5,    // multiplier on the disk-shader outline band; webgl2 / webgpu only
+  background: 'bloodflow',
   // Background layer stack. Empty array → renderers fall back to
   // a single layer derived from S.background (the legacy single-bg
   // path). PR B will surface a UI that populates this array. See
   // .claude/plan/10-bg-layer-stack.md.
-  bgLayers: [],
+  // User-curated default: single bloodflow layer with the
+  // vermilion palette so a fresh install matches the look the
+  // user has settled on.
+  bgLayers: [{
+    id: 'l_bloodflow_vermilion_default',
+    opacity: 1,
+    blend: 'normal',
+    enabled: true,
+    label: 'Bloodflow (vermilion)',
+    kind: 'bloodflow',
+    topColor: '#6b0f14',
+    botColor: '#2e080d',
+    vignette: 0,
+  }],
   renderScale: 1.0,
-  upscaleMode: 'blur',
-  scanlinesAlpha: 0.08,     // 0..1 strength of the CRT scanlines overlay; 0 = off (replaces the old scanlines: bool toggle)
+  upscaleMode: 'pixel',
+  scanlinesAlpha: 0,        // 0..1 strength of the CRT scanlines overlay; 0 = off (replaces the old scanlines: bool toggle)
   useHighlight: true,                       // selection ring uses theme accent when on
   // Audio. Explicit `musicEnabled` toggle drives playback — default OFF
   // so the page loads silent and the user opts in via Settings → Audio.
@@ -162,9 +192,11 @@ export const DEFAULTS = {
   // whatever level the user set. SFX volume unaffected by either knob.
   // Volumes are 0..1 floats.
   musicEnabled: false,
-  musicVolume: 0.5,
-  sfxVolume: 0.7,
-  renderer: 'webgpu',       // 'canvas2d' | 'webgl2' | 'webgpu'
+  musicVolume: 0.4,
+  sfxVolume: 0.75,
+  renderer: 'webgl2',       // 'canvas2d' | 'webgl2' | 'webgpu' — user-curated default: WebGL2 (WebGPU regressed on some devices; users can flip back via Settings → Performance).
+  // Virus shader 3D mode (off by default; toggle ships separately).
+  virusShader3D: false,
 };
 
 // Interface-colour accents — a SEPARATE small table from the
