@@ -2859,6 +2859,22 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindTexture(gl.TEXTURE_2D, null);
     return { fbo, tex, w, h };
   }
+  // Lazy 1×1 RGBA dummy used by the bg pass to keep
+  // u_reactorTex / u_tissueTex samplers pointed at a known-safe
+  // texture on kinds that don't sample them. Created once;
+  // contents don't matter.
+  _ensureBgDummyTex() {
+    if (this._bgDummyTex) return;
+    const gl = this.gl;
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+                  new Uint8Array([0, 0, 0, 255]));
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    this._bgDummyTex = t;
+  }
+
   _postEnsureRts() {
     const w = this.canvas.width | 0;
     const h = this.canvas.height | 0;
@@ -3251,6 +3267,27 @@ export class WebGL2Renderer extends RendererBase {
       gl.uniform4f(this._bgU.camera, this.camera.scale, this.camera.tx, this.camera.ty, this.camera.rotation);
       gl.uniform2f(this._bgU.viewport, this.W, this.H);
       gl.uniform1f(this._bgU.time, t);
+
+      // Bind a 1×1 dummy to TEXTURE0 + TEXTURE1 before each bg
+      // pass. The bg shader has u_reactorTex / u_tissueTex
+      // samplers that the kind-specific branches (kind=8 reactor,
+      // kind=11 tissue) bind real textures to — but for every
+      // other kind those samplers retain whatever was bound last
+      // frame. After the post-pin sceneFx pass bound _postRtA.tex
+      // to TEXTURE0 in the previous frame's endFrame, TEXTURE0
+      // would still point to _postRtA.tex on this frame's bg pass.
+      // _postRtA is now the render target, so the sampler
+      // referencing a texture that's also the FB attachment is a
+      // WebGL2 feedback-loop violation → GL_INVALID_OPERATION on
+      // drawArrays → bg silently fails and the FB stays at the
+      // defensive-clear black. Binding a known-safe dummy here
+      // breaks the feedback unconditionally; the kind-specific
+      // rebind below still overrides for the kinds that need it.
+      this._ensureBgDummyTex();
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this._bgDummyTex);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, this._bgDummyTex);
 
       for (let li = 0; li < layers.length; li++) {
         const bg = layers[li];
@@ -4371,19 +4408,14 @@ export class WebGL2Renderer extends RendererBase {
       }
       gl.enable(gl.BLEND);
       gl.bindVertexArray(null);
-      // Unbind the post-chain source texture from TEXTURE0 + TEXTURE1.
-      // _runPostPass bound _postSource.tex (= _postRtA.tex) to one of
-      // these units for sampling. If left bound, the NEXT frame's bg
-      // pass tries to render into _postRtA.fbo (whose color attachment
-      // IS that texture) while it's still bound for reading — a WebGL2
-      // feedback loop, GL_INVALID_OPERATION on the draw, and the bg
-      // silently fails (cells render on top of the defensive-clear
-      // black). Diagnostic confirmed glErr=1282 starting on frame 2
-      // with the bg center pixel at (0,0,0).
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, null);
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, null);
+      // PR #243 unbound TEXTURE0/1 to null here to break the
+      // feedback loop on the next frame, but that produced a
+      // different INVALID_OPERATION because the bg shader's
+      // u_reactorTex / u_tissueTex samplers still required SOME
+      // bound texture at their unit. The actual feedback fix
+      // lives in drawBackground — a 1×1 dummy is bound to
+      // TEXTURE0/1 before each bg pass, which breaks the loop
+      // AND keeps the samplers valid. Nothing to do here.
       this._postChain = [];
       this._postSource = null;
       this._sceneFbo = null;
