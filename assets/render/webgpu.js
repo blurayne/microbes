@@ -1153,12 +1153,50 @@ const GLASS_MAX_WGPU = 24;
 const GLASS_BG_WGSL = /* wgsl */ `
 struct GlassU {
   header: vec4<f32>,        // (time, cellCount, resW, resH)
-  params: vec4<f32>,        // (strength, chroma, size, _)
-  cells:  array<vec4<f32>, ${GLASS_MAX_WGPU}>,
+  params: vec4<f32>,        // (strength, chroma, size, inset)
+  extra:  vec4<f32>,        // (wobbleAmp, _, _, _)
+  cellsA: array<vec4<f32>, ${GLASS_MAX_WGPU}>,   // (uvX, uvY, uvR, kindFloat)
+  cellsB: array<vec4<f32>, ${GLASS_MAX_WGPU}>,   // (phi, seed, freq, wobMul)
 };
 @group(0) @binding(0) var<uniform> U : GlassU;
 @group(0) @binding(1) var bgSamp : sampler;
 @group(0) @binding(2) var bgTex  : texture_2d<f32>;
+
+fn glassBodyKind(k: f32) -> i32 { return i32((k + 0.5) % 16.0); }
+
+// Mirrors webgl2.js glassBodyScale + the disk shader's bodyScale.
+fn glassBodyScale(uv: vec2<f32>, kindF: f32, ph: vec4<f32>, time: f32, wobbleAmp: f32) -> f32 {
+  let kind = glassBodyKind(kindF);
+  let ang = atan2(uv.y, uv.x);
+  let phi = ph.x;
+  let seed = ph.y;
+  let freq = ph.z;
+  let wobMul = ph.w;
+  var scale: f32 = 1.0;
+  var addWob: bool = true;
+  let wobShareForLobed: f32 = 0.4;
+  if (kind == 1) {
+    scale = 1.0 + 0.16 * sin(3.0 * ang + phi) + 0.08 * sin(5.0 * ang + phi * 1.7);
+  } else if (kind == 2) {
+    scale = 1.0 + 0.04 * sin(24.0 * ang + phi) + 0.015 * sin(8.0 * ang + phi * 0.7);
+  } else if (kind == 4) {
+    scale = 1.0
+          + 0.20 * sin(3.0 * ang + 0.8 * time * freq + phi)
+          + 0.06 * sin(5.0 * ang - 0.5 * time * freq + seed);
+    addWob = false;
+  } else if (kind == 5) {
+    scale = 0.85 + 0.45 * abs(sin(5.0 * ang + phi));
+    addWob = false;
+  }
+  if (addWob) {
+    let w1 = sin(time * 0.55 * freq + ang * 3.0 + seed);
+    let w2 = sin(time * 0.85 * freq + ang * 5.0 + seed * 1.31 + phi);
+    let wob = wobbleAmp * wobMul * (w1 * 0.65 + w2 * 0.45);
+    if (kind == 1) { scale = scale + wob * wobShareForLobed; }
+    else           { scale = scale + wob; }
+  }
+  return scale;
+}
 
 @vertex fn vs_main(@builtin(vertex_index) vi: u32) -> @builtin(position) vec4<f32> {
   let x = f32((vi << 1u) & 2u) * 2.0 - 1.0;
@@ -1171,20 +1209,27 @@ struct GlassU {
   let uv  = frag.xy / res;
   var disp = vec2<f32>(0.0, 0.0);
   let minAx = min(res.x, res.y);
+  let time = U.header.x;
+  let wobbleAmp = U.extra.x;
   let n = i32(U.header.y + 0.5);
   let strength = U.params.x;
   let chroma   = U.params.y;
   let size     = max(U.params.z, 0.01);
+  let inset    = clamp(U.params.w, 0.0, 0.5);
   let halfBand = 0.15 * size;
   for (var i: i32 = 0; i < ${GLASS_MAX_WGPU}; i = i + 1) {
     if (i >= n) { break; }
-    let c = U.cells[i];
-    let dvUv = uv - c.xy;
+    let a = U.cellsA[i];
+    let b = U.cellsB[i];
+    let dvUv = uv - a.xy;
     let dvPx = dvUv * res;
     let dPx  = length(dvPx);
-    let rPx  = max(c.z * minAx, 4.0);
-    let lo   = rPx * (1.0 - halfBand);
-    let hi   = rPx * (1.0 + halfBand);
+    let rPx  = max(a.z * minAx, 4.0);
+    let silR = glassBodyScale(dvUv / max(1e-4, a.z), a.w, b, time, wobbleAmp);
+    let silPx = rPx * silR;
+    let midR = silPx * (1.0 - inset);
+    let lo   = midR - silPx * halfBand;
+    let hi   = midR + silPx * halfBand;
     if (dPx < lo || dPx > hi) { continue; }
     let t = (dPx - lo) / max(1e-4, hi - lo);
     let lens = sin(t * 3.14159);                     // peak mid-band
@@ -3492,8 +3537,8 @@ export class WebGPURenderer extends RendererBase {
         addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge',
       });
     }
-    // Layout: header vec4 + params vec4 + N × vec4 cells.
-    const floats = 4 + 4 + GLASS_MAX_WGPU * 4;
+    // Layout: header vec4 + params vec4 + extra vec4 + 2 × (N × vec4) cells.
+    const floats = 4 + 4 + 4 + 2 * GLASS_MAX_WGPU * 4;
     this._glassUbo = device.createBuffer({
       size: floats * 4,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -3505,28 +3550,40 @@ export class WebGPURenderer extends RendererBase {
     this._glassPipeline = null;
     this._glassUboData = null;
   }
-  // Same cell-pack shape as ripples — copy/paste of the per-cell
-  // visibility test + UV/radius pack.
+  // Two cells arrays per slot now: A = (uvX,uvY,uvR,kindFloat),
+  // B = (phi,seed,freq,wobMul). The glass post-process needs the
+  // body-kind + phase to evaluate bodyScale() per cell, so the
+  // membrane lens band traces the actual silhouette.
   _glassCollectCells() {
     const buf = this._glassUboData;
     const cells = (this.sim && this.sim.cells) || [];
     const W = this.W, H = this.H;
     const minAx = Math.max(1, Math.min(W, H));
-    const CELLS_OFF = 8;
+    const A_OFF = 12;
+    const B_OFF = A_OFF + GLASS_MAX_WGPU * 4;
     let n = 0;
     for (let i = 0; i < cells.length && n < GLASS_MAX_WGPU; i++) {
       const c = cells[i];
       const s = this.sim.worldToScreen(c.x, c.y);
       const m = c.r * 1.5;
       if (s.x < -m || s.y < -m || s.x > W + m || s.y > H + m) continue;
-      const off = CELLS_OFF + n * 4;
-      buf[off + 0] = s.x / W;
-      buf[off + 1] = s.y / H;
-      buf[off + 2] = (c.r * this.camera.scale) / minAx;
-      buf[off + 3] = 0;
+      const type = CELL_TYPES[c.type] || CELL_TYPES.neutrophil;
+      const bodyK = BODY_KIND_FLOAT[(type.body && type.body.kind) || 'round'] || 0;
+      const wobMul = (type.field && type.field.wobbleMul) || 1.0;
+      const aOff = A_OFF + n * 4;
+      const bOff = B_OFF + n * 4;
+      buf[aOff + 0] = s.x / W;
+      buf[aOff + 1] = s.y / H;
+      buf[aOff + 2] = (c.r * this.camera.scale) / minAx;
+      buf[aOff + 3] = bodyK;
+      buf[bOff + 0] = c.phase || 0;
+      buf[bOff + 1] = c.wobbleSeed || 0;
+      buf[bOff + 2] = c.wobbleFreq || 1;
+      buf[bOff + 3] = wobMul;
       n++;
     }
-    for (let i = CELLS_OFF + n * 4; i < buf.length; i++) buf[i] = 0;
+    for (let i = A_OFF + n * 4; i < B_OFF; i++) buf[i] = 0;
+    for (let i = B_OFF + n * 4; i < buf.length; i++) buf[i] = 0;
     return n;
   }
 
@@ -4829,7 +4886,9 @@ export class WebGPURenderer extends RendererBase {
       u[4] = S.glassStrength ?? 1.0;
       u[5] = S.glassChroma ? 1.0 : 0.0;
       u[6] = S.glassSize ?? 1.0;
-      u[7] = 0;
+      u[7] = S.glassInset ?? 0.08;
+      u[8] = S.wobbleAmp || 0;
+      u[9] = 0; u[10] = 0; u[11] = 0;
       this.device.queue.writeBuffer(
         this._glassUbo, 0,
         u.buffer, u.byteOffset, u.byteLength,
