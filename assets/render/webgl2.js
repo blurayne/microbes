@@ -3295,6 +3295,30 @@ export class WebGL2Renderer extends RendererBase {
     gl.bindVertexArray(null);
     // Decor (lobules, villi, neurons, …) intentionally not ported —
     // background flair only visible in a handful of themes.
+
+    // ── Diagnostic: read the center pixel of the scene FBO right
+    // after the bg pass. If the bg pass wrote a real color, this
+    // logs an RGBA != (0,0,0,*); if the user reports a black bg
+    // with duotone on but this prints (255, 100, 50, 255) or
+    // similar, the bug is downstream (post chain / sceneFx /
+    // canvas blit). If it prints (0,0,0,*) the bg pass itself is
+    // dark. Throttled to once per second so it doesn't spam.
+    if (this._sceneFbo && (S.microscopeBlur || S.makeItReal)) {
+      const now = performance.now();
+      if (!this._bgDiagLastMs || now - this._bgDiagLastMs > 1000) {
+        this._bgDiagLastMs = now;
+        const px = new Uint8Array(4);
+        const cx = (this.canvas.width / 2) | 0;
+        const cy = (this.canvas.height / 2) | 0;
+        gl.bindFramebuffer(gl.FRAMEBUFFER, this._sceneFbo);
+        gl.readPixels(cx, cy, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        // eslint-disable-next-line no-console
+        console.log('[duotone-diag] bg center px after bg pass:',
+                    `rgba(${px[0]}, ${px[1]}, ${px[2]}, ${px[3]})`,
+                    `chain=${(this._postChain || []).join(',')}`,
+                    `layers=${layers.length}`);
+      }
+    }
   }
 
   _setBgLayerUniforms(bg, t) {

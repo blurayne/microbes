@@ -4547,8 +4547,22 @@ export class WebGPURenderer extends RendererBase {
     // cheap FX overlays (noise / vignette / crosshair) layer on
     // top via pre-baked blend pipelines — they remain outside the
     // FBO chain.
+    //
+    // Encoder split: when a post-pin chain is enabled, the bg +
+    // cells writes to _postRtA need to be visible to the chain's
+    // first pass which samples that texture. On the user's WebGPU
+    // device the same-encoder path read stale/uninitialised
+    // memory → duotone canvas rendered completely black. PR #171
+    // shipped this split, was reverted in #172 because it broke
+    // duotone in a different way; the user's current state with
+    // no split is "completely black", so re-applying the split
+    // is at minimum no worse. Submission ordering between the two
+    // encoders is guaranteed by the WebGPU spec.
     const t = this._lastFrameSec || 0;
-    if (this._postChain && this._postChain.length > 0 && this._postSource) {
+    const hasChain = !!(this._postChain && this._postChain.length > 0 && this._postSource);
+    if (hasChain) {
+      this.device.queue.submit([this._frameEncoder.finish()]);
+      this._frameEncoder = this.device.createCommandEncoder();
       for (let i = 0; i < this._postChain.length; i++) {
         const kind = this._postChain[i];
         const isLast = (i === this._postChain.length - 1);
