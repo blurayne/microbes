@@ -19,9 +19,11 @@ file in sync.
 - [ ] **Bump-feedback envelope (smoother + slower)** — [`.claude/plan/18-bump-envelope.md`](./.claude/plan/18-bump-envelope.md) — smoothstep attack + linear decay envelope; new Bump attack + Bump duration sliders.
 - [ ] **Thick decoration lines on GPU** — [`.claude/plan/19-thick-decor-lines.md`](./.claude/plan/19-thick-decor-lines.md) — `_pushLine` emits screen-space-thick quads into `_decorTris` so the Line thickness slider actually thickens spikes / tendrils / flagella on WebGL2 + WebGPU.
 - [ ] **Bump-feedback envelope (smoother + slower)** — [`.claude/plan/18-bump-envelope.md`](./.claude/plan/18-bump-envelope.md) — smoothstep attack + linear decay envelope replaces the exp decay; new Bump attack + Bump duration sliders.
-- [ ] **Glass-membrane silhouette + inset slider** — [`.claude/plan/22-glass-silhouette.md`](./.claude/plan/22-glass-silhouette.md) — lens band traces each cell's bodyScale() silhouette (lobed / rippled / pseudopod / star); new `glassInset` slider moves the band 0..50% inward from the rim.
+- [ ] **GDD per-cell + per-pathogen detail pages** — [`.claude/plan/23-gdd-cell-pathogen-pages.md`](./.claude/plan/23-gdd-cell-pathogen-pages.md) — 20 neue Detailseiten unter `docs/cells/` und `docs/pathogens/` mit Was / Wie / Wann pro Einheit; mkdocs-Nav nestet sie unter ch01 / ch02.
 
 ## Done
+
+- [x] **Glass-membrane silhouette + inset slider** — [`.claude/plan/22-glass-silhouette.md`](./.claude/plan/22-glass-silhouette.md) (#267)
 
 - [x] **Externalize non-`en` locales to `assets/i18n/*.json`** — [`.claude/plan/21-externalize-locales.md`](./.claude/plan/21-externalize-locales.md) (#266)
 
