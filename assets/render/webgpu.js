@@ -3226,28 +3226,38 @@ export class WebGPURenderer extends RendererBase {
       label: 'sceneFx-pipeline-layout',
       bindGroupLayouts: [this._sceneFxBgLayout],
     });
-    this._sceneFxPipeline = device.createRenderPipeline({
+    // Use createRenderPipelineAsync so the validation message
+    // surfaces as a Promise rejection. The sync createRenderPipeline
+    // returns an invalid-marked object without throwing; its
+    // validation completes asynchronously, AFTER our scope pops,
+    // which is why the previous rounds always returned null and
+    // we only saw the SetPipeline / GetBindGroupLayout derivatives
+    // at frame time. The async API waits until validation is done
+    // before resolving / rejecting, so the catch finally tells us
+    // WHY the pipeline is invalid on the user's device.
+    const pipelineDesc = {
       label: 'sceneFx',
       layout: sceneFxPipelineLayout,
       vertex:   { module: mod, entryPoint: 'vs_main' },
       fragment: { module: mod, entryPoint: 'fs_main', targets: [{ format: this.format }] },
       primitive: { topology: 'triangle-list' },
-    });
-    // Force the lazy validation path so any deferred rejection
-    // lands inside our scope. With explicit layout this is also
-    // useful as a sanity check.
-    try { this._sceneFxPipeline.getBindGroupLayout(0); } catch (e) {
-      // eslint-disable-next-line no-console
-      console.warn('[webgpu sceneFx-create] getBindGroupLayout sync error:', e && e.message);
-    }
+    };
+    // Synchronous version is still used so frame code has the
+    // pipeline reference immediately; the async call is purely
+    // diagnostic and runs in parallel.
+    this._sceneFxPipeline = device.createRenderPipeline(pipelineDesc);
     device.popErrorScope().then((err) => {
       if (err) {
         // eslint-disable-next-line no-console
-        console.warn('[webgpu sceneFx-create] validation error:', err.message);
-      } else {
-        // eslint-disable-next-line no-console
-        console.log('[webgpu sceneFx-create] pipeline OK');
+        console.warn('[webgpu sceneFx-create] sync validation error:', err.message);
       }
+    });
+    device.createRenderPipelineAsync(pipelineDesc).then(() => {
+      // eslint-disable-next-line no-console
+      console.log('[webgpu sceneFx-async] pipeline validated OK');
+    }).catch((err) => {
+      // eslint-disable-next-line no-console
+      console.warn('[webgpu sceneFx-async] validation rejection:', err && err.message);
     });
     this._sceneFxSampler = device.createSampler({
       magFilter: 'linear', minFilter: 'linear',
