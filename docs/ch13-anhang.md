@@ -311,6 +311,16 @@
         Zahlenwerte.
       </p>
 
+      <p style="margin-top: 14px;">
+        <a href="assets/beziehungsdiagramm.pdf" download
+           style="display: inline-block; padding: 8px 14px; border-radius: 6px;
+                  background: #2a1e5a; color: #cdd1ec; text-decoration: none;
+                  font-family: 'IBM Plex Sans', sans-serif; font-size: 12px;
+                  border: 1px solid #4a3a8a;">
+          ⤓ PDF herunterladen · A4 quer (für Druck)
+        </a>
+      </p>
+
     </section>
 
     <section id="anhang-b" class="appendix-section" style="margin-top: 56px; padding-top: 32px; border-top: 1px solid var(--line, #2a2438);">
