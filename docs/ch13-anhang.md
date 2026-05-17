@@ -312,7 +312,7 @@
       </p>
 
       <p style="margin-top: 14px;">
-        <a href="assets/beziehungsdiagramm.pdf" download
+        <a href="../assets/beziehungsdiagramm.pdf" download
            style="display: inline-block; padding: 8px 14px; border-radius: 6px;
                   background: #2a1e5a; color: #cdd1ec; text-decoration: none;
                   font-family: 'IBM Plex Sans', sans-serif; font-size: 12px;
