@@ -4021,22 +4021,20 @@ export class WebGL2Renderer extends RendererBase {
     const caps = sim.vessels.capsules;
     const rbcs = sim.vesselRbcs || [];
     this._decorTris.length = 0;
-    // Outer tube body.
+    // Solid bright-red vessels — opaque single pass, matches the
+    // anatomical-illustration look. Survives the post-fx chain
+    // (microscope blur, glass membrane, noise) against the
+    // bloodflow bg.
     for (const cap of caps) {
       this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r,
-        0.47, 0.08, 0.11, 0.85);
+        0.88, 0.125, 0.17, 1.0);
     }
-    // Inner highlight — thinner, brighter.
-    for (const cap of caps) {
-      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r * 0.28,
-        0.67, 0.20, 0.24, 0.45);
-    }
-    // Flowing RBCs.
+    // Flowing RBCs — vivid pink ellipses survive post-fx blur.
     for (const p of rbcs) {
       const pos = rbcWorldPos(p, sim.vessels);
       if (!pos) continue;
       this._pushEllipse(pos.x, pos.y, pos.r, pos.r * 0.78, pos.angle,
-        1.0, 0.35, 0.39, 0.60);
+        1.0, 0.47, 0.51, 0.95);
     }
     if (this._decorTris.length > 0) this._uploadAndDrawDecorations();
     this._decorTris.length = 0; // leave the buffer clean for the cell-decor pass

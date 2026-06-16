@@ -5095,19 +5095,16 @@ export class WebGPURenderer extends RendererBase {
     const caps = sim.vessels.capsules;
     const rbcs = sim.vesselRbcs || [];
     this._decorTris.length = 0;
+    // Solid bright-red vessels — single opaque pass.
     for (const cap of caps) {
       this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r,
-        0.47, 0.08, 0.11, 0.85);
-    }
-    for (const cap of caps) {
-      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r * 0.28,
-        0.67, 0.20, 0.24, 0.45);
+        0.88, 0.125, 0.17, 1.0);
     }
     for (const p of rbcs) {
       const pos = rbcWorldPos(p, sim.vessels);
       if (!pos) continue;
       this._pushEllipse(pos.x, pos.y, pos.r, pos.r * 0.78, pos.angle,
-        1.0, 0.35, 0.39, 0.60);
+        1.0, 0.47, 0.51, 0.95);
     }
     if (this._decorTris.length > 0) this._uploadAndDrawDecorations();
     this._decorTris.length = 0;
