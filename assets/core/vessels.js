@@ -122,7 +122,10 @@ function buildBranchingNetwork(W, H, radiusMul) {
   const visualMinR = 3 * radiusMul;
   const rng = makePrng((W * 73856093) ^ (H * 19349663));
 
-  const baseSegLen = Math.min(W, H) * 0.30;
+  // Tree footprint is 100× the viewport area so the user can pan/
+  // zoom to reveal more of the network. baseSegLen × 10 from the
+  // viewport-fit value → 10× linear reach → 100× area coverage.
+  const baseSegLen = Math.min(W, H) * 3.0;
 
   function grow(rootX, rootY, angle, rootR, maxDepth) {
     function recurse(x, y, ang, r, depth) {
@@ -139,7 +142,10 @@ function buildBranchingNetwork(W, H, radiusMul) {
         r: Math.max(visualMinR, r),
         flow, physics,
       });
-      if (depth === 0) spawnSeeds.push({ x: (x + x2) * 0.5, y: (y + y2) * 0.5 });
+      // Pin the spawn seed at the trunk's root anchor — when the
+      // tree spans 10× the viewport its midpoint is off-screen
+      // and would spawn cells outside the camera.
+      if (depth === 0) spawnSeeds.push({ x, y });
       if (depth >= maxDepth) return;
       if (r * 0.50 < visualMinR) return;   // any thinner is invisible
       const n = rng() < 0.25 ? 3 : 2;
@@ -159,15 +165,19 @@ function buildBranchingNetwork(W, H, radiusMul) {
     recurse(rootX, rootY, angle, rootR, 0);
   }
 
-  const rootR = Math.max(physicsMinR + 24, Math.min(W, H) * 0.08) * radiusMul;
+  const rootR = Math.max(physicsMinR + 24, Math.min(W, H) * 0.70) * radiusMul;
   // One trunk coming from bottom-left, fanning up and across the
   // canvas — matches the anatomical-illustration reference image.
+  // Trunk thickness scales with the viewport so the main vessel
+  // is dramatically wide (the user wanted it ~10× wider than the
+  // viewport-fit default).
   const m = Math.min(W, H) * 0.03;
-  grow(m, H - m, -Math.PI * 0.30, rootR, 6);
+  grow(m, H - m, -Math.PI * 0.30, rootR, 7);
   return {
     capsules,
     spawnSeeds: spawnSeeds.length > 0 ? spawnSeeds : [{ x: W * 0.5, y: H * 0.5 }],
     bbox: bboxOf(capsules),
+    viewport: { W, H },
   };
 }
 
@@ -380,10 +390,26 @@ export function rbcWorldPos(rbc, vessels) {
 // as a guaranteed-inside fallback.
 export function pickSpawnInside(vessels, tries = 30) {
   if (!vessels || !vessels.capsules || vessels.capsules.length === 0) return null;
-  const { bbox } = vessels;
+  const { bbox, viewport } = vessels;
+  // Sample inside (bbox ∩ viewport) so cells don't spawn off-screen
+  // when the tree extends far beyond the camera (e.g. the vascular
+  // tree's 100×-viewport footprint). Falls back to the raw bbox if
+  // viewport is missing or the intersection is empty.
+  let minX = bbox.minX, maxX = bbox.maxX;
+  let minY = bbox.minY, maxY = bbox.maxY;
+  if (viewport) {
+    const clipMinX = Math.max(bbox.minX, 0);
+    const clipMaxX = Math.min(bbox.maxX, viewport.W);
+    const clipMinY = Math.max(bbox.minY, 0);
+    const clipMaxY = Math.min(bbox.maxY, viewport.H);
+    if (clipMaxX > clipMinX && clipMaxY > clipMinY) {
+      minX = clipMinX; maxX = clipMaxX;
+      minY = clipMinY; maxY = clipMaxY;
+    }
+  }
   for (let i = 0; i < tries; i++) {
-    const x = bbox.minX + Math.random() * (bbox.maxX - bbox.minX);
-    const y = bbox.minY + Math.random() * (bbox.maxY - bbox.minY);
+    const x = minX + Math.random() * (maxX - minX);
+    const y = minY + Math.random() * (maxY - minY);
     if (isInsideVessels(vessels, x, y)) return { x, y };
   }
   const seed = vessels.spawnSeeds && vessels.spawnSeeds[0];
