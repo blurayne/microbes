@@ -11,6 +11,10 @@ import {
   pickRandomActiveType,
 } from './state.js';
 import { getRule, maxAttractRadius, defaultHp, getBestCounter } from './sim-rules.js';
+import {
+  buildVessels, buildRbcParticles, tickRbcParticles,
+  nearestVesselWall, pickSpawnInside, isInsideVessels,
+} from './vessels.js';
 
 // Push-apart impulse from finishSplit() ramps in linearly over this
 // duration so the new cells don't snap outward at the moment of
@@ -78,6 +82,17 @@ export class Sim {
 
     /** Uniform-grid spatial hash, rebuilt twice per frame in update(). */
     this.spatialGrid = new Map();
+
+    /**
+     * Cardiovascular vessel network (when `S.vesselsEnabled`). Lazy —
+     * `rebuildVessels()` is called by app.js after every viewport
+     * resize or settings change that affects layout / radius. Null
+     * means the legacy rect-bound playfield is in effect.
+     * @type {null | { capsules: Array, spawnSeeds: Array, bbox: object }}
+     */
+    this.vessels = null;
+    /** Soft-red RBC particles drifting along the vessel centerlines. */
+    this.vesselRbcs = [];
   }
 
   setViewport(W, H) { this.W = W; this.H = H; }
@@ -247,10 +262,44 @@ export class Sim {
   }
 
   clampAllInside() {
+    if (this.vessels) {
+      // Vessel-mask clamp. Cells outside the union get pushed back
+      // to the nearest wall along the outward SDF normal, with the
+      // cell radius baked into the penetration depth so the body
+      // ends up flush with the inside surface.
+      for (const c of this.cells) {
+        const w = nearestVesselWall(this.vessels, c.x, c.y);
+        const pen = w.signedDist + c.r;
+        if (pen > 0) {
+          c.x -= w.nx * pen;
+          c.y -= w.ny * pen;
+        }
+      }
+      return;
+    }
     for (const c of this.cells) {
       c.x = Math.max(MARGIN, Math.min(this.W - MARGIN, c.x));
       c.y = Math.max(MARGIN, Math.min(this.H - MARGIN, c.y));
     }
+  }
+
+  // Build (or drop) the vessel mask + RBC particle field. Idempotent;
+  // safe to call after any settings / viewport change. When
+  // `S.vesselsEnabled` is false this clears both fields so the rest
+  // of the sim treats the playfield as the legacy rectangle.
+  rebuildVessels() {
+    if (!S.vesselsEnabled || this.W <= 0 || this.H <= 0) {
+      this.vessels = null;
+      this.vesselRbcs = [];
+      return;
+    }
+    this.vessels = buildVessels(
+      S.vesselsLayout || 'branching',
+      this.W,
+      this.H,
+      S.vesselsRadius ?? 1.0,
+    );
+    this.vesselRbcs = buildRbcParticles(this.vessels, S.vesselsRbcDensity ?? 1.0);
   }
 
   // Quiet eviction: pop the oldest cell (= front of the array) so
@@ -500,6 +549,13 @@ export class Sim {
 
   // ---------- Frame update ----------
   update(dt) {
+    // Vessel-bound RBC particle field. Cheap (linear list, advance t
+    // along each capsule, wrap on [0,1]). Skipped when vessels are
+    // disabled or the field is empty.
+    if (this.vessels && this.vesselRbcs.length > 0) {
+      tickRbcParticles(this.vesselRbcs, this.vessels, dt, S.vesselsFlowSpeed ?? 1.0);
+    }
+
     // Particle physics: outward velocity damped by drag, plus a
     // per-particle perpendicular spin force for the swirl effect.
     // Particles are GC'd when life hits zero.
@@ -791,6 +847,26 @@ export class Sim {
 
           c.x += c.vx * dt;
           c.y += c.vy * dt;
+
+          // Vessel-wall confinement: if the cell's centre + radius
+          // crosses the vessel union boundary, push it back along
+          // the outward SDF normal and reflect the inward-going
+          // velocity component (uses S.bounce as the restitution
+          // coefficient, matching the cell↔cell impulse).
+          if (this.vessels) {
+            const w = nearestVesselWall(this.vessels, c.x, c.y);
+            const pen = w.signedDist + c.r;
+            if (pen > 0) {
+              c.x -= w.nx * pen;
+              c.y -= w.ny * pen;
+              const vn = c.vx * w.nx + c.vy * w.ny;
+              if (vn > 0) {
+                const e = S.bounce ?? 0.5;
+                c.vx -= (1 + e) * vn * w.nx;
+                c.vy -= (1 + e) * vn * w.ny;
+              }
+            }
+          }
         }
       } else if (c.state === 'SPLITTING') {
         c.splitProgress += dt / SPLIT_DURATION;
@@ -887,6 +963,12 @@ export class Sim {
   // ---------- Spawning ----------
   spawnAtCenter(typeKey) {
     if (this.cells.length >= S.maxCells) return null;
+    // With vessels active, sampling the viewport centre may land
+    // outside the union; pick a guaranteed-inside seed instead.
+    if (this.vessels) {
+      const p = pickSpawnInside(this.vessels);
+      if (p) return this.spawnAtWorld(typeKey, p.x, p.y);
+    }
     const w = this.screenToWorld(this.W / 2, this.H / 2);
     return this.spawnAtWorld(typeKey, w.x, w.y);
   }
@@ -899,6 +981,13 @@ export class Sim {
     // pool to 1024 (see settings → Debug log for [sim] cap entries).
     while (this.cells.length >= S.maxCells) {
       this._recycleOldest();
+    }
+    // Vessel-mask spawn: if the explicit world position is outside
+    // the union, snap to the nearest in-vessel point so the cell
+    // doesn't appear inside a wall and immediately get shoved.
+    if (this.vessels && !isInsideVessels(this.vessels, wx, wy)) {
+      const seed = pickSpawnInside(this.vessels);
+      if (seed) { wx = seed.x; wy = seed.y; }
     }
     const jitter = CELL_RADIUS * 0.2;
     const c = this.makeCell(

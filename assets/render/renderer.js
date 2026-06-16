@@ -131,6 +131,8 @@ export class RendererBase {
   beginFrame(/* timeMs, dt */) {}
   endFrame() {}
   drawDebug(/* shapes */) {}
+  /** Optional: draw the cardiovascular vessel network + flowing RBC particles. */
+  drawVessels(/* time, timeMs */) {}
   /** Optional: draw free-floating particles released by Sim.killCell(). */
   drawParticles(/* particles, time, timeMs */) {}
   /** Optional: draw Y-shaped antibody projectiles (sim.antibodies). */

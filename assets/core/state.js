@@ -91,6 +91,18 @@ export const DEFAULTS = {
   // original 150 ms exponential.
   bumpAttack: 0.03,
   bumpDuration: 4.0,
+  // Cardiovascular vessel network. When enabled the rectangular
+  // playfield is replaced by a union-of-capsules vessel mask: cells
+  // are confined inside the bloodstream and a soft RBC particle
+  // field flows along the centerlines. See assets/core/vessels.js
+  // for layout factories + SDF helpers. All four parameters are
+  // hot-mutable; the sim rebuilds vessel geometry whenever any of
+  // them changes (or on viewport resize).
+  vesselsEnabled: true,                   // master toggle — false reverts to the rect-bound playfield
+  vesselsLayout: 'branching',             // one of: 'branching' | 'tube' | 'heart'
+  vesselsRadius: 1.0,                     // multiplier on baked-in capsule radii. Range 0.5..2.0.
+  vesselsFlowSpeed: 1.0,                  // RBC particle advance × base 80 world units / sec. Range 0..3.
+  vesselsRbcDensity: 1.0,                 // multiplier on per-capsule RBC count. Range 0..2.
   // Caustics tint — modulates the green/teal cast added on top of
   // the rendered scene. User-curated warm-cast defaults; lower
   // values toward 0 fade toward neutral white.
@@ -570,6 +582,25 @@ export function loadSettings() {
       parsed.bumpDuration = DEFAULTS.bumpDuration;
     }
     parsed.bumpDuration = Math.max(0.1, Math.min(5.0, parsed.bumpDuration));
+    // Cardiovascular vessels — boolean coerce + enum validate + slider clamps.
+    parsed.vesselsEnabled = parsed.vesselsEnabled !== false;
+    if (parsed.vesselsLayout !== 'branching'
+        && parsed.vesselsLayout !== 'tube'
+        && parsed.vesselsLayout !== 'heart') {
+      parsed.vesselsLayout = DEFAULTS.vesselsLayout;
+    }
+    if (typeof parsed.vesselsRadius !== 'number' || !Number.isFinite(parsed.vesselsRadius)) {
+      parsed.vesselsRadius = DEFAULTS.vesselsRadius;
+    }
+    parsed.vesselsRadius = Math.max(0.5, Math.min(2.0, parsed.vesselsRadius));
+    if (typeof parsed.vesselsFlowSpeed !== 'number' || !Number.isFinite(parsed.vesselsFlowSpeed)) {
+      parsed.vesselsFlowSpeed = DEFAULTS.vesselsFlowSpeed;
+    }
+    parsed.vesselsFlowSpeed = Math.max(0, Math.min(3, parsed.vesselsFlowSpeed));
+    if (typeof parsed.vesselsRbcDensity !== 'number' || !Number.isFinite(parsed.vesselsRbcDensity)) {
+      parsed.vesselsRbcDensity = DEFAULTS.vesselsRbcDensity;
+    }
+    parsed.vesselsRbcDensity = Math.max(0, Math.min(2, parsed.vesselsRbcDensity));
     // Migrate legacy locale code 'brbn' (Barbarian) to 'bar' (Bavarian).
     if (parsed.lang === 'brbn') parsed.lang = 'bar';
     // Rheinhessisch was renamed to Mainzerisch (Mainz city dialect).
@@ -762,6 +793,15 @@ export const LOCALES = {
     bump_feedback_intensity: 'Bump intensity',
     bump_attack:             'Bump attack',
     bump_duration:           'Bump duration',
+    vessels_section:           'Blood vessels',
+    vessels_enabled:           'Confine cells to vessels',
+    vessels_layout:            'Vessel layout',
+    vessels_layout_branching:  'Branching network',
+    vessels_layout_tube:       'Single tube',
+    vessels_layout_heart:      'Stylised heart',
+    vessels_radius:            'Vessel width',
+    vessels_flow_speed:        'Bloodflow speed',
+    vessels_rbc_density:       'RBC density',
     fx_kind_noise: 'Static noise',
     fx_kind_vignette: 'Vignette',
     fx_kind_crosshair: 'Crosshair',

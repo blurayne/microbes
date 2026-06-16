@@ -11,6 +11,7 @@ import {
 } from '../core/state.js';
 import { shapeVertex, splitVirtualCenters } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
+import { rbcWorldPos } from '../core/vessels.js';
 import { RendererBase } from './renderer.js';
 import { URL_OVERRIDES } from '../core/url-overrides.js';
 import { loadTexture } from '../core/texture-loader.js';
@@ -588,6 +589,62 @@ export class Canvas2DRenderer extends RendererBase {
   // look). drawCellBodies fills the cytoplasm gradient with a sharp
   // polygon edge, then the existing granules / decorations / membrane
   // / nuclei / cartoon passes layer on top.
+  // Cardiovascular vessel network + flowing RBC particles. Drawn in
+  // world coordinates inside `withCameraCtx` so the network pans/
+  // zooms/rotates with the camera. No-op when vessels are disabled.
+  drawVessels(time, ts) {
+    const sim = this.sim;
+    if (!sim || !sim.vessels) return;
+    const caps = sim.vessels.capsules;
+    const rbcs = sim.vesselRbcs || [];
+    this.withCameraCtx(() => {
+      const ctx = this.ctx;
+      // Vessel tube body — wide round-cap stroke in deep maroon.
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = 'rgba(120, 20, 28, 0.85)';
+      for (const cap of caps) {
+        ctx.lineWidth = cap.r * 2;
+        ctx.beginPath();
+        ctx.moveTo(cap.x1, cap.y1);
+        ctx.lineTo(cap.x2, cap.y2);
+        ctx.stroke();
+      }
+      // Inner highlight — a thinner brighter stroke down the middle,
+      // gives the tubes a glossy core.
+      ctx.strokeStyle = 'rgba(170, 50, 60, 0.45)';
+      for (const cap of caps) {
+        ctx.lineWidth = cap.r * 0.55;
+        ctx.beginPath();
+        ctx.moveTo(cap.x1, cap.y1);
+        ctx.lineTo(cap.x2, cap.y2);
+        ctx.stroke();
+      }
+      // Flowing RBCs — biconcave-ish ovals oriented along the flow.
+      // Outer soft body + inner darker hole, lifted from the in-game
+      // `rbc` cell-type visual recipe.
+      ctx.fillStyle = 'rgba(255, 90, 100, 0.55)';
+      for (const p of rbcs) {
+        const pos = rbcWorldPos(p, sim.vessels);
+        if (!pos) continue;
+        ctx.save();
+        ctx.translate(pos.x, pos.y);
+        ctx.rotate(pos.angle);
+        const a = pos.r;
+        const b = a * 0.78;
+        ctx.beginPath();
+        ctx.ellipse(0, 0, a, b, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Donut hole.
+        ctx.fillStyle = 'rgba(120, 20, 28, 0.55)';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, a * 0.55, b * 0.55, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255, 90, 100, 0.55)';
+        ctx.restore();
+      }
+    });
+  }
+
   drawCells(shapes, time, ts) {
     this._drawCellBodies(shapes, time);
     const theme = currentTheme();

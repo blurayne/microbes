@@ -258,6 +258,7 @@ function resize() {
     sim.setViewport(W, H);
     renderer.resize(W, H, 1, 1);
     applyRendertestCamera(sim, W, H);
+    sim.rebuildVessels();
     sim.clampAllInside();
     return;
   }
@@ -267,6 +268,7 @@ function resize() {
   sim.setViewport(W, H);
   const rs = Math.max(0.125, Math.min(1, S.renderScale || 1));
   renderer.resize(W, H, dpr, rs);
+  sim.rebuildVessels();
   sim.clampAllInside();
 }
 
@@ -1159,6 +1161,28 @@ bindCheckbox('bumpFeedback', 'bumpFeedback');
 bindRange('bumpFeedbackIntensity', 'bumpFeedbackIntensity', 'bumpFeedbackIntensityVal', v => v.toFixed(1) + '×');
 bindRange('bumpAttack', 'bumpAttack', 'bumpAttackVal', v => (v * 1000).toFixed(0) + ' ms');
 bindRange('bumpDuration', 'bumpDuration', 'bumpDurationVal', v => v.toFixed(2) + ' s');
+
+// Cardiovascular vessels. The mask + RBC particle field is rebuilt
+// every time a parameter that changes geometry mutates (toggle,
+// layout, radius). Flow speed + RBC density mutate `S` only — the
+// per-tick advance reads them live without a rebuild. The layout
+// `<select>` doesn't fit either bind helper, so it has its own
+// inline change handler.
+bindCheckbox('vesselsEnabled', 'vesselsEnabled', () => sim.rebuildVessels());
+bindRange('vesselsRadius', 'vesselsRadius', 'vesselsRadiusVal',
+  v => v.toFixed(2) + '×', () => sim.rebuildVessels());
+bindRange('vesselsFlowSpeed', 'vesselsFlowSpeed', 'vesselsFlowSpeedVal', v => v.toFixed(1) + '×');
+bindRange('vesselsRbcDensity', 'vesselsRbcDensity', 'vesselsRbcDensityVal',
+  v => v.toFixed(1) + '×', () => sim.rebuildVessels());
+const vesselsLayoutEl = document.getElementById('vesselsLayout');
+if (vesselsLayoutEl) {
+  vesselsLayoutEl.value = S.vesselsLayout || 'branching';
+  vesselsLayoutEl.addEventListener('change', () => {
+    S.vesselsLayout = vesselsLayoutEl.value;
+    saveSettings();
+    sim.rebuildVessels();
+  });
+}
 
 const useHl = document.getElementById('useHighlight');
 if (useHl) {
@@ -2506,6 +2530,10 @@ function frame(ts) {
 
   renderer.beginFrame(ts, dt);
   renderer.drawBackground(ts);
+  // Cardiovascular vessel network + flowing RBC particles. Drawn
+  // between bg and cells so it reads as the "tissue" cells move
+  // through. No-op when S.vesselsEnabled is false.
+  renderer.drawVessels(t, ts);
   // Always call drawCells / drawParticles so the renderer can clear
   // its own state. Both handle empty input cleanly (early-return after
   // the initial clear).
