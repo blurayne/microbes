@@ -5095,20 +5095,10 @@ export class WebGPURenderer extends RendererBase {
     const caps = sim.vessels.capsules;
     const rbcs = sim.vesselRbcs || [];
     this._decorTris.length = 0;
-    // Vessel WALL — opaque dark maroon, wider than the lumen.
-    for (const cap of caps) {
-      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r + 3,
-        0.15, 0.024, 0.04, 1.0);
-    }
-    // Vessel LUMEN — bright interior.
+    // Solid bright-red vessels — single opaque pass.
     for (const cap of caps) {
       this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r,
-        0.70, 0.20, 0.24, 1.0);
-    }
-    // Centerline glossy core.
-    for (const cap of caps) {
-      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, Math.max(1, cap.r * 0.15),
-        0.90, 0.51, 0.55, 0.55);
+        0.88, 0.125, 0.17, 1.0);
     }
     for (const p of rbcs) {
       const pos = rbcWorldPos(p, sim.vessels);

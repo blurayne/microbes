@@ -55,11 +55,11 @@ test('isInsideVessels detects union membership', () => {
   assert.equal(isInsideVessels(v, 50, 100), false);
 });
 
-test('VESSEL_LAYOUTS exports all 3 layout keys', () => {
-  assert.deepEqual([...VESSEL_LAYOUTS].sort(), ['branching', 'heart', 'tube']);
+test('VESSEL_LAYOUTS exports all 4 layout keys', () => {
+  assert.deepEqual([...VESSEL_LAYOUTS].sort(), ['branching', 'grid', 'heart', 'tube']);
 });
 
-for (const layout of ['branching', 'tube', 'heart']) {
+for (const layout of ['branching', 'grid', 'tube', 'heart']) {
   test(`buildVessels('${layout}') yields a non-empty bbox-bounded layout`, () => {
     const W = 1600, H = 900;
     const v = buildVessels(layout, W, H, 1.0);

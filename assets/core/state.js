@@ -585,6 +585,7 @@ export function loadSettings() {
     // Cardiovascular vessels — boolean coerce + enum validate + slider clamps.
     parsed.vesselsEnabled = parsed.vesselsEnabled !== false;
     if (parsed.vesselsLayout !== 'branching'
+        && parsed.vesselsLayout !== 'grid'
         && parsed.vesselsLayout !== 'tube'
         && parsed.vesselsLayout !== 'heart') {
       parsed.vesselsLayout = DEFAULTS.vesselsLayout;
@@ -796,7 +797,8 @@ export const LOCALES = {
     vessels_section:           'Blood vessels',
     vessels_enabled:           'Confine cells to vessels',
     vessels_layout:            'Vessel layout',
-    vessels_layout_branching:  'Branching network',
+    vessels_layout_branching:  'Vascular tree',
+    vessels_layout_grid:       'Grid network',
     vessels_layout_tube:       'Single tube',
     vessels_layout_heart:      'Stylised heart',
     vessels_radius:            'Vessel width',

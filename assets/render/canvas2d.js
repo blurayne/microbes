@@ -600,32 +600,13 @@ export class Canvas2DRenderer extends RendererBase {
     this.withCameraCtx(() => {
       const ctx = this.ctx;
       ctx.lineCap = 'round';
-      // Vessel WALL — opaque dark maroon, slightly wider than the
-      // lumen so it reads as a thin outer ring around the tube.
-      // Opaque so the GPU post-fx chain (microscope blur, glass
-      // membrane, static noise) can't wash it out against the
-      // bloodflow bg.
-      ctx.strokeStyle = 'rgb(38, 6, 10)';
-      for (const cap of caps) {
-        ctx.lineWidth = cap.r * 2 + 6;
-        ctx.beginPath();
-        ctx.moveTo(cap.x1, cap.y1);
-        ctx.lineTo(cap.x2, cap.y2);
-        ctx.stroke();
-      }
-      // Vessel LUMEN — the bright interior the cells move through.
-      ctx.strokeStyle = 'rgb(178, 52, 62)';
+      // Solid bright-red vessels — opaque so the post-fx chain
+      // (microscope blur, glass membrane, noise) can't wash them
+      // out against the bloodflow bg. Single pass matches the
+      // anatomical-illustration style the user referenced.
+      ctx.strokeStyle = 'rgb(224, 32, 44)';
       for (const cap of caps) {
         ctx.lineWidth = cap.r * 2;
-        ctx.beginPath();
-        ctx.moveTo(cap.x1, cap.y1);
-        ctx.lineTo(cap.x2, cap.y2);
-        ctx.stroke();
-      }
-      // Centerline highlight — thin glossy core down the middle.
-      ctx.strokeStyle = 'rgba(230, 130, 140, 0.55)';
-      for (const cap of caps) {
-        ctx.lineWidth = Math.max(2, cap.r * 0.30);
         ctx.beginPath();
         ctx.moveTo(cap.x1, cap.y1);
         ctx.lineTo(cap.x2, cap.y2);

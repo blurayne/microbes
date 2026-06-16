@@ -4021,23 +4021,13 @@ export class WebGL2Renderer extends RendererBase {
     const caps = sim.vessels.capsules;
     const rbcs = sim.vesselRbcs || [];
     this._decorTris.length = 0;
-    // Vessel WALL — opaque dark maroon, slightly wider than the
-    // lumen so it reads as a thin outer ring. Opaque so the post-fx
-    // chain (microscope blur, glass membrane, noise) can't wash it
-    // out against the bloodflow bg.
-    for (const cap of caps) {
-      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r + 3,
-        0.15, 0.024, 0.04, 1.0);
-    }
-    // Vessel LUMEN — bright interior the cells move through.
+    // Solid bright-red vessels — opaque single pass, matches the
+    // anatomical-illustration look. Survives the post-fx chain
+    // (microscope blur, glass membrane, noise) against the
+    // bloodflow bg.
     for (const cap of caps) {
       this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r,
-        0.70, 0.20, 0.24, 1.0);
-    }
-    // Centerline glossy core.
-    for (const cap of caps) {
-      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, Math.max(1, cap.r * 0.15),
-        0.90, 0.51, 0.55, 0.55);
+        0.88, 0.125, 0.17, 1.0);
     }
     // Flowing RBCs — vivid pink ellipses survive post-fx blur.
     for (const p of rbcs) {

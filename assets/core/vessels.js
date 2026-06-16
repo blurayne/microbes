@@ -48,6 +48,7 @@ export function capsuleLength(cap) {
 export function nearestVesselWall(vessels, px, py) {
   let best = null;
   for (const cap of vessels.capsules) {
+    if (cap.physics === false) continue;
     const s = capsuleSDF(px, py, cap);
     if (best === null || s.dist < best.dist) {
       best = { dist: s.dist, qx: s.qx, qy: s.qy, d: s.d };
@@ -63,6 +64,7 @@ export function nearestVesselWall(vessels, px, py) {
 
 export function isInsideVessels(vessels, px, py) {
   for (const cap of vessels.capsules) {
+    if (cap.physics === false) continue;
     const s = capsuleSDF(px, py, cap);
     if (s.dist <= 0) return true;
   }
@@ -89,10 +91,91 @@ function bboxOf(capsules) {
   return { minX, minY, maxX, maxY };
 }
 
-// Branching network: one main horizontal artery, two vertical branches
-// off the centre, two thin bifurcations. 6 capsules. "Großzügig" fill —
-// covers ~70 % of the viewport.
+// Deterministic mulberry32 PRNG. Seeded from the viewport dims so the
+// vascular tree comes out the same shape on each load + resize while
+// still looking organic.
+function makePrng(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Vascular tree: a fractally-branching arterial tree growing from one
+// corner of the viewport diagonally across, then a second mirror tree
+// from the opposite corner so the playfield is bracketed. Each branch
+// tapers, with sub-branches at random-ish angles. Minimum capsule
+// radius is clamped so cells (~12 px radius) always fit through the
+// thinnest leaves.
 function buildBranchingNetwork(W, H, radiusMul) {
+  const capsules = [];
+  const spawnSeeds = [];
+  // Physics floor: capsules with `r < physicsMinR` are decorative
+  // twigs only — cells aren't confined by them. The thin tips that
+  // give the tree its anatomical look would be narrower than a
+  // cell, so we draw them but don't enforce them.
+  const physicsMinR = 18 * radiusMul;
+  const visualMinR = 3 * radiusMul;
+  const rng = makePrng((W * 73856093) ^ (H * 19349663));
+
+  const baseSegLen = Math.min(W, H) * 0.30;
+
+  function grow(rootX, rootY, angle, rootR, maxDepth) {
+    function recurse(x, y, ang, r, depth) {
+      // Each level shortens segments a little — long trunk, shorter
+      // outer twigs. Random jitter keeps the silhouette organic.
+      const lenScale = Math.pow(0.82, depth) * (0.75 + rng() * 0.5);
+      const segLen = baseSegLen * lenScale;
+      const x2 = x + Math.cos(ang) * segLen;
+      const y2 = y + Math.sin(ang) * segLen;
+      const flow = depth === 0 ? 1 : (rng() < 0.5 ? 1 : -1);
+      const physics = r >= physicsMinR;
+      capsules.push({
+        x1: x, y1: y, x2, y2,
+        r: Math.max(visualMinR, r),
+        flow, physics,
+      });
+      if (depth === 0) spawnSeeds.push({ x: (x + x2) * 0.5, y: (y + y2) * 0.5 });
+      if (depth >= maxDepth) return;
+      if (r * 0.50 < visualMinR) return;   // any thinner is invisible
+      const n = rng() < 0.25 ? 3 : 2;
+      const childR = r * (0.62 + rng() * 0.12);
+      // Spread narrows with depth so the trunk fans broadly but
+      // the twigs stay pointed outward — keeps branches reaching
+      // away from the root instead of doubling back. Reference
+      // image shows ~30° per junction at the trunk.
+      const spread = Math.PI * (0.45 - depth * 0.04);
+      const jitter = 0.30 / Math.max(1, depth);
+      for (let i = 0; i < n; i++) {
+        const dAng = (i - (n - 1) * 0.5) / Math.max(1, n - 1) * spread
+                   + (rng() - 0.5) * jitter;
+        recurse(x2, y2, ang + dAng, childR, depth + 1);
+      }
+    }
+    recurse(rootX, rootY, angle, rootR, 0);
+  }
+
+  const rootR = Math.max(physicsMinR + 24, Math.min(W, H) * 0.08) * radiusMul;
+  // One trunk coming from bottom-left, fanning up and across the
+  // canvas — matches the anatomical-illustration reference image.
+  const m = Math.min(W, H) * 0.03;
+  grow(m, H - m, -Math.PI * 0.30, rootR, 6);
+  return {
+    capsules,
+    spawnSeeds: spawnSeeds.length > 0 ? spawnSeeds : [{ x: W * 0.5, y: H * 0.5 }],
+    bbox: bboxOf(capsules),
+  };
+}
+
+// Grid network (the legacy `branching` layout, kept under a new name).
+// One main horizontal artery, four vertical branches, two thin
+// bifurcation connectors. Rectilinear; useful when the user wants
+// predictable hallways rather than an organic tree.
+function buildGridNetwork(W, H, radiusMul) {
   const m = Math.max(80, Math.min(W, H) * 0.10);
   const rMain   = Math.max(40, Math.min(W, H) * 0.16) * radiusMul;
   const rBranch = Math.max(28, Math.min(W, H) * 0.10) * radiusMul;
@@ -201,11 +284,12 @@ function buildHeart(W, H, radiusMul) {
 
 const LAYOUTS = {
   branching: buildBranchingNetwork,
+  grid:      buildGridNetwork,
   tube:      buildSingleTube,
   heart:     buildHeart,
 };
 
-export const VESSEL_LAYOUTS = Object.freeze(['branching', 'tube', 'heart']);
+export const VESSEL_LAYOUTS = Object.freeze(['branching', 'grid', 'tube', 'heart']);
 
 // Public builder. `layoutKey` validated against LAYOUTS; falls back
 // to 'branching' on unknown input. `radiusMul` is a 0.5..2.0 user
