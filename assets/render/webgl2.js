@@ -4021,22 +4021,30 @@ export class WebGL2Renderer extends RendererBase {
     const caps = sim.vessels.capsules;
     const rbcs = sim.vesselRbcs || [];
     this._decorTris.length = 0;
-    // Outer tube body.
+    // Vessel WALL — opaque dark maroon, slightly wider than the
+    // lumen so it reads as a thin outer ring. Opaque so the post-fx
+    // chain (microscope blur, glass membrane, noise) can't wash it
+    // out against the bloodflow bg.
+    for (const cap of caps) {
+      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r + 3,
+        0.15, 0.024, 0.04, 1.0);
+    }
+    // Vessel LUMEN — bright interior the cells move through.
     for (const cap of caps) {
       this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r,
-        0.47, 0.08, 0.11, 0.85);
+        0.70, 0.20, 0.24, 1.0);
     }
-    // Inner highlight — thinner, brighter.
+    // Centerline glossy core.
     for (const cap of caps) {
-      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r * 0.28,
-        0.67, 0.20, 0.24, 0.45);
+      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, Math.max(1, cap.r * 0.15),
+        0.90, 0.51, 0.55, 0.55);
     }
-    // Flowing RBCs.
+    // Flowing RBCs — vivid pink ellipses survive post-fx blur.
     for (const p of rbcs) {
       const pos = rbcWorldPos(p, sim.vessels);
       if (!pos) continue;
       this._pushEllipse(pos.x, pos.y, pos.r, pos.r * 0.78, pos.angle,
-        1.0, 0.35, 0.39, 0.60);
+        1.0, 0.47, 0.51, 0.95);
     }
     if (this._decorTris.length > 0) this._uploadAndDrawDecorations();
     this._decorTris.length = 0; // leave the buffer clean for the cell-decor pass

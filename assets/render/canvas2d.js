@@ -599,9 +599,22 @@ export class Canvas2DRenderer extends RendererBase {
     const rbcs = sim.vesselRbcs || [];
     this.withCameraCtx(() => {
       const ctx = this.ctx;
-      // Vessel tube body — wide round-cap stroke in deep maroon.
       ctx.lineCap = 'round';
-      ctx.strokeStyle = 'rgba(120, 20, 28, 0.85)';
+      // Vessel WALL — opaque dark maroon, slightly wider than the
+      // lumen so it reads as a thin outer ring around the tube.
+      // Opaque so the GPU post-fx chain (microscope blur, glass
+      // membrane, static noise) can't wash it out against the
+      // bloodflow bg.
+      ctx.strokeStyle = 'rgb(38, 6, 10)';
+      for (const cap of caps) {
+        ctx.lineWidth = cap.r * 2 + 6;
+        ctx.beginPath();
+        ctx.moveTo(cap.x1, cap.y1);
+        ctx.lineTo(cap.x2, cap.y2);
+        ctx.stroke();
+      }
+      // Vessel LUMEN — the bright interior the cells move through.
+      ctx.strokeStyle = 'rgb(178, 52, 62)';
       for (const cap of caps) {
         ctx.lineWidth = cap.r * 2;
         ctx.beginPath();
@@ -609,20 +622,18 @@ export class Canvas2DRenderer extends RendererBase {
         ctx.lineTo(cap.x2, cap.y2);
         ctx.stroke();
       }
-      // Inner highlight — a thinner brighter stroke down the middle,
-      // gives the tubes a glossy core.
-      ctx.strokeStyle = 'rgba(170, 50, 60, 0.45)';
+      // Centerline highlight — thin glossy core down the middle.
+      ctx.strokeStyle = 'rgba(230, 130, 140, 0.55)';
       for (const cap of caps) {
-        ctx.lineWidth = cap.r * 0.55;
+        ctx.lineWidth = Math.max(2, cap.r * 0.30);
         ctx.beginPath();
         ctx.moveTo(cap.x1, cap.y1);
         ctx.lineTo(cap.x2, cap.y2);
         ctx.stroke();
       }
       // Flowing RBCs — biconcave-ish ovals oriented along the flow.
-      // Outer soft body + inner darker hole, lifted from the in-game
-      // `rbc` cell-type visual recipe.
-      ctx.fillStyle = 'rgba(255, 90, 100, 0.55)';
+      // Vivid pink so they read as moving particles even through the
+      // post-fx blur.
       for (const p of rbcs) {
         const pos = rbcWorldPos(p, sim.vessels);
         if (!pos) continue;
@@ -631,15 +642,14 @@ export class Canvas2DRenderer extends RendererBase {
         ctx.rotate(pos.angle);
         const a = pos.r;
         const b = a * 0.78;
+        ctx.fillStyle = 'rgb(255, 120, 130)';
         ctx.beginPath();
         ctx.ellipse(0, 0, a, b, 0, 0, Math.PI * 2);
         ctx.fill();
-        // Donut hole.
-        ctx.fillStyle = 'rgba(120, 20, 28, 0.55)';
+        ctx.fillStyle = 'rgba(140, 30, 38, 0.70)';
         ctx.beginPath();
         ctx.ellipse(0, 0, a * 0.55, b * 0.55, 0, 0, Math.PI * 2);
         ctx.fill();
-        ctx.fillStyle = 'rgba(255, 90, 100, 0.55)';
         ctx.restore();
       }
     });
