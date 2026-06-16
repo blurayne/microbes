@@ -22,6 +22,19 @@ import { loadTexture } from '../core/texture-loader.js';
 // needed.
 const RT_TRANSLUCENT = !!URL_OVERRIDES.translucent;
 
+// Vessel body shading — concentric strokes simulate a 3D tube
+// cross-section. Widest stroke at the rim is darkest; each
+// successive narrower stroke is brighter, so the radial gradient
+// reads as a glossy rounded tube. rMul = width fraction of cap.r×2.
+const VESSEL_BODY_PASSES = [
+  { rMul: 1.00, color: 'rgb(48, 4, 8)'     },
+  { rMul: 0.90, color: 'rgb(120, 14, 22)'  },
+  { rMul: 0.78, color: 'rgb(180, 30, 40)'  },
+  { rMul: 0.62, color: 'rgb(220, 56, 64)'  },
+  { rMul: 0.42, color: 'rgb(240, 110, 118)' },
+  { rMul: 0.22, color: 'rgba(255, 195, 195, 0.9)' },
+];
+
 /**
  * Canvas2D implementation of the IRenderer interface (see renderer.js).
  *
@@ -600,16 +613,38 @@ export class Canvas2DRenderer extends RendererBase {
     this.withCameraCtx(() => {
       const ctx = this.ctx;
       ctx.lineCap = 'round';
-      // Solid bright-red vessels — opaque so the post-fx chain
-      // (microscope blur, glass membrane, noise) can't wash them
-      // out against the bloodflow bg. Single pass matches the
-      // anatomical-illustration style the user referenced.
-      ctx.strokeStyle = 'rgb(224, 32, 44)';
+      // Multi-pass parallel-stroke gradient that simulates a 3D
+      // tube cross-section: outer rim shadow → dark wall → mid →
+      // bright → pink lumen → bright core. Each pass strokes the
+      // same path with diminishing width and brighter color, so
+      // visually the tube reads as rounded rather than flat. Final
+      // pass = a thin specular highlight offset perpendicular to
+      // the segment, reading as a glassy reflection from above-
+      // left.
+      for (const pass of VESSEL_BODY_PASSES) {
+        ctx.strokeStyle = pass.color;
+        for (const cap of caps) {
+          ctx.lineWidth = cap.r * 2 * pass.rMul;
+          ctx.beginPath();
+          ctx.moveTo(cap.x1, cap.y1);
+          ctx.lineTo(cap.x2, cap.y2);
+          ctx.stroke();
+        }
+      }
+      // Off-centre specular highlight — perpendicular offset by
+      // ~35 % of the tube radius so the gloss reads as a curved
+      // reflection rather than a centerline.
+      ctx.strokeStyle = 'rgba(255, 240, 240, 0.70)';
       for (const cap of caps) {
-        ctx.lineWidth = cap.r * 2;
+        const dx = cap.x2 - cap.x1, dy = cap.y2 - cap.y1;
+        const len = Math.hypot(dx, dy);
+        if (len < 1e-4) continue;
+        const nx = -dy / len, ny = dx / len;
+        const ox = nx * cap.r * 0.35, oy = ny * cap.r * 0.35;
+        ctx.lineWidth = Math.max(1.5, cap.r * 0.12);
         ctx.beginPath();
-        ctx.moveTo(cap.x1, cap.y1);
-        ctx.lineTo(cap.x2, cap.y2);
+        ctx.moveTo(cap.x1 + ox, cap.y1 + oy);
+        ctx.lineTo(cap.x2 + ox, cap.y2 + oy);
         ctx.stroke();
       }
       // Flowing RBCs — biconcave-ish ovals oriented along the flow.

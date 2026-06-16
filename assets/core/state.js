@@ -99,8 +99,9 @@ export const DEFAULTS = {
   // hot-mutable; the sim rebuilds vessel geometry whenever any of
   // them changes (or on viewport resize).
   vesselsEnabled: true,                   // master toggle — false reverts to the rect-bound playfield
-  vesselsLayout: 'branching',             // one of: 'branching' | 'tube' | 'heart'
+  vesselsLayout: 'branching',             // one of: 'branching' | 'grid' | 'tube' | 'heart'
   vesselsRadius: 1.0,                     // multiplier on baked-in capsule radii. Range 0.5..2.0.
+  vesselsScale:  1.0,                     // multiplier on tree segment LENGTHS (footprint size, no impact on width). Range 0.1..10.
   vesselsFlowSpeed: 1.0,                  // RBC particle advance × base 80 world units / sec. Range 0..3.
   vesselsRbcDensity: 1.0,                 // multiplier on per-capsule RBC count. Range 0..2.
   // Caustics tint — modulates the green/teal cast added on top of
@@ -594,6 +595,10 @@ export function loadSettings() {
       parsed.vesselsRadius = DEFAULTS.vesselsRadius;
     }
     parsed.vesselsRadius = Math.max(0.5, Math.min(2.0, parsed.vesselsRadius));
+    if (typeof parsed.vesselsScale !== 'number' || !Number.isFinite(parsed.vesselsScale)) {
+      parsed.vesselsScale = DEFAULTS.vesselsScale;
+    }
+    parsed.vesselsScale = Math.max(0.1, Math.min(10, parsed.vesselsScale));
     if (typeof parsed.vesselsFlowSpeed !== 'number' || !Number.isFinite(parsed.vesselsFlowSpeed)) {
       parsed.vesselsFlowSpeed = DEFAULTS.vesselsFlowSpeed;
     }
@@ -802,6 +807,7 @@ export const LOCALES = {
     vessels_layout_tube:       'Single tube',
     vessels_layout_heart:      'Stylised heart',
     vessels_radius:            'Vessel width',
+    vessels_scale:             'Vessel size',
     vessels_flow_speed:        'Bloodflow speed',
     vessels_rbc_density:       'RBC density',
     fx_kind_noise: 'Static noise',

@@ -111,7 +111,7 @@ function makePrng(seed) {
 // tapers, with sub-branches at random-ish angles. Minimum capsule
 // radius is clamped so cells (~12 px radius) always fit through the
 // thinnest leaves.
-function buildBranchingNetwork(W, H, radiusMul) {
+function buildBranchingNetwork(W, H, radiusMul, sizeScale = 1.0) {
   const capsules = [];
   const spawnSeeds = [];
   // Physics floor: capsules with `r < physicsMinR` are decorative
@@ -122,10 +122,13 @@ function buildBranchingNetwork(W, H, radiusMul) {
   const visualMinR = 3 * radiusMul;
   const rng = makePrng((W * 73856093) ^ (H * 19349663));
 
-  // Tree footprint is 100× the viewport area so the user can pan/
-  // zoom to reveal more of the network. baseSegLen × 10 from the
-  // viewport-fit value → 10× linear reach → 100× area coverage.
-  const baseSegLen = Math.min(W, H) * 3.0;
+  // Tree footprint: baseSegLen scales LENGTH only (not width), so
+  // bigger sizeScale makes the network sprawl further while the
+  // trunk + branch radii stay constant. 30× the viewport-fit value
+  // by default (10× the previous "100× area" baseline = ~10000×
+  // the original area), tuned with the runtime `Vessel size`
+  // slider via `sizeScale`.
+  const baseSegLen = Math.min(W, H) * 30.0 * sizeScale;
 
   function grow(rootX, rootY, angle, rootR, maxDepth) {
     function recurse(x, y, ang, r, depth) {
@@ -304,9 +307,9 @@ export const VESSEL_LAYOUTS = Object.freeze(['branching', 'grid', 'tube', 'heart
 // Public builder. `layoutKey` validated against LAYOUTS; falls back
 // to 'branching' on unknown input. `radiusMul` is a 0.5..2.0 user
 // multiplier on the default radii.
-export function buildVessels(layoutKey, W, H, radiusMul) {
+export function buildVessels(layoutKey, W, H, radiusMul, sizeScale = 1.0) {
   const fn = LAYOUTS[layoutKey] || LAYOUTS.branching;
-  return fn(W, H, radiusMul);
+  return fn(W, H, radiusMul, sizeScale);
 }
 
 // ── RBC particle field ───────────────────────────────────────────────

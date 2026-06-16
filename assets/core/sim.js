@@ -298,6 +298,7 @@ export class Sim {
       this.W,
       this.H,
       S.vesselsRadius ?? 1.0,
+      S.vesselsScale ?? 1.0,
     );
     this.vesselRbcs = buildRbcParticles(this.vessels, S.vesselsRbcDensity ?? 1.0);
   }
