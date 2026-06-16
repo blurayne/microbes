@@ -35,6 +35,17 @@ import { loadTexture } from '../core/texture-loader.js';
 // backdrop. Default is opaque (existing behaviour). Read once at
 // module load — `URL_OVERRIDES` is frozen.
 const RT_TRANSLUCENT = !!URL_OVERRIDES.translucent;
+
+// Vessel body shading — concentric strokes simulate a 3D tube
+// cross-section. Same palette as canvas2d / webgl2.
+const VESSEL_BODY_PASSES_GPU = [
+  { rMul: 1.00, r: 0.19, g: 0.016, b: 0.031, a: 1.0 },
+  { rMul: 0.90, r: 0.47, g: 0.055, b: 0.086, a: 1.0 },
+  { rMul: 0.78, r: 0.71, g: 0.118, b: 0.157, a: 1.0 },
+  { rMul: 0.62, r: 0.86, g: 0.220, b: 0.251, a: 1.0 },
+  { rMul: 0.42, r: 0.94, g: 0.431, b: 0.463, a: 1.0 },
+  { rMul: 0.22, r: 1.00, g: 0.765, b: 0.765, a: 0.90 },
+];
 // Diagnostic infrastructure is gated behind ?diagnose=webgpu in
 // the URL. Off by default so production traffic doesn't pay the
 // per-frame validation-scope push/pop, the 1Hz readback's
@@ -5095,10 +5106,24 @@ export class WebGPURenderer extends RendererBase {
     const caps = sim.vessels.capsules;
     const rbcs = sim.vesselRbcs || [];
     this._decorTris.length = 0;
-    // Solid bright-red vessels — single opaque pass.
+    // Multi-pass parallel-stroke gradient → rounded "glass" tube.
+    // Same palette + offset specular as the canvas2d / webgl2 ports.
+    for (const pass of VESSEL_BODY_PASSES_GPU) {
+      for (const cap of caps) {
+        this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2,
+          cap.r * pass.rMul, pass.r, pass.g, pass.b, pass.a);
+      }
+    }
     for (const cap of caps) {
-      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r,
-        0.88, 0.125, 0.17, 1.0);
+      const dx = cap.x2 - cap.x1, dy = cap.y2 - cap.y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-4) continue;
+      const nx = -dy / len, ny = dx / len;
+      const ox = nx * cap.r * 0.35, oy = ny * cap.r * 0.35;
+      const hw = Math.max(1, cap.r * 0.06);
+      this._pushThickSegment(cap.x1 + ox, cap.y1 + oy,
+        cap.x2 + ox, cap.y2 + oy, hw,
+        1.0, 0.94, 0.94, 0.70);
     }
     for (const p of rbcs) {
       const pos = rbcWorldPos(p, sim.vessels);

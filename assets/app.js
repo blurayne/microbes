@@ -1171,6 +1171,8 @@ bindRange('bumpDuration', 'bumpDuration', 'bumpDurationVal', v => v.toFixed(2) +
 bindCheckbox('vesselsEnabled', 'vesselsEnabled', () => sim.rebuildVessels());
 bindRange('vesselsRadius', 'vesselsRadius', 'vesselsRadiusVal',
   v => v.toFixed(2) + '×', () => sim.rebuildVessels());
+bindRange('vesselsScale', 'vesselsScale', 'vesselsScaleVal',
+  v => v.toFixed(1) + '×', () => sim.rebuildVessels());
 bindRange('vesselsFlowSpeed', 'vesselsFlowSpeed', 'vesselsFlowSpeedVal', v => v.toFixed(1) + '×');
 bindRange('vesselsRbcDensity', 'vesselsRbcDensity', 'vesselsRbcDensityVal',
   v => v.toFixed(1) + '×', () => sim.rebuildVessels());

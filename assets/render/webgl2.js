@@ -1668,6 +1668,17 @@ const NUC_KIND_FLOAT = {
 // triangle primitives. Each vertex carries (x,y) world coords and an
 // rgba colour. Drawn in two batches (LINES + TRIANGLES) per frame.
 const DECOR_VERT_FLOATS = 6;     // x, y, r, g, b, a
+
+// Vessel body shading — concentric strokes simulate a 3D tube
+// cross-section. Same palette as canvas2d (sRGB approx, no gamma).
+const VESSEL_BODY_PASSES_GL = [
+  { rMul: 1.00, r: 0.19, g: 0.016, b: 0.031, a: 1.0 },
+  { rMul: 0.90, r: 0.47, g: 0.055, b: 0.086, a: 1.0 },
+  { rMul: 0.78, r: 0.71, g: 0.118, b: 0.157, a: 1.0 },
+  { rMul: 0.62, r: 0.86, g: 0.220, b: 0.251, a: 1.0 },
+  { rMul: 0.42, r: 0.94, g: 0.431, b: 0.463, a: 1.0 },
+  { rMul: 0.22, r: 1.00, g: 0.765, b: 0.765, a: 0.90 },
+];
 const VERT_DECOR = `#version 300 es
 precision highp float;
 layout(location=0) in vec2 a_pos;
@@ -4021,13 +4032,29 @@ export class WebGL2Renderer extends RendererBase {
     const caps = sim.vessels.capsules;
     const rbcs = sim.vesselRbcs || [];
     this._decorTris.length = 0;
-    // Solid bright-red vessels — opaque single pass, matches the
-    // anatomical-illustration look. Survives the post-fx chain
-    // (microscope blur, glass membrane, noise) against the
-    // bloodflow bg.
+    // Multi-pass parallel-stroke gradient that simulates a 3D
+    // rounded tube: rim shadow → mid → bright → core, then a thin
+    // off-centre specular highlight reads as glass. Same palette
+    // as canvas2d (linear-space approximation of the sRGB values).
+    for (const pass of VESSEL_BODY_PASSES_GL) {
+      for (const cap of caps) {
+        this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2,
+          cap.r * pass.rMul, pass.r, pass.g, pass.b, pass.a);
+      }
+    }
+    // Off-centre specular — push a thin segment offset perpendicular
+    // to the capsule axis. Same _pushThickSegment helper, but the
+    // start + end points are shifted by `(nx, ny) × cap.r × 0.35`.
     for (const cap of caps) {
-      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r,
-        0.88, 0.125, 0.17, 1.0);
+      const dx = cap.x2 - cap.x1, dy = cap.y2 - cap.y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-4) continue;
+      const nx = -dy / len, ny = dx / len;
+      const ox = nx * cap.r * 0.35, oy = ny * cap.r * 0.35;
+      const hw = Math.max(1, cap.r * 0.06);
+      this._pushThickSegment(cap.x1 + ox, cap.y1 + oy,
+        cap.x2 + ox, cap.y2 + oy, hw,
+        1.0, 0.94, 0.94, 0.70);
     }
     // Flowing RBCs — vivid pink ellipses survive post-fx blur.
     for (const p of rbcs) {

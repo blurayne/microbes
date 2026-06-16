@@ -115,6 +115,7 @@
   "vessels_layout_tube": "Einzelne Ader",
   "vessels_layout_heart": "Stilisiertes Herz",
   "vessels_radius": "Aderbreite",
+  "vessels_scale": "Adergröße",
   "vessels_flow_speed": "Strömungsgeschwindigkeit",
   "vessels_rbc_density": "Erythrozyten-Dichte",
   "fx_kind_noise": "Rauschen",
