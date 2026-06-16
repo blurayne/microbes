@@ -105,80 +105,93 @@ function makePrng(seed) {
   };
 }
 
-// Vascular tree: a fractally-branching arterial tree growing from one
-// corner of the viewport diagonally across, then a second mirror tree
-// from the opposite corner so the playfield is bracketed. Each branch
-// tapers, with sub-branches at random-ish angles. Minimum capsule
-// radius is clamped so cells (~12 px radius) always fit through the
-// thinnest leaves.
+// Vascular network: one main vessel running vertically through the
+// viewport (bottom→top), extending far above + below the camera, with
+// side branches at regular intervals along its length. Sub-branches
+// occasionally fork off each side branch. Matches the anatomical
+// "aorta + arterial branches" mental model the user described.
+//
+// Footprint scales with sizeScale, but capsule COUNT is held roughly
+// constant — bigger means longer segments, not more of them, so the
+// network stays visually legible at all sizes.
 function buildBranchingNetwork(W, H, radiusMul, sizeScale = 1.0) {
   const capsules = [];
   const spawnSeeds = [];
-  // Physics floor: capsules with `r < physicsMinR` are decorative
-  // twigs only — cells aren't confined by them. The thin tips that
-  // give the tree its anatomical look would be narrower than a
-  // cell, so we draw them but don't enforce them.
   const physicsMinR = 18 * radiusMul;
   const visualMinR = 3 * radiusMul;
   const rng = makePrng((W * 73856093) ^ (H * 19349663));
 
-  // Tree footprint: baseSegLen scales LENGTH only (not width), so
-  // bigger sizeScale makes the network sprawl further while the
-  // trunk + branch radii stay constant. 30× the viewport-fit value
-  // by default (10× the previous "100× area" baseline = ~10000×
-  // the original area), tuned with the runtime `Vessel size`
-  // slider via `sizeScale`.
-  const baseSegLen = Math.min(W, H) * 30.0 * sizeScale;
+  // Main vessel: 20× viewport height by default, runs vertically
+  // through the screen centre, extends way above + below the camera
+  // so the user can scroll along it. `sizeScale` multiplies the
+  // total length (slider keeps 20× as 1.0).
+  const mainLen = H * 20 * sizeScale;
+  const mainX   = W * 0.5;
+  const mainTop = H * 0.5 - mainLen * 0.5;
+  const mainBot = H * 0.5 + mainLen * 0.5;
+  const mainR = Math.max(physicsMinR + 24, Math.min(W, H) * 0.07) * radiusMul;
 
-  function grow(rootX, rootY, angle, rootR, maxDepth) {
-    function recurse(x, y, ang, r, depth) {
-      // Each level shortens segments a little — long trunk, shorter
-      // outer twigs. Random jitter keeps the silhouette organic.
-      const lenScale = Math.pow(0.82, depth) * (0.75 + rng() * 0.5);
-      const segLen = baseSegLen * lenScale;
-      const x2 = x + Math.cos(ang) * segLen;
-      const y2 = y + Math.sin(ang) * segLen;
-      const flow = depth === 0 ? 1 : (rng() < 0.5 ? 1 : -1);
-      const physics = r >= physicsMinR;
-      capsules.push({
-        x1: x, y1: y, x2, y2,
-        r: Math.max(visualMinR, r),
-        flow, physics,
-      });
-      // Pin the spawn seed at the trunk's root anchor — when the
-      // tree spans 10× the viewport its midpoint is off-screen
-      // and would spawn cells outside the camera.
-      if (depth === 0) spawnSeeds.push({ x, y });
-      if (depth >= maxDepth) return;
-      if (r * 0.50 < visualMinR) return;   // any thinner is invisible
-      const n = rng() < 0.25 ? 3 : 2;
-      const childR = r * (0.62 + rng() * 0.12);
-      // Spread narrows with depth so the trunk fans broadly but
-      // the twigs stay pointed outward — keeps branches reaching
-      // away from the root instead of doubling back. Reference
-      // image shows ~30° per junction at the trunk.
-      const spread = Math.PI * (0.45 - depth * 0.04);
-      const jitter = 0.30 / Math.max(1, depth);
-      for (let i = 0; i < n; i++) {
-        const dAng = (i - (n - 1) * 0.5) / Math.max(1, n - 1) * spread
-                   + (rng() - 0.5) * jitter;
-        recurse(x2, y2, ang + dAng, childR, depth + 1);
-      }
-    }
-    recurse(rootX, rootY, angle, rootR, 0);
+  // Slice the main into ~30 capsules so it tapers very slightly
+  // toward the top (mild biological cue, easier on the SDF iteration
+  // cost than one giant capsule).
+  const NUM_MAIN = 30;
+  for (let i = 0; i < NUM_MAIN; i++) {
+    const t0 = i / NUM_MAIN;
+    const t1 = (i + 1) / NUM_MAIN;
+    const y0 = mainBot + (mainTop - mainBot) * t0;
+    const y1 = mainBot + (mainTop - mainBot) * t1;
+    const r = mainR * (1.0 - t0 * 0.25);
+    capsules.push({
+      x1: mainX, y1: y0, x2: mainX, y2: y1,
+      r, flow: -1, physics: true,
+    });
   }
 
-  const rootR = Math.max(physicsMinR + 24, Math.min(W, H) * 0.70) * radiusMul;
-  // One trunk coming from bottom-left, fanning up and across the
-  // canvas — matches the anatomical-illustration reference image.
-  // Trunk thickness scales with the viewport so the main vessel
-  // is dramatically wide (the user wanted it ~10× wider than the
-  // viewport-fit default).
-  const m = Math.min(W, H) * 0.03;
-  grow(m, H - m, -Math.PI * 0.30, rootR, 7);
+  // Side branches at evenly-spaced intervals along the main vessel.
+  // Alternating left/right with random angles slightly biased toward
+  // perpendicular (so they look like arterial branches, not all
+  // streaming the same direction).
+  const NUM_BRANCHES = 40;
+  for (let i = 0; i < NUM_BRANCHES; i++) {
+    const t = (i + 0.5) / NUM_BRANCHES;
+    const by0 = mainBot + (mainTop - mainBot) * t;
+    const side = (i % 2 === 0) ? 1 : -1;          // alternate L/R
+    const angle = side === 1
+      ? (rng() - 0.5) * Math.PI * 0.45            // right ≈ 0°
+      : Math.PI + (rng() - 0.5) * Math.PI * 0.45; // left  ≈ 180°
+    const branchLen = H * (1.5 + rng() * 3.5) * sizeScale;
+    const branchR = mainR * (0.32 + rng() * 0.18);
+    const bx1 = mainX, by1 = by0;
+    const bx2 = bx1 + Math.cos(angle) * branchLen;
+    const by2 = by1 + Math.sin(angle) * branchLen;
+    capsules.push({
+      x1: bx1, y1: by1, x2: bx2, y2: by2,
+      r: Math.max(visualMinR, branchR),
+      flow: rng() < 0.5 ? 1 : -1,
+      physics: branchR >= physicsMinR,
+    });
+    // ~60 % of branches grow one sub-branch off their tip.
+    if (rng() < 0.6) {
+      const subAngle = angle + (rng() - 0.5) * Math.PI * 0.55;
+      const subLen = branchLen * (0.35 + rng() * 0.30);
+      const subR = branchR * (0.55 + rng() * 0.15);
+      const sx2 = bx2 + Math.cos(subAngle) * subLen;
+      const sy2 = by2 + Math.sin(subAngle) * subLen;
+      capsules.push({
+        x1: bx2, y1: by2, x2: sx2, y2: sy2,
+        r: Math.max(visualMinR, subR),
+        flow: rng() < 0.5 ? 1 : -1,
+        physics: subR >= physicsMinR,
+      });
+    }
+  }
+
+  // Spawn seed in the visible portion of the main vessel.
+  spawnSeeds.push({ x: mainX, y: H * 0.5 });
+
   return {
     capsules,
-    spawnSeeds: spawnSeeds.length > 0 ? spawnSeeds : [{ x: W * 0.5, y: H * 0.5 }],
+    spawnSeeds,
     bbox: bboxOf(capsules),
     viewport: { W, H },
   };

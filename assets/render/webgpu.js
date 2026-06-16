@@ -36,15 +36,22 @@ import { loadTexture } from '../core/texture-loader.js';
 // module load — `URL_OVERRIDES` is frozen.
 const RT_TRANSLUCENT = !!URL_OVERRIDES.translucent;
 
-// Vessel body shading — concentric strokes simulate a 3D tube
-// cross-section. Same palette as canvas2d / webgl2.
+// Vessel body shading — 12 concentric strokes that simulate a 3D
+// rounded tube cross-section. Wider passes are dark (rim shadow),
+// narrower passes are bright (lumen + specular core).
 const VESSEL_BODY_PASSES_GPU = [
-  { rMul: 1.00, r: 0.19, g: 0.016, b: 0.031, a: 1.0 },
-  { rMul: 0.90, r: 0.47, g: 0.055, b: 0.086, a: 1.0 },
-  { rMul: 0.78, r: 0.71, g: 0.118, b: 0.157, a: 1.0 },
-  { rMul: 0.62, r: 0.86, g: 0.220, b: 0.251, a: 1.0 },
-  { rMul: 0.42, r: 0.94, g: 0.431, b: 0.463, a: 1.0 },
-  { rMul: 0.22, r: 1.00, g: 0.765, b: 0.765, a: 0.90 },
+  { rMul: 1.00, r: 0.10, g: 0.012, b: 0.024, a: 1.0 },
+  { rMul: 0.95, r: 0.22, g: 0.024, b: 0.043, a: 1.0 },
+  { rMul: 0.88, r: 0.40, g: 0.043, b: 0.071, a: 1.0 },
+  { rMul: 0.80, r: 0.56, g: 0.071, b: 0.102, a: 1.0 },
+  { rMul: 0.72, r: 0.69, g: 0.110, b: 0.141, a: 1.0 },
+  { rMul: 0.63, r: 0.80, g: 0.165, b: 0.196, a: 1.0 },
+  { rMul: 0.53, r: 0.89, g: 0.275, b: 0.306, a: 1.0 },
+  { rMul: 0.43, r: 0.94, g: 0.412, b: 0.441, a: 1.0 },
+  { rMul: 0.33, r: 0.97, g: 0.580, b: 0.604, a: 1.0 },
+  { rMul: 0.23, r: 0.99, g: 0.745, b: 0.757, a: 1.0 },
+  { rMul: 0.14, r: 1.00, g: 0.882, b: 0.886, a: 1.0 },
+  { rMul: 0.07, r: 1.00, g: 0.965, b: 0.965, a: 1.0 },
 ];
 // Diagnostic infrastructure is gated behind ?diagnose=webgpu in
 // the URL. Off by default so production traffic doesn't pay the
