@@ -70,6 +70,27 @@
         <div id="bgConfig" class="bg-config-rows"></div>
       </details>
 
+      <details class="settings-section">
+        <summary data-i18n="vessels_section">Blood vessels</summary>
+        <label><input type="checkbox" id="vesselsEnabled" /> <span data-i18n="vessels_enabled">Confine cells to vessels</span></label>
+        <label><span data-i18n="vessels_layout">Vessel layout</span>
+          <select id="vesselsLayout">
+            <option value="branching" data-i18n="vessels_layout_branching">Branching network</option>
+            <option value="tube"      data-i18n="vessels_layout_tube">Single tube</option>
+            <option value="heart"     data-i18n="vessels_layout_heart">Stylised heart</option>
+          </select>
+        </label>
+        <label><span data-i18n="vessels_radius">Vessel width</span> <span id="vesselsRadiusVal" class="val"></span>
+          <input type="range" id="vesselsRadius" min="0.5" max="2.0" step="0.05" />
+        </label>
+        <label><span data-i18n="vessels_flow_speed">Bloodflow speed</span> <span id="vesselsFlowSpeedVal" class="val"></span>
+          <input type="range" id="vesselsFlowSpeed" min="0" max="3" step="0.1" />
+        </label>
+        <label><span data-i18n="vessels_rbc_density">RBC density</span> <span id="vesselsRbcDensityVal" class="val"></span>
+          <input type="range" id="vesselsRbcDensity" min="0" max="2" step="0.1" />
+        </label>
+      </details>
+
       <details class="settings-section" open>
         <summary data-i18n="gameplay">Gameplay</summary>
         <label><span data-i18n="game_mode">Game mode</span>

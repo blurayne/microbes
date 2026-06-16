@@ -25,6 +25,7 @@ import {
 import { shapeVertex } from '../core/shape.js';
 import { effectiveMouthKind } from '../core/sim-faces.js';
 import { testKindFor } from '../core/cell-kinds.js';
+import { rbcWorldPos } from '../core/vessels.js';
 import { RendererBase } from './renderer.js';
 import { URL_OVERRIDES } from '../core/url-overrides.js';
 import { loadTexture } from '../core/texture-loader.js';
@@ -5079,6 +5080,79 @@ export class WebGPURenderer extends RendererBase {
           );
         }
       }
+    }
+  }
+
+  // Cardiovascular vessel network + flowing RBC particles. WebGPU
+  // mirror of the WebGL2 vessel pass — piggybacks on the decoration
+  // triangle pipeline. Per-capsule thick segments + per-RBC ellipse
+  // fans go through `_pushThickSegment` / `_pushEllipse`, then we
+  // re-use the existing decoration upload + draw plumbing. No-op
+  // when vessels are disabled.
+  drawVessels(time, ts) {
+    const sim = this.sim;
+    if (!sim || !sim.vessels) return;
+    const caps = sim.vessels.capsules;
+    const rbcs = sim.vesselRbcs || [];
+    this._decorTris.length = 0;
+    for (const cap of caps) {
+      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r,
+        0.47, 0.08, 0.11, 0.85);
+    }
+    for (const cap of caps) {
+      this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2, cap.r * 0.28,
+        0.67, 0.20, 0.24, 0.45);
+    }
+    for (const p of rbcs) {
+      const pos = rbcWorldPos(p, sim.vessels);
+      if (!pos) continue;
+      this._pushEllipse(pos.x, pos.y, pos.r, pos.r * 0.78, pos.angle,
+        1.0, 0.35, 0.39, 0.60);
+    }
+    if (this._decorTris.length > 0) this._uploadAndDrawDecorations();
+    this._decorTris.length = 0;
+  }
+
+  _pushThickSegment(x1, y1, x2, y2, hw, r, g, b, a) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6 || hw < 0.5) return;
+    const tx = dx / len, ty = dy / len;
+    const nx = -ty * hw, ny =  tx * hw;
+    const ex =  tx * hw, ey =  ty * hw;
+    const ax1 = x1 - ex + nx, ay1 = y1 - ey + ny;
+    const ax2 = x1 - ex - nx, ay2 = y1 - ey - ny;
+    const bx1 = x2 + ex + nx, by1 = y2 + ey + ny;
+    const bx2 = x2 + ex - nx, by2 = y2 + ey - ny;
+    const arr = this._decorTris;
+    arr.push(
+      ax1, ay1, r, g, b, a,
+      ax2, ay2, r, g, b, a,
+      bx1, by1, r, g, b, a,
+      ax2, ay2, r, g, b, a,
+      bx2, by2, r, g, b, a,
+      bx1, by1, r, g, b, a,
+    );
+  }
+
+  _pushEllipse(cx, cy, a, b, ang, r, g, b8, alpha) {
+    const N = 8;
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const arr = this._decorTris;
+    let prevX = cx + a * ca;
+    let prevY = cy + a * sa;
+    for (let i = 1; i <= N; i++) {
+      const t = (i / N) * Math.PI * 2;
+      const lx = a * Math.cos(t);
+      const ly = b * Math.sin(t);
+      const wx = cx + lx * ca - ly * sa;
+      const wy = cy + lx * sa + ly * ca;
+      arr.push(
+        cx, cy, r, g, b8, alpha,
+        prevX, prevY, r, g, b8, alpha,
+        wx, wy, r, g, b8, alpha,
+      );
+      prevX = wx; prevY = wy;
     }
   }
 

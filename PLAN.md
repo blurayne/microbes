@@ -14,6 +14,7 @@ file in sync.
 - [ ] **Glass-membrane follow-ups (size slider, WebGL2 Y-flip, trail fix)** — [`.claude/plan/15-glass-membrane-followups.md`](./.claude/plan/15-glass-membrane-followups.md) — new `glassSize` slider; WebGL2 lens band no longer reads from mirrored scene rows.
 - [ ] **HUD rework: rename + move-to-debug + every-branch build stamp** — [`.claude/plan/17-hud-rework.md`](./.claude/plan/17-hud-rework.md) — three top-left HUD toggles move to Debug, share one pill style, build wraps to 2 rows for long branches, pages.yml builds on every branch.
 - [ ] **Bump-feedback envelope (smoother + slower)** — [`.claude/plan/18-bump-envelope.md`](./.claude/plan/18-bump-envelope.md) — smoothstep attack + linear decay envelope replaces the exp decay; new Bump attack + Bump duration sliders.
+- [ ] **Cardiovascular vessel network + flowing RBCs** — [`.claude/plan/24-vessels.md`](./.claude/plan/24-vessels.md) — optional union-of-capsules vessel mask confines cells to the bloodstream; new "Blood vessels" settings submenu picks branching/tube/heart layout; RBC particle field flows along centerlines.
 
 ## Done
 
