@@ -601,10 +601,12 @@ export class Canvas2DRenderer extends RendererBase {
       const ctx = this.ctx;
       ctx.lineCap = 'round';
       // Each capsule strokes with a per-call LINEAR GRADIENT laid
-      // perpendicular to its axis — smooth rim→core→rim shading
-      // reads as a 3D rounded tube cross-section. The bright peak
-      // is shifted off-centre (~t=0.42) so the gloss looks like
-      // a directional glassy reflection rather than a flat ridge.
+      // perpendicular to its axis — smooth rim→core→rim shading reads
+      // as a 3D rounded tube cross-section. Deep crimson rim → blood
+      // red body → a soft off-centre sheen (not chrome), for a wet
+      // anatomical look. Capsules taper r→r2; the short-segment chain
+      // strokes with the mid radius + round caps, so the taper reads
+      // smooth across joints.
       for (const cap of caps) {
         const dx = cap.x2 - cap.x1, dy = cap.y2 - cap.y1;
         const len = Math.hypot(dx, dy);
@@ -612,21 +614,22 @@ export class Canvas2DRenderer extends RendererBase {
         const nx = -dy / len, ny = dx / len;
         const mx = (cap.x1 + cap.x2) * 0.5;
         const my = (cap.y1 + cap.y2) * 0.5;
+        const rMid = (cap.r + (cap.r2 ?? cap.r)) * 0.5;
         const grad = ctx.createLinearGradient(
-          mx + nx * cap.r, my + ny * cap.r,
-          mx - nx * cap.r, my - ny * cap.r,
+          mx + nx * rMid, my + ny * rMid,
+          mx - nx * rMid, my - ny * rMid,
         );
-        grad.addColorStop(0.00, 'rgb(38, 4, 8)');
-        grad.addColorStop(0.10, 'rgb(96, 12, 18)');
-        grad.addColorStop(0.25, 'rgb(170, 28, 36)');
-        grad.addColorStop(0.42, 'rgb(245, 130, 138)');
-        grad.addColorStop(0.50, 'rgb(255, 230, 232)');
-        grad.addColorStop(0.58, 'rgb(245, 130, 138)');
-        grad.addColorStop(0.75, 'rgb(170, 28, 36)');
-        grad.addColorStop(0.90, 'rgb(96, 12, 18)');
-        grad.addColorStop(1.00, 'rgb(38, 4, 8)');
+        grad.addColorStop(0.00, 'rgb(46, 2, 6)');
+        grad.addColorStop(0.12, 'rgb(104, 8, 14)');
+        grad.addColorStop(0.30, 'rgb(168, 22, 28)');
+        grad.addColorStop(0.44, 'rgb(206, 46, 50)');
+        grad.addColorStop(0.50, 'rgb(238, 120, 120)');
+        grad.addColorStop(0.57, 'rgb(206, 46, 50)');
+        grad.addColorStop(0.74, 'rgb(160, 20, 26)');
+        grad.addColorStop(0.90, 'rgb(96, 8, 14)');
+        grad.addColorStop(1.00, 'rgb(40, 2, 6)');
         ctx.strokeStyle = grad;
-        ctx.lineWidth = cap.r * 2;
+        ctx.lineWidth = rMid * 2;
         ctx.beginPath();
         ctx.moveTo(cap.x1, cap.y1);
         ctx.lineTo(cap.x2, cap.y2);

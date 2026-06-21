@@ -13,6 +13,7 @@ file in sync.
 - [ ] **Shader-test visual parity for in-game cells** — [`.claude/plan/13-shader-test-visuals.md`](./.claude/plan/13-shader-test-visuals.md) — split into PRs A → F; foundation PRs serially, per-cell ports parallel.
 - [ ] **Glass-membrane follow-ups (size slider, WebGL2 Y-flip, trail fix)** — [`.claude/plan/15-glass-membrane-followups.md`](./.claude/plan/15-glass-membrane-followups.md) — new `glassSize` slider; WebGL2 lens band no longer reads from mirrored scene rows.
 - [ ] **HUD rework: rename + move-to-debug + every-branch build stamp** — [`.claude/plan/17-hud-rework.md`](./.claude/plan/17-hud-rework.md) — three top-left HUD toggles move to Debug, share one pill style, build wraps to 2 rows for long branches, pages.yml builds on every branch.
+- [ ] **Realistic vessels & branching** — [`.claude/plan/25-realistic-vessels.md`](./.claude/plan/25-realistic-vessels.md) — curved, tapering, Murray's-law recursive vascular tree rendered as a finely-subdivided capsule chain; detail lives in `physics:false` capsules so confinement cost stays flat.
 
 ## Done
 
