@@ -83,10 +83,11 @@ export function isInsideVessels(vessels, px, py) {
 function bboxOf(capsules) {
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const c of capsules) {
-    minX = Math.min(minX, c.x1 - c.r, c.x2 - c.r);
-    minY = Math.min(minY, c.y1 - c.r, c.y2 - c.r);
-    maxX = Math.max(maxX, c.x1 + c.r, c.x2 + c.r);
-    maxY = Math.max(maxY, c.y1 + c.r, c.y2 + c.r);
+    const r2 = c.r2 ?? c.r;          // tapered capsules store the far-end radius
+    minX = Math.min(minX, c.x1 - c.r, c.x2 - r2);
+    minY = Math.min(minY, c.y1 - c.r, c.y2 - r2);
+    maxX = Math.max(maxX, c.x1 + c.r, c.x2 + r2);
+    maxY = Math.max(maxY, c.y1 + c.r, c.y2 + r2);
   }
   return { minX, minY, maxX, maxY };
 }
@@ -105,89 +106,164 @@ function makePrng(seed) {
   };
 }
 
-// Vascular network: one main vessel running vertically through the
-// viewport (bottom→top), extending far above + below the camera, with
-// side branches at regular intervals along its length. Sub-branches
-// occasionally fork off each side branch. Matches the anatomical
-// "aorta + arterial branches" mental model the user described.
+// Realistic vascular network. One dominant vertical "aorta" runs through
+// the screen-X centre (bottom→top, extending far past the camera). Side
+// branches peel off alternating sides at intervals — like intercostal
+// arteries off the aorta — and each side branch is a recursive,
+// Murray's-law bifurcating sub-tree. Every vessel is CURVED (meandering
+// centerline) and TAPERS along its length.
 //
-// Footprint scales with sizeScale, but capsule COUNT is held roughly
-// constant — bigger means longer segments, not more of them, so the
-// network stays visually legible at all sizes.
+// Implementation note — no SDF change: each anatomical vessel is sampled
+// into many short, round-capped capsules. Segments are short enough that
+// the per-capsule radius steps <~12 %, so the capsule union reads (and
+// confines) as a smooth tapered curved tube. Capsules carry an optional
+// `r2` (radius at the far end) used only by the renderers for a crisp
+// trapezoid taper; the physics SDF keeps using `r` (the start/thicker
+// end → safely over-confines). Detail (curves, capillaries) lives in
+// `physics:false` capsules, which the confinement loop skips, so the
+// per-cell-per-tick cost stays bounded by the trunk + major branches.
 function buildBranchingNetwork(W, H, radiusMul, sizeScale = 1.0) {
   const capsules = [];
   const spawnSeeds = [];
-  const physicsMinR = 18 * radiusMul;
-  const visualMinR = 3 * radiusMul;
   const rng = makePrng((W * 73856093) ^ (H * 19349663));
 
-  // Main vessel: 20× viewport height by default, runs vertically
-  // through the screen centre, extends way above + below the camera
-  // so the user can scroll along it. `sizeScale` multiplies the
-  // total length (slider keeps 20× as 1.0).
-  const mainLen = H * 20 * sizeScale;
-  const mainX   = W * 0.5;
-  const mainTop = H * 0.5 - mainLen * 0.5;
-  const mainBot = H * 0.5 + mainLen * 0.5;
-  const mainR = Math.max(physicsMinR + 24, Math.min(W, H) * 0.07) * radiusMul;
+  const physicsMinR  = 14 * radiusMul;   // confinement floor (skip thinner)
+  const visualMinR   = 1.5 * radiusMul;  // thinnest capillary we still draw
+  const capillaryR   = 3.0 * radiusMul;  // stop bifurcating below this
+  const MAX_GEN      = 7;                 // recursion depth for side trees
+  const MAX_CAPSULES = 760;              // hard render-cost cap
 
-  // Slice the main into ~30 capsules so it tapers very slightly
-  // toward the top (mild biological cue, easier on the SDF iteration
-  // cost than one giant capsule).
-  const NUM_MAIN = 30;
-  for (let i = 0; i < NUM_MAIN; i++) {
-    const t0 = i / NUM_MAIN;
-    const t1 = (i + 1) / NUM_MAIN;
-    const y0 = mainBot + (mainTop - mainBot) * t0;
-    const y1 = mainBot + (mainTop - mainBot) * t1;
-    const r = mainR * (1.0 - t0 * 0.25);
-    capsules.push({
-      x1: mainX, y1: y0, x2: mainX, y2: y1,
-      r, flow: -1, physics: true,
-    });
+  // Emit one curved, tapering vessel as a chain of short round-capped
+  // capsules. Returns the tip {x, y, heading, r} so the caller can
+  // attach children. `wander` is the per-step heading jitter (radians);
+  // `restore` pulls the heading back toward `baseHeading` so meanders
+  // don't curl into spirals.
+  function emitVessel(x, y, heading, rStart, rEnd, length, opts) {
+    const baseHeading = opts.baseHeading ?? heading;
+    const wander  = opts.wander  ?? 0.16;
+    const restore = opts.restore ?? 0.05;
+    const flow    = opts.flow    ?? -1;
+    const physics = opts.physics ?? false;
+    // Subdivide so (a) the curve is smooth and (b) the radius steps
+    // <12 % per segment. Thicker/longer vessels and bigger taper get
+    // more segments.
+    const radSpan   = Math.abs(rStart - rEnd) / Math.max(1e-3, Math.min(rStart, rEnd));
+    const radSteps  = Math.ceil(radSpan / 0.12);
+    const curveSteps = Math.ceil(length / (Math.min(W, H) * 0.30));
+    const N = Math.max(3, Math.min(48, Math.max(radSteps, curveSteps)));
+    const segLen = length / N;
+    let px = x, py = y, h = heading, curR = rStart;
+    for (let i = 0; i < N; i++) {
+      h += (rng() - 0.5) * wander + (baseHeading - h) * restore;
+      const nx = px + Math.cos(h) * segLen;
+      const ny = py + Math.sin(h) * segLen;
+      const nr = rStart + (rEnd - rStart) * ((i + 1) / N);
+      const mid = (curR + nr) * 0.5;
+      capsules.push({
+        x1: px, y1: py, x2: nx, y2: ny,
+        r:  Math.max(visualMinR, curR),
+        r2: Math.max(visualMinR, nr),
+        flow,
+        physics: physics && mid >= physicsMinR,
+        flowEligible: mid >= physicsMinR,
+      });
+      px = nx; py = ny; curR = nr;
+      if (capsules.length >= MAX_CAPSULES) break;
+    }
+    return { x: px, y: py, heading: h, r: rEnd };
   }
 
-  // Side branches at evenly-spaced intervals along the main vessel.
-  // Alternating left/right with random angles slightly biased toward
-  // perpendicular (so they look like arterial branches, not all
-  // streaming the same direction).
-  const NUM_BRANCHES = 40;
-  for (let i = 0; i < NUM_BRANCHES; i++) {
-    const t = (i + 0.5) / NUM_BRANCHES;
-    const by0 = mainBot + (mainTop - mainBot) * t;
-    const side = (i % 2 === 0) ? 1 : -1;          // alternate L/R
-    const angle = side === 1
-      ? (rng() - 0.5) * Math.PI * 0.45            // right ≈ 0°
-      : Math.PI + (rng() - 0.5) * Math.PI * 0.45; // left  ≈ 180°
-    const branchLen = H * (1.5 + rng() * 3.5) * sizeScale;
-    const branchR = mainR * (0.32 + rng() * 0.18);
-    const bx1 = mainX, by1 = by0;
-    const bx2 = bx1 + Math.cos(angle) * branchLen;
-    const by2 = by1 + Math.sin(angle) * branchLen;
-    capsules.push({
-      x1: bx1, y1: by1, x2: bx2, y2: by2,
-      r: Math.max(visualMinR, branchR),
+  // Grow a vessel then bifurcate per Murray's law (r_p³ = r_a³ + r_b³).
+  function grow(x, y, heading, r, gen, lenScale) {
+    if (gen > MAX_GEN || r < capillaryR || capsules.length >= MAX_CAPSULES) return;
+    // Branch segments are short enough that a gen-1 branch + its first
+    // few bifurcations fit on screen → the recursive forking structure
+    // is visible, not pushed off-frame.
+    const length = Math.min(W, H) * 0.34 * lenScale * (0.8 + rng() * 0.5);
+    const rEnd = r * (0.60 + rng() * 0.14);
+    const tip = emitVessel(x, y, heading, r, rEnd, length, {
+      baseHeading: heading,
+      wander:  0.14 + gen * 0.05,        // deeper vessels meander more
+      restore: 0.06,
       flow: rng() < 0.5 ? 1 : -1,
-      physics: branchR >= physicsMinR,
+      physics: r >= physicsMinR,
     });
-    // ~60 % of branches grow one sub-branch off their tip.
-    if (rng() < 0.6) {
-      const subAngle = angle + (rng() - 0.5) * Math.PI * 0.55;
-      const subLen = branchLen * (0.35 + rng() * 0.30);
-      const subR = branchR * (0.55 + rng() * 0.15);
-      const sx2 = bx2 + Math.cos(subAngle) * subLen;
-      const sy2 = by2 + Math.sin(subAngle) * subLen;
-      capsules.push({
-        x1: bx2, y1: by2, x2: sx2, y2: sy2,
-        r: Math.max(visualMinR, subR),
-        flow: rng() < 0.5 ? 1 : -1,
-        physics: subR >= physicsMinR,
-      });
+    if (gen >= MAX_GEN || tip.r < capillaryR) return;
+    // Asymmetric flow split → Murray radii. Thinner child peels off at
+    // the wider angle (optimality of arterial bifurcations).
+    const f  = 0.40 + rng() * 0.20;       // flow fraction to child A
+    const rA = tip.r * Math.cbrt(f);
+    const rB = tip.r * Math.cbrt(1 - f);
+    const spread = 0.45 + rng() * 0.45;   // total bifurcation angle (rad)
+    const angA = -spread * (rB / (rA + rB));
+    const angB =  spread * (rA / (rA + rB));
+    grow(tip.x, tip.y, tip.heading + angA, rA, gen + 1, lenScale * 0.78);
+    grow(tip.x, tip.y, tip.heading + angB, rB, gen + 1, lenScale * 0.78);
+  }
+
+  // ── Main trunk: dominant vertical aorta through the screen centre ──
+  // ~5 viewport-heights tall by default so it clearly extends past the
+  // top + bottom of the camera (reads as a long vessel you travel
+  // along) while still being short enough that the side branches and
+  // their recursive forks fit on screen. `sizeScale` (the runtime
+  // "Vessel size" slider) scales this up to the giant version.
+  const mainLen = H * 5 * sizeScale;
+  const mainX   = W * 0.5;
+  const mainBot = H * 0.5 + mainLen * 0.5;   // start below the camera
+  const mainR   = Math.max(physicsMinR + 18, Math.min(W, H) * 0.048) * radiusMul;
+  const mainREnd = mainR * 0.5;              // tapers toward the top
+
+  // Pass 1 — emit the COMPLETE trunk first (low wander + strong vertical
+  // restoring keep it readable as THE main vessel) and record where each
+  // slice ends so we can hang side branches off it afterward. Doing the
+  // trunk first means it's never truncated by the capsule cap.
+  // Branch spacing is set in WORLD units (~0.42·min) so branches stay a
+  // readable distance apart regardless of how long the trunk is.
+  const branchSpacing = Math.min(W, H) * 0.42;
+  const NUM_SLICES = Math.max(6, Math.min(48, Math.round(mainLen / branchSpacing)));
+  const branchSeeds = [];
+  let tx = mainX, ty = mainBot;
+  let th = -Math.PI / 2;                      // heading: straight up
+  const upHeading = -Math.PI / 2;
+  for (let i = 0; i < NUM_SLICES; i++) {
+    const t0 = i / NUM_SLICES, t1 = (i + 1) / NUM_SLICES;
+    const r0 = mainR + (mainREnd - mainR) * t0;
+    const r1 = mainR + (mainREnd - mainR) * t1;
+    const seg = emitVessel(tx, ty, th, r0, r1, mainLen / NUM_SLICES, {
+      baseHeading: upHeading,
+      wander: 0.05, restore: 0.18,
+      flow: -1, physics: true,
+    });
+    tx = seg.x; ty = seg.y; th = seg.heading;
+    if (i > 1 && i < NUM_SLICES - 1) {
+      branchSeeds.push({ x: tx, y: ty, heading: th, r: seg.r, side: (i % 2 === 0) ? 1 : -1 });
     }
   }
 
-  // Spawn seed in the visible portion of the main vessel.
-  spawnSeeds.push({ x: mainX, y: H * 0.5 });
+  // Pass 2 — grow a recursive Murray sub-tree off each trunk slice.
+  // ~70–80° off vertical (jittered) so branches leave roughly
+  // perpendicular like real arterial offshoots. Stops when the
+  // capsule cap is reached.
+  for (const b of branchSeeds) {
+    if (capsules.length >= MAX_CAPSULES) break;
+    const branchHeading = b.heading + b.side * (Math.PI * 0.42 + (rng() - 0.5) * 0.35);
+    const branchR = b.r * (0.46 + rng() * 0.16);
+    grow(b.x, b.y, branchHeading, branchR, 1, 1.0 + rng() * 0.6);
+  }
+
+  // Spawn seed: midpoint of whichever physics capsule sits closest to
+  // the viewport centre. A capsule's centerline midpoint has SDF = −r,
+  // so it's guaranteed inside the union (the trunk meanders, so a fixed
+  // (mainX, H/2) guess can land just outside).
+  const cxV = W * 0.5, cyV = H * 0.5;
+  let bestSeed = null, bestD2 = Infinity;
+  for (const c of capsules) {
+    if (c.physics === false) continue;
+    const mxC = (c.x1 + c.x2) * 0.5, myC = (c.y1 + c.y2) * 0.5;
+    const d2 = (mxC - cxV) ** 2 + (myC - cyV) ** 2;
+    if (d2 < bestD2) { bestD2 = d2; bestSeed = { x: mxC, y: myC }; }
+  }
+  spawnSeeds.push(bestSeed || { x: mainX, y: H * 0.5 });
 
   return {
     capsules,
@@ -342,6 +418,11 @@ export function buildRbcParticles(vessels, densityMul) {
   const mul = Math.max(0, densityMul);
   for (let ci = 0; ci < vessels.capsules.length; ci++) {
     const cap = vessels.capsules[ci];
+    // Only the wider, flow-eligible vessels carry visible RBCs — seeding
+    // hair-thin capillaries would spawn thousands of sub-pixel particles
+    // for no visual gain. Layouts without the flag (grid/tube/heart)
+    // leave `flowEligible` undefined → treated as eligible.
+    if (cap.flowEligible === false) continue;
     const len = capsuleLength(cap);
     let n = Math.round(len * RBC_BASE_DENSITY * mul);
     if (n <= 0) continue;

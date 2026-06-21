@@ -83,8 +83,23 @@ test('buildVessels falls back to branching on unknown layout', () => {
   assert.equal(fallback.capsules.length, def.capsules.length);
 });
 
-test('buildRbcParticles seeds N≥3 particles per capsule', () => {
+test('buildRbcParticles seeds flow-eligible capsules only', () => {
   const v = buildVessels('branching', 1600, 900, 1.0);
+  const rbcs = buildRbcParticles(v, 1.0);
+  // Some RBCs must exist, and every one must ride a flow-eligible
+  // capsule (the realistic layout flags hair-thin capillaries
+  // `flowEligible:false` so they carry no particles).
+  assert.ok(rbcs.length > 0, 'expected at least some RBCs');
+  for (const p of rbcs) {
+    const cap = v.capsules[p.capsuleIdx];
+    assert.ok(cap && cap.flowEligible !== false,
+      `RBC seeded on non-flow capsule #${p.capsuleIdx}`);
+  }
+});
+
+test('buildRbcParticles seeds N≥3 per capsule for uniform layouts', () => {
+  // Layouts that don't flag capillaries (grid) seed every capsule.
+  const v = buildVessels('grid', 1600, 900, 1.0);
   const rbcs = buildRbcParticles(v, 1.0);
   assert.ok(rbcs.length >= v.capsules.length * 3,
     `expected ≥${v.capsules.length * 3} RBCs, got ${rbcs.length}`);

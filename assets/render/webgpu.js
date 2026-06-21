@@ -40,18 +40,18 @@ const RT_TRANSLUCENT = !!URL_OVERRIDES.translucent;
 // rounded tube cross-section. Wider passes are dark (rim shadow),
 // narrower passes are bright (lumen + specular core).
 const VESSEL_BODY_PASSES_GPU = [
-  { rMul: 1.00, r: 0.10, g: 0.012, b: 0.024, a: 1.0 },
-  { rMul: 0.95, r: 0.22, g: 0.024, b: 0.043, a: 1.0 },
-  { rMul: 0.88, r: 0.40, g: 0.043, b: 0.071, a: 1.0 },
-  { rMul: 0.80, r: 0.56, g: 0.071, b: 0.102, a: 1.0 },
-  { rMul: 0.72, r: 0.69, g: 0.110, b: 0.141, a: 1.0 },
-  { rMul: 0.63, r: 0.80, g: 0.165, b: 0.196, a: 1.0 },
-  { rMul: 0.53, r: 0.89, g: 0.275, b: 0.306, a: 1.0 },
-  { rMul: 0.43, r: 0.94, g: 0.412, b: 0.441, a: 1.0 },
-  { rMul: 0.33, r: 0.97, g: 0.580, b: 0.604, a: 1.0 },
-  { rMul: 0.23, r: 0.99, g: 0.745, b: 0.757, a: 1.0 },
-  { rMul: 0.14, r: 1.00, g: 0.882, b: 0.886, a: 1.0 },
-  { rMul: 0.07, r: 1.00, g: 0.965, b: 0.965, a: 1.0 },
+  { rMul: 1.00, r: 0.16, g: 0.010, b: 0.022, a: 1.0 },
+  { rMul: 0.95, r: 0.26, g: 0.020, b: 0.032, a: 1.0 },
+  { rMul: 0.88, r: 0.40, g: 0.040, b: 0.052, a: 1.0 },
+  { rMul: 0.80, r: 0.52, g: 0.068, b: 0.082, a: 1.0 },
+  { rMul: 0.72, r: 0.63, g: 0.092, b: 0.110, a: 1.0 },
+  { rMul: 0.63, r: 0.72, g: 0.122, b: 0.142, a: 1.0 },
+  { rMul: 0.53, r: 0.79, g: 0.165, b: 0.182, a: 1.0 },
+  { rMul: 0.43, r: 0.86, g: 0.255, b: 0.265, a: 1.0 },
+  { rMul: 0.33, r: 0.90, g: 0.370, b: 0.378, a: 1.0 },
+  { rMul: 0.23, r: 0.93, g: 0.480, b: 0.485, a: 1.0 },
+  { rMul: 0.14, r: 0.96, g: 0.600, b: 0.598, a: 1.0 },
+  { rMul: 0.07, r: 1.00, g: 0.760, b: 0.745, a: 1.0 },
 ];
 // Diagnostic infrastructure is gated behind ?diagnose=webgpu in
 // the URL. Off by default so production traffic doesn't pay the
@@ -5113,24 +5113,27 @@ export class WebGPURenderer extends RendererBase {
     const caps = sim.vessels.capsules;
     const rbcs = sim.vesselRbcs || [];
     this._decorTris.length = 0;
-    // Multi-pass parallel-stroke gradient → rounded "glass" tube.
-    // Same palette + offset specular as the canvas2d / webgl2 ports.
+    // Multi-pass parallel-stroke gradient → rounded tube. Each capsule
+    // tapers `r → r2` so every pass is a trapezoid. Same palette +
+    // soft offset specular as the canvas2d / webgl2 ports.
     for (const pass of VESSEL_BODY_PASSES_GPU) {
       for (const cap of caps) {
-        this._pushThickSegment(cap.x1, cap.y1, cap.x2, cap.y2,
-          cap.r * pass.rMul, pass.r, pass.g, pass.b, pass.a);
+        const r2 = cap.r2 ?? cap.r;
+        this._pushTaperedSegment(cap.x1, cap.y1, cap.x2, cap.y2,
+          cap.r * pass.rMul, r2 * pass.rMul, pass.r, pass.g, pass.b, pass.a);
       }
     }
     for (const cap of caps) {
+      const r2 = cap.r2 ?? cap.r;
       const dx = cap.x2 - cap.x1, dy = cap.y2 - cap.y1;
       const len = Math.hypot(dx, dy);
       if (len < 1e-4) continue;
       const nx = -dy / len, ny = dx / len;
-      const ox = nx * cap.r * 0.35, oy = ny * cap.r * 0.35;
-      const hw = Math.max(1, cap.r * 0.06);
-      this._pushThickSegment(cap.x1 + ox, cap.y1 + oy,
-        cap.x2 + ox, cap.y2 + oy, hw,
-        1.0, 0.94, 0.94, 0.70);
+      this._pushTaperedSegment(
+        cap.x1 + nx * cap.r * 0.35, cap.y1 + ny * cap.r * 0.35,
+        cap.x2 + nx * r2 * 0.35,    cap.y2 + ny * r2 * 0.35,
+        Math.max(1, cap.r * 0.10), Math.max(1, r2 * 0.10),
+        1.0, 0.92, 0.90, 0.42);
     }
     for (const p of rbcs) {
       const pos = rbcWorldPos(p, sim.vessels);
@@ -5153,6 +5156,33 @@ export class WebGPURenderer extends RendererBase {
     const ax2 = x1 - ex - nx, ay2 = y1 - ey - ny;
     const bx1 = x2 + ex + nx, by1 = y2 + ey + ny;
     const bx2 = x2 + ex - nx, by2 = y2 + ey - ny;
+    const arr = this._decorTris;
+    arr.push(
+      ax1, ay1, r, g, b, a,
+      ax2, ay2, r, g, b, a,
+      bx1, by1, r, g, b, a,
+      ax2, ay2, r, g, b, a,
+      bx2, by2, r, g, b, a,
+      bx1, by1, r, g, b, a,
+    );
+  }
+
+  // Tapered variant: half-width hw1 at the start, hw2 at the end →
+  // trapezoid quad. Mirrors webgl2._pushTaperedSegment so vessels
+  // render identically across the two GPU backends.
+  _pushTaperedSegment(x1, y1, x2, y2, hw1, hw2, r, g, b, a) {
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.hypot(dx, dy);
+    if (len < 1e-6 || (hw1 < 0.5 && hw2 < 0.5)) return;
+    const tx = dx / len, ty = dy / len;
+    const n1x = -ty * hw1, n1y = tx * hw1;
+    const n2x = -ty * hw2, n2y = tx * hw2;
+    const e1x = tx * hw1, e1y = ty * hw1;
+    const e2x = tx * hw2, e2y = ty * hw2;
+    const ax1 = x1 - e1x + n1x, ay1 = y1 - e1y + n1y;
+    const ax2 = x1 - e1x - n1x, ay2 = y1 - e1y - n1y;
+    const bx1 = x2 + e2x + n2x, by1 = y2 + e2y + n2y;
+    const bx2 = x2 + e2x - n2x, by2 = y2 + e2y - n2y;
     const arr = this._decorTris;
     arr.push(
       ax1, ay1, r, g, b, a,
